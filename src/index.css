@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+:root {
+  /* Brand Colors from Palette */
+  --primary: #23aaff;
+  --primary-hover: #0092ed;
+  --secondary: #5288aa;
+  --accent: #ffa526;
+
+  /* Light Theme Surfaces & Text */
+  --bg-app: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f1f5f9;
+  --border-color: #e2e8f0;
+
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+
+  color-scheme: light dark;
+}
+
+/* Dark Theme Support */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: #38bdff;       /* Slightly brighter blue for dark backgrounds */
+    --primary-hover: #23aaff;
+    --secondary: #68a3c7;
+    --accent: #ffb347;
+
+    /* Dark Theme Surfaces & Text */
+    --bg-app: #0f172a;        /* Deep Slate Dark */
+    --bg-surface: #1e293b;    /* Card Surface */
+    --bg-subtle: #334155;     /* Zebra Row / Subtle fill */
+    --border-color: #334155;
+
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --text-inverse: #0f172a;
+  }
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
