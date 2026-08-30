@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PlayerList from './PlayerList';
 import { GIST_ID, DEFAULT_FILENAME, ENCRYPTED_GITHUB_TOKEN } from './gistService';
+import { decryptToken } from './cryptoUtils';
 
 
 const INITIAL_ROSTER = [];
@@ -57,9 +58,7 @@ export default function App() {
       });
 
       if (!response.ok) throw new Error(`Status ${response.status}`);
-      console.log(response)
       const data = await response.json();
-      console.log(data)
       const file = data.files[DEFAULT_FILENAME] || Object.values(data.files)[0];
 
       if (file && file.content) {
@@ -98,6 +97,7 @@ export default function App() {
 
       // 1. Decrypt token in RAM using the typed password
       const decryptedPat = await decryptToken(ENCRYPTED_GITHUB_TOKEN, appPassword);
+      console.log(decryptedPat)
 
       setSyncStatus('Salvando no Gist...');
 
@@ -121,6 +121,7 @@ export default function App() {
       if (!response.ok) throw new Error(`Status ${response.status}`);
       setSyncStatus('Salvo no Gist com sucesso!');
     } catch (err) {
+      console.error(err)
       setSyncStatus('Senha incorreta ou erro no Gist!');
     } finally {
       setIsSyncing(false);
