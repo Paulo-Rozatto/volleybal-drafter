@@ -1,33 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import PlayerList from './PlayerList';
+import { GIST_ID, DEFAULT_FILENAME, ENCRYPTED_GITHUB_TOKEN } from './gistService';
 
-const INITIAL_ROSTER = [
-  { id: '1', name: 'Gabi', score: 4, gender: 'F', height: 'short' },
-  { id: '2', name: 'Davi', score: 4, gender: 'M', height: 'tall' },
-  { id: '3', name: 'Wellington', score: 5, gender: 'M', height: 'tall' },
-  { id: '4', name: 'Iuri', score: 3, gender: 'M', height: 'short' },
-  { id: '5', name: 'Corzino', score: 3, gender: 'M', height: 'short' },
-  { id: '6', name: 'Paulo', score: 5, gender: 'M', height: 'tall' },
-  { id: '7', name: 'Vinicius', score: 5, gender: 'M', height: 'tall' },
-  { id: '8', name: 'Estêvão', score: 5, gender: 'M', height: 'short' },
-  { id: '9', name: 'Ian', score: 3, gender: 'M', height: 'short' },
-  { id: '10', name: 'BH', score: 4, gender: 'M', height: 'Tall' },
-  { id: '11', name: 'Churuska', score: 4, gender: 'M', height: 'short' },
-  { id: '12', name: 'Ana', score: 2, gender: 'F', height: 'short' },
-  { id: '14', name: 'Luiza', score: 3, gender: 'F', height: 'short' },
-  { id: '15', name: 'Gostavu', score: 5, gender: 'M', height: 'tall' },
-  { id: '16', name: 'Arthur', score: 3, gender: 'M', height: 'tall' },
-  { id: '17', name: 'Rodrigo Esteves', score: 2, gender: 'M', height: 'tall' },
-  { id: '18', name: 'Euler', score: 4, gender: 'M', height: 'tall' },
-  { id: '19', name: 'André', score: 4, gender: 'M', height: 'tall' },
-  { id: '20', name: 'Geo', score: 2, gender: 'M', height: 'Tall' }
-];
+
+const INITIAL_ROSTER = [];
 
 export default function App() {
-  // --- Estados Principais ---
-  const [currentView, setCurrentView] = useState('draft'); // draft, players, preview, history
+  // --- Core Navigation & Drawer States ---
+  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  
+
+  // --- Players & History States ---
   const [players, setPlayers] = useState(() => {
     const saved = localStorage.getItem('volleyPlayers');
     return saved ? JSON.parse(saved) : INITIAL_ROSTER;
@@ -38,21 +21,24 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // --- Estados do Sorteio Rápido ---
-  const [pastedText, setPastedText] = useState('1- Lucas, 2- Camila, Mariana confirmed, Gabriel...');
+  // --- Quick Draft States ---
+  const [pastedText, setPastedText] = useState('');
   const [sessionPlayers, setSessionPlayers] = useState([]);
   const [teamSize, setTeamSize] = useState(6);
   const [balanceGender, setBalanceGender] = useState(true);
   const [balanceHeight, setBalanceHeight] = useState(true);
+  const [newPlayerName, setNewPlayerName] = useState('');
 
-  // --- Estados da Prévia e Navegação de Histórico ---
+  // --- Draft Preview & History Index ---
   const [draftPreview, setDraftPreview] = useState(null);
   const [currentDraftIndex, setCurrentDraftIndex] = useState(0);
 
-  // --- Adicionar Jogador Rápido ---
-  const [newPlayerName, setNewPlayerName] = useState('');
+  // --- GitHub Gist Sync States ---
+  const [appPassword, setAppPassword] = useState(() => sessionStorage.getItem('app_password') || '');
+  const [syncStatus, setSyncStatus] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  // Persistência
+  // LocalStorage Persistence
   useEffect(() => {
     localStorage.setItem('volleyPlayers', JSON.stringify(players));
   }, [players]);
@@ -61,17 +47,97 @@ export default function App() {
     localStorage.setItem('volleyDrafts', JSON.stringify(draftHistory));
   }, [draftHistory]);
 
-  // --- Leitura do Texto / Match ---
+  // --- Gist API Handlers ---
+  const handleLoadGist = async () => {
+    try {
+      setIsSyncing(true);
+      setSyncStatus('Carregando do Gist...');
+      const response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+        headers: { Accept: 'application/vnd.github.v3+json' },
+      });
+
+      if (!response.ok) throw new Error(`Status ${response.status}`);
+      console.log(response)
+      const data = await response.json();
+      console.log(data)
+      const file = data.files[DEFAULT_FILENAME] || Object.values(data.files)[0];
+
+      if (file && file.content) {
+        console.log(file.content)
+        const loadedPlayers = JSON.parse(file.content);
+        setPlayers(loadedPlayers);
+        setSyncStatus('Carregado do Gist com sucesso!');
+      } else {
+        setSyncStatus('Nenhum dado encontrado no Gist.');
+      }
+    } catch (err) {
+      setSyncStatus(`Erro ao carregar: ${err.message}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+
+
+  // Keep password in sessionStorage so you only type it once per session on any device
+  const handlePasswordChange = (e) => {
+    const pwd = e.target.value;
+    setAppPassword(pwd);
+    sessionStorage.setItem('app_password', pwd);
+  };
+
+  const handleSaveGist = async () => {
+    if (!appPassword) {
+      alert('Por favor, digite sua senha de desbloqueio.');
+      return;
+    }
+
+    try {
+      setIsSyncing(true);
+      setSyncStatus('Descriptografando token...');
+
+      // 1. Decrypt token in RAM using the typed password
+      const decryptedPat = await decryptToken(ENCRYPTED_GITHUB_TOKEN, appPassword);
+
+      setSyncStatus('Salvando no Gist...');
+
+      // 2. Send PATCH request with decrypted token
+      const response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+        method: 'PATCH',
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Authorization': `Bearer ${decryptedPat}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          files: {
+            'players.json': {
+              content: JSON.stringify(players, null, 2),
+            },
+          },
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Status ${response.status}`);
+      setSyncStatus('Salvo no Gist com sucesso!');
+    } catch (err) {
+      setSyncStatus('Senha incorreta ou erro no Gist!');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+
+  // --- Name Matcher ---
   const handleIdentifyPlayers = () => {
     if (!pastedText.trim()) return;
 
     const normalize = (str) =>
-      str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "");
+      str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '');
 
     const cleanText = normalize(pastedText);
 
-    // Encontra os jogadores cadastrados na lista
-    const matched = players.filter(p => {
+    const matched = players.filter((p) => {
       const cleanName = normalize(p.name);
       return cleanName.length >= 2 && cleanText.includes(cleanName);
     });
@@ -79,25 +145,24 @@ export default function App() {
     setSessionPlayers(matched);
   };
 
-  // --- Atualização In-Place nos Cards ---
+  // --- State Updates ---
   const handleUpdateSessionPlayer = (id, field, value) => {
-    // Atualiza na sessão atual
-    setSessionPlayers(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
-    
-    // Sincroniza a alteração no cadastro geral
-    setPlayers(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
+    setSessionPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+    setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
   };
 
   const handleUpdatePlayer = (id, field, value) => {
-    setPlayers((prevPlayers) =>
-      prevPlayers.map((player) =>
-        player.id === id ? { ...player, [field]: value } : player
-      )
-    );
+    setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+    setSessionPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+  };
+
+  const handleDeletePlayer = (id) => {
+    setPlayers((prev) => prev.filter((p) => p.id !== id));
+    setSessionPlayers((prev) => prev.filter((p) => p.id !== id));
   };
 
   const handleRemoveFromSession = (id) => {
-    setSessionPlayers(sessionPlayers.filter(p => p.id !== id));
+    setSessionPlayers((prev) => prev.filter((p) => p.id !== id));
   };
 
   const handleAddQuickPlayer = (e) => {
@@ -109,15 +174,15 @@ export default function App() {
       name: newPlayerName.trim(),
       score: 3,
       gender: 'F',
-      height: 'short'
+      height: 'short',
     };
 
-    setPlayers([...players, newP]);
-    setSessionPlayers([...sessionPlayers, newP]);
+    setPlayers((prev) => [...prev, newP]);
+    setSessionPlayers((prev) => [...prev, newP]);
     setNewPlayerName('');
   };
 
-  // --- Algoritmo de Sorteio Monte Carlo ---
+  // --- Monte Carlo Draft Generator ---
   const runMonteCarloDraft = () => {
     const numTeams = Math.floor(sessionPlayers.length / teamSize);
     if (numTeams < 2) {
@@ -135,16 +200,16 @@ export default function App() {
         return arr.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0);
       };
 
-      const scores = teams.map(t => t.reduce((sum, p) => sum + p.score, 0));
+      const scores = teams.map((t) => t.reduce((sum, p) => sum + p.score, 0));
       let penalty = variance(scores) * 4;
 
       if (balanceGender) {
-        const females = teams.map(t => t.filter(p => p.gender === 'F').length);
+        const females = teams.map((t) => t.filter((p) => p.gender === 'F').length);
         penalty += variance(females) * 3;
       }
 
       if (balanceHeight) {
-        const talls = teams.map(t => t.filter(p => p.height === 'tall').length);
+        const talls = teams.map((t) => t.filter((p) => p.height === 'tall').length);
         penalty += variance(talls) * 3;
       }
 
@@ -173,7 +238,7 @@ export default function App() {
       date: new Date().toLocaleString('pt-BR'),
       teams: bestTeams,
       format: `${teamSize}x${teamSize}`,
-      bench
+      bench,
     };
 
     setDraftPreview(result);
@@ -188,100 +253,127 @@ export default function App() {
     setCurrentView('history');
   };
 
-  // --- Renderização da Interface ---
-
   return (
-    <div className="min-h-screen bg-gray-100 font-sans text-gray-800">
-      <div className="max-w-3xl mx-auto min-h-screen flex flex-col bg-white shadow-lg relative">
-        
-        {/* Cabeçalho Fixo com Menu Hamburger */}
-        <header className="bg-blue-600 text-white p-4 flex justify-between items-center shadow-md">
-          <h1 
-            onClick={() => setCurrentView('draft')} 
+    <div
+      className="min-h-screen font-sans transition-colors"
+      style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }}
+    >
+      <div
+        className="max-w-2xl mx-auto min-h-screen flex flex-col border-x shadow-2xl relative"
+        style={{ backgroundColor: 'var(--bg-app)', borderColor: 'var(--border-color)' }}
+      >
+        {/* Header */}
+        <header
+          className="p-4 flex justify-between items-center border-b shadow-sm"
+          style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+        >
+          <h1
+            onClick={() => setCurrentView('draft')}
             className="text-2xl font-black tracking-wide cursor-pointer flex items-center gap-2"
           >
             🏐 Cortada
           </h1>
-          <button 
+          <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="p-2 text-2xl focus:outline-none"
+            className="p-2 text-2xl focus:outline-none cursor-pointer"
           >
             ☰
           </button>
         </header>
 
-        {/* Menu Lateral Dropdown */}
+        {/* Navigation Menu Drawer */}
         {isMenuOpen && (
-          <div className="bg-blue-700 text-white flex flex-col p-2 space-y-1 shadow-inner">
-            <button 
+          <div
+            className="flex flex-col p-2 space-y-1 border-b shadow-inner"
+            style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
+          >
+            <button
               onClick={() => { setCurrentView('draft'); setIsMenuOpen(false); }}
-              className={`p-3 text-left font-semibold rounded-lg ${currentView === 'draft' ? 'bg-blue-800' : 'hover:bg-blue-600'}`}
+              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+              style={{
+                backgroundColor: currentView === 'draft' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)'
+              }}
             >
               ⚡ Sorteio Rápido
             </button>
-            <button 
+            <button
               onClick={() => { setCurrentView('players'); setIsMenuOpen(false); }}
-              className={`p-3 text-left font-semibold rounded-lg ${currentView === 'players' ? 'bg-blue-800' : 'hover:bg-blue-600'}`}
+              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+              style={{
+                backgroundColor: currentView === 'players' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)'
+              }}
             >
               👥 Elenco Completo ({players.length})
             </button>
-            <button 
-              onClick={() => { 
-                if(draftHistory.length === 0) return alert('Nenhum sorteio salvo!');
+            <button
+              onClick={() => {
+                if (draftHistory.length === 0) return alert('Nenhum sorteio salvo!');
                 setCurrentDraftIndex(0);
-                setCurrentView('history'); 
-                setIsMenuOpen(false); 
+                setCurrentView('history');
+                setIsMenuOpen(false);
               }}
-              className={`p-3 text-left font-semibold rounded-lg ${currentView === 'history' ? 'bg-blue-800' : 'hover:bg-blue-600'}`}
+              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+              style={{
+                backgroundColor: currentView === 'history' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)'
+              }}
             >
               📜 Histórico de Sorteios
             </button>
           </div>
         )}
 
-        {/* Conteúdo Principal por Tela */}
-        <main className="flex-1 p-4 overflow-y-auto">
+        {/* Main Content Area */}
+        <main className="flex-1 p-4 overflow-y-auto space-y-4">
 
-          {/* 1. TELA DE SORTEIO RÁPIDO (LANDING PAGE) */}
+          {/* 1. DRAFT VIEW */}
           {currentView === 'draft' && (
             <div className="space-y-4">
-              
-              {/* Área de Colar Texto */}
-              <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 space-y-2">
-                <label className="block text-sm font-bold text-blue-900">
+              {/* WhatsApp Textarea */}
+              <div
+                className="p-3 rounded-xl border space-y-2"
+                style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
+              >
+                <label className="block text-sm font-bold" style={{ color: 'var(--text-main)' }}>
                   Cole a lista de confirmados (WhatsApp):
                 </label>
-                <textarea 
+                <textarea
                   rows="3"
                   value={pastedText}
                   onChange={(e) => setPastedText(e.target.value)}
                   placeholder="Ex: 1- Lucas, 2- Camila, Mariana confirmed, Gabriel..."
-                  className="w-full border rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  className="w-full border rounded-lg p-2 text-sm outline-none"
+                  style={{
+                    backgroundColor: 'var(--bg-app)',
+                    color: 'var(--text-main)',
+                    borderColor: 'var(--border-color)'
+                  }}
                 />
-                <button 
+                <button
                   onClick={handleIdentifyPlayers}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg text-sm transition"
+                  className="w-full font-bold py-2 rounded-lg text-sm transition cursor-pointer"
+                  style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
                 >
                   🔍 Identificar Jogadores
                 </button>
               </div>
 
-              {/* Lista de Jogadores Reconhecidos (Scroll próprio e Edição In-Place) */}
+              {/* Matched Session Players */}
               {sessionPlayers.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex justify-between items-center px-1">
-                    <span className="font-bold text-gray-700 text-sm">
+                    <span className="font-bold text-sm">
                       Jogadores na Mesa ({sessionPlayers.length})
                     </span>
-                    <button 
+                    <button
                       onClick={() => setSessionPlayers([])}
-                      className="text-xs text-red-500 font-bold"
+                      className="text-xs text-red-500 font-bold cursor-pointer"
                     >
                       Limpar Tudo
                     </button>
                   </div>
-
-                  {/* Container de Cards com ROLAGEM PRÓPRIA */}
 
                   <PlayerList
                     players={sessionPlayers}
@@ -291,31 +383,49 @@ export default function App() {
                 </div>
               )}
 
-              {/* Adicionar Jogador Rápido que Faltou */}
+              {/* Add Quick Player */}
               <form onSubmit={handleAddQuickPlayer} className="flex gap-2">
-                <input 
+                <input
                   type="text"
                   value={newPlayerName}
                   onChange={(e) => setNewPlayerName(e.target.value)}
                   placeholder="Nome de outro jogador..."
                   className="flex-1 border rounded-lg p-2 text-sm outline-none"
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    color: 'var(--text-main)',
+                    borderColor: 'var(--border-color)'
+                  }}
                 />
-                <button type="submit" className="bg-gray-800 text-white text-xs font-bold px-3 rounded-lg">
+                <button
+                  type="submit"
+                  className="text-xs font-bold px-4 rounded-lg cursor-pointer"
+                  style={{ backgroundColor: 'var(--secondary)', color: '#ffffff' }}
+                >
                   + Add
                 </button>
               </form>
 
-              {/* Configurações do Sorteio */}
-              <div className="bg-white p-3 rounded-xl border space-y-3">
+              {/* Game Format & Settings */}
+              <div
+                className="p-3 rounded-xl border space-y-3"
+                style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
+              >
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">FORMATO DO JOGO</label>
-                  <div className="flex bg-gray-100 rounded-lg p-1">
-                    {[2, 3, 4, 5, 6].map(n => (
+                  <label className="block text-xs font-bold mb-1" style={{ color: 'var(--text-muted)' }}>
+                    FORMATO DO JOGO
+                  </label>
+                  <div className="flex rounded-lg p-1 gap-1" style={{ backgroundColor: 'var(--bg-subtle)' }}>
+                    {[2, 3, 4, 5, 6].map((n) => (
                       <button
                         key={n}
                         type="button"
                         onClick={() => setTeamSize(n)}
-                        className={`flex-1 py-1 text-xs font-bold rounded-md ${teamSize === n ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
+                        className="flex-1 py-1 text-xs font-bold rounded-md transition cursor-pointer"
+                        style={{
+                          backgroundColor: teamSize === n ? 'var(--primary)' : 'transparent',
+                          color: teamSize === n ? 'var(--text-inverse)' : 'var(--text-muted)'
+                        }}
                       >
                         {n}x{n}
                       </button>
@@ -327,50 +437,71 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setBalanceGender(!balanceGender)}
-                    className={`py-2 px-2 text-xs font-bold rounded-lg border ${balanceGender ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-gray-50 text-gray-400'}`}
+                    className="py-2 px-2 text-xs font-bold rounded-lg border transition cursor-pointer"
+                    style={{
+                      backgroundColor: balanceGender ? 'var(--bg-subtle)' : 'transparent',
+                      borderColor: balanceGender ? 'var(--primary)' : 'var(--border-color)',
+                      color: 'var(--text-main)'
+                    }}
                   >
                     👩/👨 Gênero {balanceGender ? '✓' : ''}
                   </button>
                   <button
                     type="button"
                     onClick={() => setBalanceHeight(!balanceHeight)}
-                    className={`py-2 px-2 text-xs font-bold rounded-lg border ${balanceHeight ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-gray-50 text-gray-400'}`}
+                    className="py-2 px-2 text-xs font-bold rounded-lg border transition cursor-pointer"
+                    style={{
+                      backgroundColor: balanceHeight ? 'var(--bg-subtle)' : 'transparent',
+                      borderColor: balanceHeight ? 'var(--primary)' : 'var(--border-color)',
+                      color: 'var(--text-main)'
+                    }}
                   >
                     📏 Altura {balanceHeight ? '✓' : ''}
                   </button>
                 </div>
               </div>
 
-              {/* Botão Principal de Ação */}
-              <button 
+              {/* Main CTA Button */}
+              <button
                 onClick={runMonteCarloDraft}
-                className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl text-lg shadow-lg transition"
+                className="w-full font-bold py-3.5 rounded-xl text-lg shadow-lg transition cursor-pointer"
+                style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
               >
                 Sortear Times!
               </button>
             </div>
           )}
 
-          {/* 2. TELA DE PRÉVIA DO SORTEIO */}
+          {/* 2. PREVIEW VIEW */}
           {currentView === 'preview' && draftPreview && (
             <div className="space-y-4 pb-12">
-              <h2 className="text-xl font-bold text-center text-gray-800">Prévia do Sorteio</h2>
+              <h2 className="text-xl font-bold text-center">Prévia do Sorteio</h2>
 
               {draftPreview.teams.map((team, idx) => {
                 const scoreSum = team.reduce((a, b) => a + b.score, 0);
                 return (
-                  <div key={idx} className="bg-white border-2 border-blue-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="bg-blue-50 p-2 flex justify-between items-center border-b">
-                      <span className="font-bold text-blue-900">Time {idx + 1}</span>
-                      <span className="text-xs bg-blue-200 text-blue-800 font-bold px-2 py-0.5 rounded">
+                  <div
+                    key={idx}
+                    className="border rounded-xl overflow-hidden shadow-sm"
+                    style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
+                  >
+                    <div
+                      className="p-2 flex justify-between items-center border-b"
+                      style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--border-color)' }}
+                    >
+                      <span className="font-bold">Time {idx + 1}</span>
+                      <span
+                        className="text-xs font-bold px-2 py-0.5 rounded"
+                        style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+                      >
                         Força: {scoreSum}
                       </span>
                     </div>
                     <div className="p-2 space-y-1">
-                      {team.map(p => (
-                        <div key={p.id} className="flex justify-between text-sm py-1 border-b last:border-0">
+                      {team.map((p) => (
+                        <div key={p.id} className="flex justify-between text-sm py-1 border-b last:border-0" style={{ borderColor: 'var(--border-color)' }}>
                           <span>{p.name} {p.gender === 'F' ? '👩' : '👨'} ({p.height === 'tall' ? 'Alto' : 'Baixo'})</span>
-                          <span className="font-bold text-yellow-500">{p.score}⭐</span>
+                          <span className="font-bold" style={{ color: 'var(--accent)' }}>{p.score}⭐</span>
                         </div>
                       ))}
                     </div>
@@ -379,15 +510,17 @@ export default function App() {
               })}
 
               <div className="flex gap-2 pt-4">
-                <button 
-                  onClick={runMonteCarloDraft} 
-                  className="flex-1 bg-gray-200 hover:bg-gray-300 font-bold py-3 rounded-xl"
+                <button
+                  onClick={runMonteCarloDraft}
+                  className="flex-1 font-bold py-3 rounded-xl border cursor-pointer"
+                  style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--border-color)', color: 'var(--text-main)' }}
                 >
                   🔄 Refazer
                 </button>
-                <button 
-                  onClick={handleConfirmDraft} 
-                  className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl shadow-md"
+                <button
+                  onClick={handleConfirmDraft}
+                  className="flex-1 font-bold py-3 rounded-xl shadow-md cursor-pointer"
+                  style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
                 >
                   ✅ Confirmar
                 </button>
@@ -395,46 +528,102 @@ export default function App() {
             </div>
           )}
 
-          {/* 3. TELA DE GERENCIAMENTO COMPLETO DE JOGADORES */}
+          {/* 3. ROSTER MANAGEMENT & GIST SYNC VIEW */}
           {currentView === 'players' && (
             <div className="space-y-4">
-              <h2 className="text-xl font-bold text-gray-800">Elenco Registrado</h2>
+              {/* GitHub Gist Controls */}
+              {/* Sync Controls */}
+              <div
+                className="p-4 rounded-xl border space-y-3"
+                style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
+              >
+                <h3 className="font-bold text-sm">Sincronização GitHub Gist</h3>
+
+                <input
+                  type="password"
+                  placeholder="Digite sua Senha/PIN de Desbloqueio"
+                  value={appPassword}
+                  onChange={handlePasswordChange}
+                  className="w-full border p-2 rounded text-xs outline-none"
+                  style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-main)', borderColor: 'var(--border-color)' }}
+                />
+
+                <div className="flex gap-2 text-xs">
+                  <button
+                    onClick={handleLoadGist}
+                    disabled={isSyncing}
+                    className="px-3 py-2 rounded font-bold border cursor-pointer"
+                    style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--border-color)', color: 'var(--text-main)' }}
+                  >
+                    🔄 Carregar do Gist
+                  </button>
+
+                  <button
+                    onClick={handleSaveGist}
+                    disabled={isSyncing || !appPassword}
+                    className="px-3 py-2 rounded font-bold cursor-pointer disabled:opacity-50"
+                    style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+                  >
+                    💾 Salvar no Gist
+                  </button>
+                </div>
+
+                {syncStatus && (
+                  <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
+                    {syncStatus}
+                  </p>
+                )}
+              </div>
+
+              <h2 className="text-xl font-bold">Elenco Registrado ({players.length})</h2>
+
               <PlayerList
                 players={players}
-                onUpdatePlayer={handleUpdateSessionPlayer}
-                // onDeletePlayer={handleDeletePlayer}
+                onUpdatePlayer={handleUpdatePlayer}
+                onDeletePlayer={handleDeletePlayer}
               />
             </div>
           )}
 
-          {/* 4. TELA DE HISTÓRICO DE SORTEIOS */}
+          {/* 4. HISTORY VIEW */}
           {currentView === 'history' && draftHistory.length > 0 && (
             <div className="space-y-4">
-              <div className="flex justify-between items-center bg-white p-2 rounded-xl shadow-sm">
-                <button 
+              <div
+                className="flex justify-between items-center p-2 rounded-xl border"
+                style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
+              >
+                <button
                   onClick={() => setCurrentDraftIndex(Math.min(currentDraftIndex + 1, draftHistory.length - 1))}
                   disabled={currentDraftIndex === draftHistory.length - 1}
-                  className="p-2 font-bold text-blue-600 disabled:text-gray-300"
+                  className="p-2 font-bold cursor-pointer disabled:opacity-30"
+                  style={{ color: 'var(--primary)' }}
                 >
                   ← Anterior
                 </button>
-                <span className="text-xs text-gray-500">{draftHistory[currentDraftIndex].date}</span>
-                <button 
+                <span className="text-xs text-gray-400">{draftHistory[currentDraftIndex].date}</span>
+                <button
                   onClick={() => setCurrentDraftIndex(Math.max(currentDraftIndex - 1, 0))}
                   disabled={currentDraftIndex === 0}
-                  className="p-2 font-bold text-blue-600 disabled:text-gray-300"
+                  className="p-2 font-bold cursor-pointer disabled:opacity-30"
+                  style={{ color: 'var(--primary)' }}
                 >
                   Próximo →
                 </button>
               </div>
 
               {draftHistory[currentDraftIndex].teams.map((team, idx) => (
-                <div key={idx} className="bg-white border rounded-xl p-3 shadow-sm space-y-1">
-                  <h3 className="font-bold text-blue-800 border-b pb-1">Time {idx + 1}</h3>
-                  {team.map(p => (
+                <div
+                  key={idx}
+                  className="border rounded-xl p-3 space-y-1"
+                  style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
+                >
+                  <h3 className="font-bold border-b pb-1" style={{ color: 'var(--primary)', borderColor: 'var(--border-color)' }}>
+                    Time {idx + 1}
+                  </h3>
+                  {team.map((p) => (
                     <div key={p.id} className="flex justify-between text-sm py-1">
                       <span>{p.name}</span>
-                      <span>{p.score}⭐</span>
+                      <span style={{ color: 'var(--accent)' }}>{p.score}⭐</span>
                     </div>
                   ))}
                 </div>
