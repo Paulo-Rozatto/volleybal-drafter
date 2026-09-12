@@ -1,14 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import PlayerList from './PlayerList';
+import GameSessionsView from './GameSessionsView';
+import GistSyncPanel from './GistSyncPanel';
 import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
+import { appendDraftGameSession } from './gameSessions.js';
 import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
 import {
+  applySuccessfulGistLoad,
+  applyGistLoadFailure,
   canSaveToGist,
+  clearPendingGistChanges,
   getGistGateMessage,
+  gistLoadNeedsFetch,
+  GIST_LOAD_STRATEGY,
+  markPendingGistChanges,
   nextGameSessionsDocument,
   persistLocalGameSessions,
   readLocalGameSessions,
+  readPendingGistChanges,
 } from './persistence/syncHelpers.js';
 
 
@@ -16,7 +26,7 @@ const INITIAL_ROSTER = [];
 
 export default function App() {
   // --- Core Navigation & Drawer States ---
-  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history'
+  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // --- Players & History States ---
@@ -54,7 +64,8 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [gistLoaded, setGistLoaded] = useState(false);
-  const [hasPendingGistChanges, setHasPendingGistChanges] = useState(false);
+  const [hasPendingGistChanges, setHasPendingGistChanges] = useState(() => readPendingGistChanges());
+  const [showLoadConflict, setShowLoadConflict] = useState(false);
 
   const gistGateMessage = getGistGateMessage({ gistLoaded, hasPendingGistChanges });
   const saveEnabled = canSaveToGist({
@@ -74,40 +85,73 @@ export default function App() {
 
   const updatePersistedPlayers = (updater) => {
     setPlayers(updater);
+    markPendingGistChanges();
     setHasPendingGistChanges(true);
   };
 
-  // --- Gist API Handlers ---
-  const handleLoadGist = async () => {
-    if (hasPendingGistChanges) {
-      const confirmed = window.confirm(
-        'Há alterações não salvas no Gist. Carregar agora vai descartá-las. Continuar?'
-      );
-      if (!confirmed) return;
-    }
+  const handleCreateGameSession = (input) => {
+    const { document } = appendDraftGameSession(gameSessions, input);
+    const persistResult = persistLocalGameSessions(document);
+    setGameSessions(document);
+    markPendingGistChanges();
+    setHasPendingGistChanges(true);
+    setLocalWriteError(persistResult.ok ? null : persistResult.error);
+  };
+
+  const loadGistWithStrategy = async (strategy) => {
+    setShowLoadConflict(false);
+    if (!gistLoadNeedsFetch(strategy)) return;
 
     try {
       setIsSyncing(true);
       setSyncStatus('Carregando do Gist...');
-      const state = await loadGistState();
-      const nextSessions = nextGameSessionsDocument(
+      const remote = await loadGistState();
+      const remoteSessions = nextGameSessionsDocument(
         createEmptyGameSessionsDocument(),
-        state.gameSessions
+        remote.gameSessions
       );
-      const persistResult = persistLocalGameSessions(nextSessions);
+      const result = applySuccessfulGistLoad({
+        strategy,
+        localPlayers: players,
+        localGameSessions: gameSessions,
+        remotePlayers: remote.players,
+        remoteGameSessions: remoteSessions,
+      });
 
-      setPlayers(state.players);
-      setGameSessions(nextSessions);
-      setLocalCacheError(null);
-      setLocalWriteError(persistResult.ok ? null : persistResult.error);
+      if (result.replaceLocal) {
+        const persistResult = persistLocalGameSessions(result.gameSessions);
+        setPlayers(result.players);
+        setGameSessions(result.gameSessions);
+        setLocalCacheError(null);
+        setLocalWriteError(persistResult.ok ? null : persistResult.error);
+        clearPendingGistChanges();
+      } else {
+        markPendingGistChanges();
+      }
+
+      setHasPendingGistChanges(result.hasPendingGistChanges);
       setGistLoaded(true);
-      setHasPendingGistChanges(false);
-      setSyncStatus('Carregado do Gist com sucesso!');
+      setSyncStatus(result.syncStatus);
     } catch (err) {
-      setSyncStatus(`Erro ao carregar: ${err.message}`);
+      const failure = applyGistLoadFailure({
+        error: err,
+        hasPendingGistChanges,
+        localPlayers: players,
+        localGameSessions: gameSessions,
+      });
+      setSyncStatus(failure.syncStatus);
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  // --- Gist API Handlers ---
+  const handleLoadGist = () => {
+    if (hasPendingGistChanges) {
+      setShowLoadConflict(true);
+      return;
+    }
+    return loadGistWithStrategy(GIST_LOAD_STRATEGY.FRESH);
   };
 
   // Keep password in sessionStorage so you only type it once per session on any device
@@ -139,6 +183,7 @@ export default function App() {
         gameSessions,
         token: decryptedPat,
       });
+      clearPendingGistChanges();
       setHasPendingGistChanges(false);
       setSyncStatus('Salvo no Gist com sucesso!');
     } catch (err) {
@@ -275,6 +320,25 @@ export default function App() {
     setCurrentView('history');
   };
 
+  const gistSyncPanel = (
+    <GistSyncPanel
+      password={appPassword}
+      onPasswordChange={handlePasswordChange}
+      onLoad={handleLoadGist}
+      onSave={handleSaveGist}
+      isSyncing={isSyncing}
+      saveEnabled={saveEnabled}
+      gistGateMessage={gistGateMessage}
+      syncStatus={syncStatus}
+      localCacheError={localCacheError}
+      localWriteError={localWriteError}
+      showLoadConflict={showLoadConflict}
+      onKeepLocalChanges={() => loadGistWithStrategy(GIST_LOAD_STRATEGY.KEEP_LOCAL)}
+      onUseRemoteData={() => loadGistWithStrategy(GIST_LOAD_STRATEGY.USE_REMOTE)}
+      onCancelLoad={() => setShowLoadConflict(false)}
+    />
+  );
+
   return (
     <div
       className="min-h-screen font-sans transition-colors"
@@ -328,6 +392,16 @@ export default function App() {
               }}
             >
               👥 Elenco Completo ({players.length})
+            </button>
+            <button
+              onClick={() => { setCurrentView('sessions'); setIsMenuOpen(false); }}
+              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+              style={{
+                backgroundColor: currentView === 'sessions' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)'
+              }}
+            >
+              🗓️ Encontros
             </button>
             <button
               onClick={() => {
@@ -553,65 +627,7 @@ export default function App() {
           {/* 3. ROSTER MANAGEMENT & GIST SYNC VIEW */}
           {currentView === 'players' && (
             <div className="space-y-4">
-              {/* GitHub Gist Controls */}
-              {/* Sync Controls */}
-              <div
-                className="p-4 rounded-xl border space-y-3"
-                style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-              >
-                <h3 className="font-bold text-sm">Sincronização GitHub Gist</h3>
-
-                <input
-                  type="password"
-                  placeholder="Digite sua Senha/PIN de Desbloqueio"
-                  value={appPassword}
-                  onChange={handlePasswordChange}
-                  className="w-full border p-2 rounded text-xs outline-none"
-                  style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-main)', borderColor: 'var(--border-color)' }}
-                />
-
-                <div className="flex gap-2 text-xs">
-                  <button
-                    onClick={handleLoadGist}
-                    disabled={isSyncing}
-                    className="px-3 py-2 rounded font-bold border cursor-pointer"
-                    style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--border-color)', color: 'var(--text-main)' }}
-                  >
-                    🔄 Carregar do Gist
-                  </button>
-
-                  <button
-                    onClick={handleSaveGist}
-                    disabled={!saveEnabled}
-                    className="px-3 py-2 rounded font-bold cursor-pointer disabled:opacity-50"
-                    style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
-                  >
-                    💾 Salvar no Gist
-                  </button>
-                </div>
-
-                {localCacheError && (
-                  <p className="text-xs font-semibold text-red-500">
-                    Erro no cache local de encontros: {localCacheError}
-                  </p>
-                )}
-
-                {localWriteError && (
-                  <p className="text-xs font-semibold text-red-500">
-                    Erro ao salvar encontros no cache local: {localWriteError}
-                  </p>
-                )}
-
-                <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
-                  {gistGateMessage}
-                </p>
-
-                {syncStatus && (
-                  <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
-                    {syncStatus}
-                  </p>
-                )}
-              </div>
+              {gistSyncPanel}
 
               <h2 className="text-xl font-bold">Elenco Registrado ({players.length})</h2>
 
@@ -621,6 +637,14 @@ export default function App() {
                 onDeletePlayer={handleDeletePlayer}
               />
             </div>
+          )}
+
+          {currentView === 'sessions' && (
+            <GameSessionsView
+              sessions={gameSessions.sessions}
+              onCreateSession={handleCreateGameSession}
+              syncPanel={gistSyncPanel}
+            />
           )}
 
           {/* 4. HISTORY VIEW */}

@@ -1,6 +1,21 @@
-import { GAME_SESSIONS_SCHEMA_VERSION } from './constants.js';
+import { GAME_SESSIONS_SCHEMA_VERSION, GIST_PENDING_CHANGES_STORAGE_KEY } from './constants.js';
 import { createEmptyGameSessionsDocument } from './gameSessionsDocument.js';
 import { loadGameSessionsDocument, saveGameSessionsDocument } from './gameSessionsStorage.js';
+
+export const GIST_LOAD_STRATEGY = {
+  FRESH: 'fresh',
+  KEEP_LOCAL: 'keep_local',
+  USE_REMOTE: 'use_remote',
+  CANCEL: 'cancel',
+};
+
+function resolveStorage(storage) {
+  if (storage) return storage;
+  if (typeof globalThis.localStorage === 'undefined' || globalThis.localStorage == null) {
+    throw new Error('localStorage não está disponível.');
+  }
+  return globalThis.localStorage;
+}
 
 export function readLocalGameSessions(storage) {
   try {
@@ -62,4 +77,78 @@ export function getGistGateMessage({ gistLoaded, hasPendingGistChanges }) {
 
 export function canSaveToGist({ gistLoaded, isSyncing, hasPassword }) {
   return Boolean(gistLoaded && !isSyncing && hasPassword);
+}
+
+export function readPendingGistChanges(storage) {
+  try {
+    const raw = resolveStorage(storage).getItem(GIST_PENDING_CHANGES_STORAGE_KEY);
+    return raw === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function writePendingGistChanges(value, storage) {
+  try {
+    resolveStorage(storage).setItem(GIST_PENDING_CHANGES_STORAGE_KEY, value ? 'true' : 'false');
+    return { ok: true, error: null };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error.message || 'Não foi possível atualizar o indicador de alterações pendentes.',
+    };
+  }
+}
+
+export function markPendingGistChanges(storage) {
+  return writePendingGistChanges(true, storage);
+}
+
+export function clearPendingGistChanges(storage) {
+  return writePendingGistChanges(false, storage);
+}
+
+export function gistLoadNeedsFetch(strategy) {
+  return strategy !== GIST_LOAD_STRATEGY.CANCEL;
+}
+
+export function applySuccessfulGistLoad({
+  strategy,
+  localPlayers,
+  localGameSessions,
+  remotePlayers,
+  remoteGameSessions,
+}) {
+  if (strategy === GIST_LOAD_STRATEGY.KEEP_LOCAL) {
+    return {
+      players: localPlayers,
+      gameSessions: localGameSessions,
+      replaceLocal: false,
+      gistLoaded: true,
+      hasPendingGistChanges: true,
+      syncStatus: 'Gist carregado. As alterações locais foram mantidas e ainda precisam ser salvas.',
+    };
+  }
+
+  return {
+    players: remotePlayers,
+    gameSessions: remoteGameSessions,
+    replaceLocal: true,
+    gistLoaded: true,
+    hasPendingGistChanges: false,
+    syncStatus:
+      strategy === GIST_LOAD_STRATEGY.USE_REMOTE
+        ? 'Dados locais substituídos pelos dados do Gist.'
+        : 'Carregado do Gist com sucesso!',
+  };
+}
+
+export function applyGistLoadFailure({ error, hasPendingGistChanges, localPlayers, localGameSessions }) {
+  return {
+    players: localPlayers,
+    gameSessions: localGameSessions,
+    replaceLocal: false,
+    hasPendingGistChanges,
+    syncStatus: `Erro ao carregar: ${error?.message || error}`,
+  };
 }

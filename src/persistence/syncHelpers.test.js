@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { GAME_SESSIONS_STORAGE_KEY } from './constants.js';
+import { GAME_SESSIONS_STORAGE_KEY, GIST_PENDING_CHANGES_STORAGE_KEY } from './constants.js';
 import { createEmptyGameSessionsDocument } from './gameSessionsDocument.js';
 import {
+  applyGistLoadFailure,
+  applySuccessfulGistLoad,
   canSaveToGist,
+  clearPendingGistChanges,
   getGistGateMessage,
+  gistLoadNeedsFetch,
+  GIST_LOAD_STRATEGY,
+  markPendingGistChanges,
   nextGameSessionsDocument,
   persistLocalGameSessions,
   readLocalGameSessions,
+  readPendingGistChanges,
 } from './syncHelpers.js';
 
 function createMemoryStorage(initial = {}) {
@@ -164,5 +171,135 @@ describe('mensagens e permissão de salvamento', () => {
     expect(canSaveToGist({ gistLoaded: true, isSyncing: false, hasPassword: true })).toBe(true);
     expect(canSaveToGist({ gistLoaded: true, isSyncing: true, hasPassword: true })).toBe(false);
     expect(canSaveToGist({ gistLoaded: true, isSyncing: false, hasPassword: false })).toBe(false);
+  });
+
+  it('não bloqueia o salvamento só por existir alteração pendente', () => {
+    expect(
+      canSaveToGist({ gistLoaded: true, isSyncing: false, hasPassword: true })
+    ).toBe(true);
+  });
+});
+
+describe('indicador persistido de alterações pendentes', () => {
+  it('lê o indicador persistido como true', () => {
+    const storage = createMemoryStorage({
+      [GIST_PENDING_CHANGES_STORAGE_KEY]: 'true',
+    });
+    expect(readPendingGistChanges(storage)).toBe(true);
+  });
+
+  it('ausência da chave resulta em false', () => {
+    expect(readPendingGistChanges(createMemoryStorage())).toBe(false);
+  });
+
+  it('trata valor inválido com segurança', () => {
+    expect(
+      readPendingGistChanges(createMemoryStorage({ [GIST_PENDING_CHANGES_STORAGE_KEY]: 'yes' }))
+    ).toBe(false);
+    expect(
+      readPendingGistChanges(createMemoryStorage({ [GIST_PENDING_CHANGES_STORAGE_KEY]: 'false' }))
+    ).toBe(false);
+    expect(
+      readPendingGistChanges(createMemoryStorage({ [GIST_PENDING_CHANGES_STORAGE_KEY]: '{broken' }))
+    ).toBe(false);
+  });
+
+  it('marca e limpa a pendência', () => {
+    const storage = createMemoryStorage({ volleyPlayers: '[]' });
+
+    expect(markPendingGistChanges(storage)).toEqual({ ok: true, error: null });
+    expect(storage.getItem(GIST_PENDING_CHANGES_STORAGE_KEY)).toBe('true');
+    expect(readPendingGistChanges(storage)).toBe(true);
+
+    expect(clearPendingGistChanges(storage)).toEqual({ ok: true, error: null });
+    expect(storage.getItem(GIST_PENDING_CHANGES_STORAGE_KEY)).toBe('false');
+    expect(readPendingGistChanges(storage)).toBe(false);
+    expect(storage.getItem('volleyPlayers')).toBe('[]');
+  });
+
+  it('erro do storage não apaga outras chaves', () => {
+    const storage = {
+      getItem(key) {
+        if (key === 'volleyPlayers') return '[{"id":"p1"}]';
+        if (key === GAME_SESSIONS_STORAGE_KEY) return '{"schemaVersion":1,"sessions":[]}';
+        return null;
+      },
+      setItem() {
+        throw new Error('quota exceeded');
+      },
+      removeItem() {},
+    };
+
+    const result = markPendingGistChanges(storage);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('quota exceeded');
+    expect(storage.getItem('volleyPlayers')).toBe('[{"id":"p1"}]');
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe('{"schemaVersion":1,"sessions":[]}');
+  });
+});
+
+describe('estratégias de carregamento do Gist', () => {
+  const localPlayers = [{ id: 'local' }];
+  const remotePlayers = [{ id: 'remote' }];
+  const localGameSessions = { schemaVersion: 1, sessions: [{ id: 'local-session' }] };
+  const remoteGameSessions = { schemaVersion: 1, sessions: [{ id: 'remote-session' }] };
+
+  it('Manter alterações locais preserva jogadores e encontros', () => {
+    const result = applySuccessfulGistLoad({
+      strategy: GIST_LOAD_STRATEGY.KEEP_LOCAL,
+      localPlayers,
+      localGameSessions,
+      remotePlayers,
+      remoteGameSessions,
+    });
+
+    expect(result.replaceLocal).toBe(false);
+    expect(result.players).toBe(localPlayers);
+    expect(result.gameSessions).toBe(localGameSessions);
+    expect(result.gistLoaded).toBe(true);
+    expect(result.hasPendingGistChanges).toBe(true);
+    expect(result.syncStatus).toBe(
+      'Gist carregado. As alterações locais foram mantidas e ainda precisam ser salvas.'
+    );
+  });
+
+  it('Usar dados do Gist escolhe os dados remotos', () => {
+    const result = applySuccessfulGistLoad({
+      strategy: GIST_LOAD_STRATEGY.USE_REMOTE,
+      localPlayers,
+      localGameSessions,
+      remotePlayers,
+      remoteGameSessions,
+    });
+
+    expect(result.replaceLocal).toBe(true);
+    expect(result.players).toBe(remotePlayers);
+    expect(result.gameSessions).toBe(remoteGameSessions);
+    expect(result.gistLoaded).toBe(true);
+    expect(result.hasPendingGistChanges).toBe(false);
+    expect(result.syncStatus).toBe('Dados locais substituídos pelos dados do Gist.');
+  });
+
+  it('cancelar não realiza carregamento', () => {
+    expect(gistLoadNeedsFetch(GIST_LOAD_STRATEGY.CANCEL)).toBe(false);
+    expect(gistLoadNeedsFetch(GIST_LOAD_STRATEGY.KEEP_LOCAL)).toBe(true);
+    expect(gistLoadNeedsFetch(GIST_LOAD_STRATEGY.USE_REMOTE)).toBe(true);
+    expect(gistLoadNeedsFetch(GIST_LOAD_STRATEGY.FRESH)).toBe(true);
+  });
+
+  it('erro de GET mantém os dados e a pendência local', () => {
+    const result = applyGistLoadFailure({
+      error: new Error('rede indisponível'),
+      hasPendingGistChanges: true,
+      localPlayers,
+      localGameSessions,
+    });
+
+    expect(result.replaceLocal).toBe(false);
+    expect(result.players).toBe(localPlayers);
+    expect(result.gameSessions).toBe(localGameSessions);
+    expect(result.hasPendingGistChanges).toBe(true);
+    expect(result.syncStatus).toBe('Erro ao carregar: rede indisponível');
   });
 });
