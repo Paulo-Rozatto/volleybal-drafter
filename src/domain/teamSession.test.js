@@ -127,6 +127,34 @@ describe('validateTeam e validateSessionTeams', () => {
     ).toBe('TEAM_PLAYER_NOT_FOUND');
   });
 
+  it('aceita snapshot órfão já existente mesmo fora do elenco atual', () => {
+    const orphan = team('t1', [member('missing', 'Ghost')]);
+    expect(
+      validateTeam(orphan, format, roster, [], { existingMemberIds: ['missing'] }).ok
+    ).toBe(true);
+    expect(
+      validateV2Document(
+        {
+          schemaVersion: 2,
+          sessions: [
+            {
+              id: 'session-1',
+              date: '2026-09-12',
+              name: null,
+              status: 'draft',
+              createdAt: '2026-09-12T18:00:00.000Z',
+              updatedAt: '2026-09-12T18:00:00.000Z',
+              format: { teamSize: 2, teamCount: 2 },
+              teams: [orphan, team('t2', [])],
+              rounds: [],
+            },
+          ],
+        },
+        roster
+      ).ok
+    ).toBe(true);
+  });
+
   it('rejeita quantidade de times diferente do teamCount explícito', () => {
     const result = validateTeamCount([team('t1', []), team('t2', []), team('t3', [])], {
       teamSize: 2,

@@ -27,6 +27,11 @@ import {
   teamSessionFinalizeProgressLabel,
   teamSessionIsReadyToFinalize,
   updateSessionTeam,
+  deleteTeamSession,
+  DELETE_TEAM_SESSION_CONFIRMATION_REQUIRED,
+  FORMAT_CHANGE_CONFIRMATION_REQUIRED,
+  FORMAT_CHANGE_CONFIRMATION_MESSAGE,
+  updateTeamSessionDetails,
   setTeamSessionMatchScore,
 } from './teamGameSessions.js';
 
@@ -1034,7 +1039,7 @@ describe('escalações por partida', () => {
     ).toBe('SCHEMA_VERSION_UNSUPPORTED');
   });
 
-  it('atualiza o nome só na partida editada e restaura times-base só no rascunho', () => {
+  it('preserva snapshots da partida editada e não reescreve times nem as demais partidas', () => {
     const original = inProgressFourTeams();
     original.sessions[0].rounds[0].matches[0].lineupA = [member('p1', 'Erik antigo')];
     original.sessions[0].rounds[0].matches[1].lineupA = [member('p5', 'Ian antigo')];
@@ -1046,9 +1051,24 @@ describe('escalações por partida', () => {
       roster: renamedRoster,
       now: LATER,
     });
-    expect(updated.session.rounds[0].matches[0].lineupA[0].playerName).toBe('Erik atual');
+    expect(updated.session.rounds[0].matches[0].lineupA[0].playerName).toBe('Erik antigo');
+    expect(updated.session.rounds[0].matches[0].lineupB[0].playerName).toBe('Gabi');
     expect(updated.session.rounds[0].matches[1].lineupA[0].playerName).toBe('Ian antigo');
     expect(updated.session.teams[0].members[0].playerName).toBe('Erik');
+
+    const withNewMember = setTeamSessionMatchLineups(
+      original,
+      'session-1',
+      'r1',
+      'm1',
+      ['p1', 'p2'],
+      ['p3'],
+      { roster: renamedRoster, now: LATER }
+    );
+    expect(withNewMember.session.rounds[0].matches[0].lineupA).toEqual([
+      member('p1', 'Erik antigo'),
+      member('p2', 'André'),
+    ]);
 
     const restored = restoreMatchLineupsFromBaseTeams(
       original.sessions[0].teams,
@@ -1312,5 +1332,287 @@ describe('finalização de encontros V2', () => {
     expect(withInvalid(21, null)).toBe('FINALIZE_INCOMPLETE');
     expect(withInvalid(-1, 18)).toBe('FINALIZE_INCOMPLETE');
     expect(withInvalid(21.5, 18)).toBe('FINALIZE_INCOMPLETE');
+  });
+});
+
+describe('edição e exclusão de encontros', () => {
+  it('edita nome e data em draft, in_progress e finished sem mexer em times', () => {
+    const teams = [team('team-1', [member('p1', 'Erik')])];
+    const original = documentWith(draftSession({ teams }));
+    const snapshot = JSON.parse(JSON.stringify(original.sessions[0].teams));
+    const updated = updateTeamSessionDetails(
+      original,
+      'session-1',
+      { date: '2026-09-13', name: '  QA Encontro  ' },
+      { now: LATER }
+    );
+
+    expect(updated.ok).toBe(true);
+    expect(updated.session.date).toBe('2026-09-13');
+    expect(updated.session.name).toBe('QA Encontro');
+    expect(updated.session.id).toBe('session-1');
+    expect(updated.session.createdAt).toBe(ISO_CREATED);
+    expect(updated.session.status).toBe('draft');
+    expect(updated.session.teams).toEqual(snapshot);
+    expect(updated.session.updatedAt).toBe('2026-09-12T20:00:00.000Z');
+    expect(original.sessions[0].name).toBe('Arena');
+
+    const live = documentWith(draftSession({ status: 'in_progress', teams, rounds: [] }));
+    live.sessions[0].rounds = [
+      {
+        id: 'r1',
+        number: 1,
+        byeTeamId: null,
+        matches: [
+          {
+            id: 'm1',
+            teamAId: 'team-1',
+            teamBId: 'team-2',
+            lineupA: [member('p1', 'Erik')],
+            lineupB: [member('p3', 'Gabi')],
+            scoreA: null,
+            scoreB: null,
+          },
+        ],
+      },
+    ];
+    live.sessions[0].teams = [
+      team('team-1', [member('p1', 'Erik'), member('p2', 'André')]),
+      team('team-2', [member('p3', 'Gabi'), member('p4', 'Luiza')]),
+    ];
+    const liveUpdated = updateTeamSessionDetails(live, 'session-1', { name: '' }, { now: LATER });
+    expect(liveUpdated.ok).toBe(true);
+    expect(liveUpdated.session.name).toBeNull();
+    expect(liveUpdated.session.status).toBe('in_progress');
+    expect(liveUpdated.session.teams).toHaveLength(2);
+    expect(liveUpdated.session.rounds).toHaveLength(1);
+
+    const finished = JSON.parse(JSON.stringify(liveUpdated.document));
+    finished.sessions[0].status = 'finished';
+    finished.sessions[0].rounds[0].matches[0].scoreA = 21;
+    finished.sessions[0].rounds[0].matches[0].scoreB = 18;
+    const finishedUpdated = updateTeamSessionDetails(
+      finished,
+      'session-1',
+      { date: '2026-09-14' },
+      { now: LATER }
+    );
+    expect(finishedUpdated.ok).toBe(true);
+    expect(finishedUpdated.session.date).toBe('2026-09-14');
+    expect(finishedUpdated.session.status).toBe('finished');
+    expect(finishedUpdated.session.rounds[0].matches[0]).toMatchObject({ scoreA: 21, scoreB: 18 });
+  });
+
+  it('não grava quando nada mudou', () => {
+    const original = documentWith(draftSession());
+    const result = updateTeamSessionDetails(
+      original,
+      'session-1',
+      { date: '2026-09-12', name: 'Arena', teamSize: 2, teamCount: 2 },
+      { now: LATER }
+    );
+    expect(result.ok).toBe(true);
+    expect(result.unchanged).toBe(true);
+    expect(result.session.updatedAt).toBe(ISO_CREATED);
+    expect(result.document).toBe(original);
+  });
+
+  it('altera formato de draft vazio sem confirmação e rejeita valores inválidos', () => {
+    const original = documentWith(draftSession());
+    const updated = updateTeamSessionDetails(
+      original,
+      'session-1',
+      { teamSize: 4, teamCount: 3 },
+      { now: LATER }
+    );
+    expect(updated.ok).toBe(true);
+    expect(updated.session.format).toEqual({ teamSize: 4, teamCount: 3 });
+    expect(updated.session.teams).toEqual([]);
+
+    const badDate = updateTeamSessionDetails(original, 'session-1', { date: '12-09-2026' });
+    expect(badDate.ok).toBe(false);
+    expect(badDate.document).toBeNull();
+    expect(original.sessions[0].date).toBe('2026-09-12');
+
+    const badFormat = updateTeamSessionDetails(original, 'session-1', { teamSize: 7, teamCount: 2 });
+    expect(badFormat.ok).toBe(false);
+    expect(badFormat.document).toBeNull();
+    expect(badFormat.errors[0].field).toBe('teamSize');
+
+    const missing = updateTeamSessionDetails(original, 'missing', { name: 'X' });
+    expect(missing.ok).toBe(false);
+    expect(missing.errors[0].code).toBe('SESSION_NOT_FOUND');
+    expect(missing.document).toBeNull();
+  });
+
+  it('exige confirmação para mudar formato de draft com times e cancela sem alterar', () => {
+    const original = documentWith(
+      draftSession({
+        teams: [team('team-1', [member('p1', 'Erik')])],
+      })
+    );
+    const pending = updateTeamSessionDetails(original, 'session-1', { teamSize: 3, teamCount: 2 });
+    expect(pending.ok).toBe(false);
+    expect(pending.errors[0].code).toBe(FORMAT_CHANGE_CONFIRMATION_REQUIRED);
+    expect(pending.errors[0].message).toBe(FORMAT_CHANGE_CONFIRMATION_MESSAGE);
+    expect(pending.document).toBeNull();
+    expect(original.sessions[0].teams).toHaveLength(1);
+
+    const confirmed = updateTeamSessionDetails(
+      original,
+      'session-1',
+      { teamSize: 3, teamCount: 2 },
+      { formatChangeConfirmed: true, now: LATER }
+    );
+    expect(confirmed.ok).toBe(true);
+    expect(confirmed.session.format).toEqual({ teamSize: 3, teamCount: 2 });
+    expect(confirmed.session.teams).toEqual([]);
+    expect(confirmed.session.rounds).toEqual([]);
+    expect(confirmed.session.id).toBe('session-1');
+    expect(confirmed.session.createdAt).toBe(ISO_CREATED);
+    expect(original.sessions[0].teams).toHaveLength(1);
+  });
+
+  it('bloqueia mudança de formato fora de draft', () => {
+    const live = documentWith(draftSession({ status: 'in_progress' }));
+    expect(updateTeamSessionDetails(live, 'session-1', { teamSize: 4 }).errors[0].code).toBe(
+      'FORMAT_LOCKED'
+    );
+
+    const original = documentWith(draftSession({ status: 'finished' }));
+    const result = updateTeamSessionDetails(original, 'session-1', { teamSize: 4 });
+    expect(result.ok).toBe(false);
+    expect(result.errors[0].code).toBe('FORMAT_LOCKED');
+    expect(result.document).toBeNull();
+  });
+
+  it('exclui somente a sessão confirmada e preserva as demais', () => {
+    const original = documentWith(draftSession(), [draftSession({ id: 'session-2', name: 'Outro' })]);
+    const pending = deleteTeamSession(original, 'session-1');
+    expect(pending.ok).toBe(false);
+    expect(pending.errors[0].code).toBe(DELETE_TEAM_SESSION_CONFIRMATION_REQUIRED);
+    expect(pending.document).toBeNull();
+    expect(original.sessions).toHaveLength(2);
+
+    const missing = deleteTeamSession(original, 'missing', { deleteConfirmed: true });
+    expect(missing.ok).toBe(false);
+    expect(missing.errors[0].code).toBe('SESSION_NOT_FOUND');
+    expect(missing.document).toBeNull();
+    expect(original.sessions).toHaveLength(2);
+
+    const confirmed = deleteTeamSession(original, 'session-1', { deleteConfirmed: true });
+    expect(confirmed.ok).toBe(true);
+    expect(confirmed.document.schemaVersion).toBe(2);
+    expect(confirmed.document.sessions.map((session) => session.id)).toEqual(['session-2']);
+    expect(original.sessions).toHaveLength(2);
+  });
+});
+
+describe('snapshots órfãos após exclusão do elenco', () => {
+  it('preserva snapshot em draft, in_progress e finished e some das novas seleções', () => {
+    const draft = documentWith(
+      draftSession({
+        format: { teamSize: 2, teamCount: 3 },
+        teams: [
+          team('team-1', [member('p1', 'Erik antigo')]),
+          team('team-2', [member('p3', 'Gabi')]),
+        ],
+      })
+    );
+    const reducedRoster = roster.filter((player) => player.id !== 'p1');
+    const snapshot = JSON.parse(JSON.stringify(draft.sessions[0].teams));
+
+    expect(availablePlayersForTeams(reducedRoster, draft.sessions[0].teams).map((player) => player.id)).not.toContain(
+      'p1'
+    );
+    expect(availablePlayersForTeams(reducedRoster, []).map((player) => player.id)).not.toContain('p1');
+    expect(availablePlayersForTeams(reducedRoster, []).map((player) => player.id)).toContain('p3');
+
+    const keptTeam = updateSessionTeam(draft, 'session-1', 'team-1', ['p1'], {
+      roster: reducedRoster,
+      now: LATER,
+    });
+    expect(keptTeam.ok).toBe(true);
+    expect(keptTeam.session.teams[0].members).toEqual([member('p1', 'Erik antigo')]);
+    expect(draft.sessions[0].teams).toEqual(snapshot);
+
+    const added = addSessionTeam(
+      documentWith(
+        draftSession({
+          teams: [team('team-2', [member('p3', 'Gabi')])],
+        })
+      ),
+      'session-1',
+      ['p1'],
+      { roster: reducedRoster, now: LATER }
+    );
+    expect(added.ok).toBe(false);
+    expect(added.errors[0].code).toBe('TEAM_PLAYER_NOT_FOUND');
+    expect(added.document).toBeNull();
+
+    const live = startTeamSessionRoundRobin(
+      documentWith(
+        draftSession({
+          format: { teamSize: 2, teamCount: 4 },
+          teams: [
+            team('team-1', [member('p1', 'Erik antigo'), member('p2', 'André')]),
+            team('team-2', [member('p3', 'Gabi'), member('p4', 'Luiza')]),
+            team('team-3', [member('p5', 'Ian'), member('p6', 'Ana')]),
+            team('team-4', [member('p7', 'BH'), member('p8', 'Arthur')]),
+          ],
+        })
+      ),
+      'session-1',
+      { roster: reducedRoster, idGenerator: sequentialIds(), now: NOW, generateConfirmed: true }
+    );
+    expect(live.ok).toBe(true);
+    expect(live.session.status).toBe('in_progress');
+    expect(live.session.teams[0].members[0]).toEqual(member('p1', 'Erik antigo'));
+    const firstMatch = allMatches(live.session.rounds).find(
+      (match) => match.teamAId === 'team-1' || match.teamBId === 'team-1'
+    );
+    const firstLineup =
+      firstMatch.teamAId === 'team-1' ? firstMatch.lineupA : firstMatch.lineupB;
+    expect(firstLineup[0]).toEqual(member('p1', 'Erik antigo'));
+
+    const otherMatch = allMatches(live.session.rounds).find((match) => match.id !== firstMatch.id);
+    const editedOther = setTeamSessionMatchLineups(
+      live.document,
+      'session-1',
+      live.session.rounds.find((round) => round.matches.some((match) => match.id === otherMatch.id)).id,
+      otherMatch.id,
+      otherMatch.lineupA.map((item) => item.playerId),
+      otherMatch.lineupB.map((item) => item.playerId),
+      { roster: reducedRoster, now: LATER }
+    );
+    expect(editedOther.ok).toBe(true);
+    expect(editedOther.session.teams[0].members[0]).toEqual(member('p1', 'Erik antigo'));
+    const keptFirst = allMatches(editedOther.session.rounds).find((match) => match.id === firstMatch.id);
+    const keptLineup = keptFirst.teamAId === 'team-1' ? keptFirst.lineupA : keptFirst.lineupB;
+    expect(keptLineup[0]).toEqual(member('p1', 'Erik antigo'));
+
+    const renamed = updateTeamSessionDetails(
+      editedOther.document,
+      'session-1',
+      { name: 'QA Snapshot' },
+      { now: LATER }
+    );
+    expect(renamed.session.teams[0].members[0]).toEqual(member('p1', 'Erik antigo'));
+
+    let scored = editedOther.document;
+    for (const round of scored.sessions[0].rounds) {
+      for (const match of round.matches) {
+        scored = setTeamSessionMatchScore(scored, 'session-1', round.id, match.id, 21, 18, {
+          now: LATER,
+        }).document;
+      }
+    }
+    const finished = finalizeTeamSession(scored, 'session-1', {
+      finalizeConfirmed: true,
+      now: LATER,
+    });
+    expect(finished.ok).toBe(true);
+    expect(finished.session.status).toBe('finished');
+    expect(finished.session.teams[0].members[0]).toEqual(member('p1', 'Erik antigo'));
   });
 });

@@ -45,6 +45,19 @@ function collectMemberIds(groups) {
   return ids;
 }
 
+export function collectSessionSnapshotPlayerIds(session) {
+  const ids = new Set(collectMemberIds(session?.teams));
+  for (const round of session?.rounds ?? []) {
+    for (const match of round?.matches ?? []) {
+      for (const member of [...(match?.lineupA ?? []), ...(match?.lineupB ?? [])]) {
+        const id = memberPlayerId(member);
+        if (id) ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
 export function cloneTeamMembers(members) {
   return (Array.isArray(members) ? members : []).map((member) => ({
     playerId: member?.playerId,
@@ -183,7 +196,7 @@ export function validateTeamCount(teams, format) {
  * @param {Array<{ id: string }>} [roster]
  * @param {Array<{ id?: unknown, members?: unknown }>} [otherTeams]
  */
-export function validateTeam(team, format, roster = null, otherTeams = []) {
+export function validateTeam(team, format, roster = null, otherTeams = [], options = {}) {
   const errors = [];
   const teamSize = format?.teamSize;
 
@@ -236,7 +249,8 @@ export function validateTeam(team, format, roster = null, otherTeams = []) {
     }
     seenIds.add(playerId);
 
-    if (Array.isArray(roster) && !knownIds.has(playerId)) {
+    const existingMemberIds = new Set(options.existingMemberIds ?? []);
+    if (Array.isArray(roster) && !knownIds.has(playerId) && !existingMemberIds.has(playerId)) {
       errors.push(
         error('TEAM_PLAYER_NOT_FOUND', 'Jogador não encontrado no elenco.', {
           field: `members[${index}].playerId`,
@@ -263,7 +277,7 @@ export function validateTeam(team, format, roster = null, otherTeams = []) {
  * @param {unknown} format
  * @param {Array<{ id: string }>} [roster]
  */
-export function validateSessionTeams(teams, format, roster = null) {
+export function validateSessionTeams(teams, format, roster = null, options = {}) {
   const formatResult = validateFormat(format);
   if (!formatResult.ok) return formatResult;
 
@@ -276,7 +290,7 @@ export function validateSessionTeams(teams, format, roster = null) {
 
   teams.forEach((team, index) => {
     const otherTeams = teams.filter((_, otherIndex) => otherIndex !== index);
-    const result = validateTeam(team, format, roster, otherTeams);
+    const result = validateTeam(team, format, roster, otherTeams, options);
     if (!result.ok) {
       errors.push(
         ...result.errors.map((item) => ({
@@ -348,7 +362,8 @@ export function validateLineup(lineup, format, roster = null, options = {}) {
     }
     seenIds.add(playerId);
 
-    if (Array.isArray(roster) && !knownIds.has(playerId)) {
+    const existingMemberIds = new Set(options.existingMemberIds ?? []);
+    if (Array.isArray(roster) && !knownIds.has(playerId) && !existingMemberIds.has(playerId)) {
       errors.push(
         error('LINEUP_PLAYER_NOT_FOUND', 'Jogador não encontrado no elenco.', {
           field: `${field}[${index}].playerId`,
@@ -376,7 +391,7 @@ function teamExists(teams, teamId) {
  * @param {Array<{ id?: unknown }>} teams
  * @param {Array<{ id: string }>} [roster]
  */
-export function validateMatchLineups(match, format, teams = [], roster = null) {
+export function validateMatchLineups(match, format, teams = [], roster = null, options = {}) {
   const errors = [];
 
   if (!isNonEmptyId(match?.teamAId) || !isNonEmptyId(match?.teamBId)) {
@@ -402,8 +417,14 @@ export function validateMatchLineups(match, format, teams = [], roster = null) {
     }
   }
 
-  const lineupAResult = validateLineup(match?.lineupA, format, roster, { field: 'lineupA' });
-  const lineupBResult = validateLineup(match?.lineupB, format, roster, { field: 'lineupB' });
+  const lineupAResult = validateLineup(match?.lineupA, format, roster, {
+    field: 'lineupA',
+    existingMemberIds: options.existingMemberIds,
+  });
+  const lineupBResult = validateLineup(match?.lineupB, format, roster, {
+    field: 'lineupB',
+    existingMemberIds: options.existingMemberIds,
+  });
   if (!lineupAResult.ok) errors.push(...lineupAResult.errors);
   if (!lineupBResult.ok) errors.push(...lineupBResult.errors);
 
@@ -458,6 +479,7 @@ function collectSessionIntegrityErrors(session, { roster = null, sessionIndex = 
   const errors = [];
   const sessionId = session?.id;
   const context = { sessionIndex, sessionId };
+  const existingMemberIds = collectSessionSnapshotPlayerIds(session);
 
   const legacy = collectLegacyPairKeys(session);
   if (legacy.size > 0) {
@@ -537,14 +559,16 @@ function collectSessionIntegrityErrors(session, { roster = null, sessionIndex = 
       error('TEAMS_NOT_ARRAY', 'Os times do encontro precisam ser uma lista.', context)
     );
   } else if (requireExactTeamCount) {
-    const teamsResult = validateSessionTeams(session.teams, session.format, roster);
+    const teamsResult = validateSessionTeams(session.teams, session.format, roster, {
+      existingMemberIds,
+    });
     if (!teamsResult.ok) {
       errors.push(...teamsResult.errors.map((item) => ({ ...item, ...context })));
     }
   } else {
     session.teams.forEach((team, index) => {
       const otherTeams = session.teams.filter((_, otherIndex) => otherIndex !== index);
-      const result = validateTeam(team, session.format, roster, otherTeams);
+      const result = validateTeam(team, session.format, roster, otherTeams, { existingMemberIds });
       if (!result.ok) {
         errors.push(
           ...result.errors.map((item) => ({
@@ -692,7 +716,9 @@ function collectSessionIntegrityErrors(session, { roster = null, sessionIndex = 
         seenMatchIds.add(match.id);
       }
 
-      const lineupResult = validateMatchLineups(match, session.format, session.teams ?? [], roster);
+      const lineupResult = validateMatchLineups(match, session.format, session.teams ?? [], roster, {
+        existingMemberIds,
+      });
       if (!lineupResult.ok) {
         errors.push(
           ...lineupResult.errors.map((item) => ({

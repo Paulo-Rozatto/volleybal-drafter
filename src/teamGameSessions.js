@@ -10,12 +10,15 @@ import {
   TEAM_SESSION_SCHEMA_VERSION,
   cloneTeamMembers,
   cloneV2Round,
+  cloneV2Session,
   cloneV2Team,
+  collectSessionSnapshotPlayerIds,
   createInitialLineups,
   validateFormat,
   validateMatchLineups,
   validateSessionTeams,
   validateTeam,
+  validateV2Document,
 } from './domain/teamSession.js';
 import {
   formatFinalizeMatchProgress,
@@ -42,6 +45,17 @@ export const CLEAR_SCORE_CONFIRMATION_MESSAGE =
 
 export const FINALIZE_TEAM_SESSION_CONFIRMATION_MESSAGE =
   'Depois da finalização, times, escalações e placares ficarão bloqueados para edição.';
+
+export const FORMAT_CHANGE_CONFIRMATION_REQUIRED = 'FORMAT_CHANGE_CONFIRMATION_REQUIRED';
+export const FORMAT_CHANGE_CONFIRMATION_MESSAGE =
+  'Alterar o formato removerá todos os times já montados. Deseja continuar?';
+
+export const DELETE_TEAM_SESSION_CONFIRMATION_REQUIRED = 'DELETE_TEAM_SESSION_CONFIRMATION_REQUIRED';
+export const DELETE_TEAM_SESSION_CONFIRMATION_MESSAGE = 'Excluir este encontro permanentemente?';
+export const DELETE_TEAM_SESSION_SIDE_EFFECTS_WARNING =
+  'Times, escalações, placares e estatísticas derivadas também deixarão de existir.';
+export const DELETE_FINISHED_TEAM_SESSION_WARNING =
+  'Este encontro já está finalizado. A exclusão apaga times, escalações, placares e qualquer estatística derivada. Esta ação não pode ser desfeita.';
 
 const STATUS_LABELS = {
   draft: 'Rascunho',
@@ -182,11 +196,30 @@ function snapshotMember(player) {
   };
 }
 
-function membersFromIds(memberIds, roster) {
+function membersFromIds(memberIds, roster, previousMembers = [], { refreshFromRoster = true } = {}) {
   const byId = new Map((roster ?? []).map((player) => [player?.id, player]));
+  const previousById = new Map(
+    (previousMembers ?? [])
+      .filter((member) => typeof member?.playerId === 'string' && member.playerId.trim())
+      .map((member) => [member.playerId, member])
+  );
   return (memberIds ?? []).map((id) => {
+    const previous = previousById.get(id);
+    if (previous && !refreshFromRoster) {
+      return {
+        playerId: previous.playerId,
+        playerName: previous.playerName,
+      };
+    }
     const player = byId.get(id);
-    return player ? snapshotMember(player) : { playerId: id, playerName: '' };
+    if (player) return snapshotMember(player);
+    if (previous) {
+      return {
+        playerId: previous.playerId,
+        playerName: previous.playerName,
+      };
+    }
+    return { playerId: id, playerName: '' };
   });
 }
 
@@ -225,7 +258,7 @@ function lockedResult(session) {
   return null;
 }
 
-function validateDraftTeamSet(teams, format, roster) {
+function validateDraftTeamSet(teams, format, roster, existingMemberIds = []) {
   const formatResult = validateFormat(format);
   if (!formatResult.ok) return formatResult;
 
@@ -246,7 +279,7 @@ function validateDraftTeamSet(teams, format, roster) {
   const errors = [];
   teams.forEach((team, index) => {
     const otherTeams = teams.filter((_, otherIndex) => otherIndex !== index);
-    const result = validateTeam(team, format, roster, otherTeams);
+    const result = validateTeam(team, format, roster, otherTeams, { existingMemberIds });
     if (!result.ok) {
       errors.push(
         ...result.errors.map((item) => ({
@@ -262,7 +295,8 @@ function validateDraftTeamSet(teams, format, roster) {
 }
 
 function commitTeams(document, session, nextTeams, roster, now, team) {
-  const setResult = validateDraftTeamSet(nextTeams, session.format, roster);
+  const existingMemberIds = [...collectSessionSnapshotPlayerIds(session)];
+  const setResult = validateDraftTeamSet(nextTeams, session.format, roster, existingMemberIds);
   if (!setResult.ok) return fail(setResult.errors);
 
   const updatedSession = withUpdatedTeams(session, nextTeams, now);
@@ -316,6 +350,129 @@ export function appendDraftTeamSession(document, input, options) {
     },
     session,
   };
+}
+
+export function updateTeamSessionDetails(document, sessionId, changes = {}, options = {}) {
+  const schemaError = requireV2Document(document);
+  if (schemaError) return schemaError;
+
+  const session = findSession(document, sessionId);
+  if (!session) {
+    return fail([error('SESSION_NOT_FOUND', 'Encontro não encontrado.')]);
+  }
+
+  const nextDate = Object.prototype.hasOwnProperty.call(changes, 'date') ? changes.date : session.date;
+  const dateResult = validateDate(nextDate);
+  if (!dateResult.ok) return fail(dateResult.errors);
+
+  const nextName = Object.prototype.hasOwnProperty.call(changes, 'name')
+    ? normalizeSessionName(changes.name)
+    : session.name;
+
+  const wantsFormatChange =
+    Object.prototype.hasOwnProperty.call(changes, 'teamSize') ||
+    Object.prototype.hasOwnProperty.call(changes, 'teamCount') ||
+    Object.prototype.hasOwnProperty.call(changes, 'format');
+
+  let nextFormat = {
+    teamSize: session.format.teamSize,
+    teamCount: session.format.teamCount,
+  };
+
+  if (wantsFormatChange) {
+    if (changes.format && typeof changes.format === 'object') {
+      nextFormat = {
+        teamSize: Object.prototype.hasOwnProperty.call(changes.format, 'teamSize')
+          ? changes.format.teamSize
+          : nextFormat.teamSize,
+        teamCount: Object.prototype.hasOwnProperty.call(changes.format, 'teamCount')
+          ? changes.format.teamCount
+          : nextFormat.teamCount,
+      };
+    }
+    if (Object.prototype.hasOwnProperty.call(changes, 'teamSize')) {
+      nextFormat.teamSize = changes.teamSize;
+    }
+    if (Object.prototype.hasOwnProperty.call(changes, 'teamCount')) {
+      nextFormat.teamCount = changes.teamCount;
+    }
+
+    const formatResult = validateFormat(nextFormat);
+    if (!formatResult.ok) return fail(formatResult.errors);
+
+    if (session.status !== 'draft') {
+      return fail([
+        error('FORMAT_LOCKED', 'O formato não pode mudar após a geração dos jogos.', {
+          field: 'format',
+        }),
+      ]);
+    }
+  }
+
+  const formatChanged =
+    nextFormat.teamSize !== session.format.teamSize || nextFormat.teamCount !== session.format.teamCount;
+  const dateChanged = nextDate !== session.date;
+  const nameChanged = nextName !== session.name;
+
+  if (!formatChanged && !dateChanged && !nameChanged) {
+    return {
+      ok: true,
+      errors: [],
+      unchanged: true,
+      document,
+      session,
+      team: null,
+    };
+  }
+
+  const hasTeams = Array.isArray(session.teams) && session.teams.length > 0;
+  if (formatChanged && hasTeams && !options.formatChangeConfirmed) {
+    return fail([
+      error(FORMAT_CHANGE_CONFIRMATION_REQUIRED, FORMAT_CHANGE_CONFIRMATION_MESSAGE),
+    ]);
+  }
+
+  const clock = options.now ?? (() => new Date());
+  const updatedSession = cloneV2Session({
+    ...session,
+    date: nextDate,
+    name: nextName,
+    format: nextFormat,
+    teams: formatChanged && hasTeams ? [] : session.teams,
+    rounds: formatChanged && hasTeams ? [] : session.rounds,
+    updatedAt: clock().toISOString(),
+  });
+
+  const nextDocument = replaceSession(document, sessionId, updatedSession);
+  const validation = validateV2Document(nextDocument);
+  if (!validation.ok) return fail(validation.errors);
+
+  return succeed({ document: nextDocument, session: updatedSession });
+}
+
+export function deleteTeamSession(document, sessionId, options = {}) {
+  const schemaError = requireV2Document(document);
+  if (schemaError) return schemaError;
+
+  const session = findSession(document, sessionId);
+  if (!session) {
+    return fail([error('SESSION_NOT_FOUND', 'Encontro não encontrado.')]);
+  }
+
+  if (!options.deleteConfirmed) {
+    return fail([
+      error(DELETE_TEAM_SESSION_CONFIRMATION_REQUIRED, DELETE_TEAM_SESSION_CONFIRMATION_MESSAGE),
+    ]);
+  }
+
+  const nextDocument = {
+    schemaVersion: TEAM_SESSION_SCHEMA_VERSION,
+    sessions: (document.sessions ?? []).filter((item) => item?.id !== sessionId),
+  };
+  const validation = validateV2Document(nextDocument);
+  if (!validation.ok) return fail(validation.errors);
+
+  return succeed({ document: nextDocument, session: null });
 }
 
 export function takenTeamPlayerIds(teams, ignoredTeamId) {
@@ -402,7 +559,7 @@ export function updateSessionTeam(document, sessionId, teamId, memberIds = [], o
 
   const team = {
     id: teamId,
-    members: membersFromIds(memberIds ?? [], roster),
+    members: membersFromIds(memberIds ?? [], roster, currentTeams[teamIndex]?.members),
   };
   const nextTeams = currentTeams.map((item, index) => (index === teamIndex ? team : item));
   return commitTeams(document, session, nextTeams, roster, now, team);
@@ -451,7 +608,9 @@ function teamsReadyForRounds(session, roster) {
   if (Array.isArray(session.rounds) && session.rounds.length > 0) return false;
   if (!Array.isArray(session.teams) || session.teams.length < 2) return false;
 
-  const setResult = validateSessionTeams(session.teams, session.format, roster);
+  const setResult = validateSessionTeams(session.teams, session.format, roster, {
+    existingMemberIds: collectSessionSnapshotPlayerIds(session),
+  });
   if (!setResult.ok) return false;
   return session.teams.every((team) => Array.isArray(team?.members) && team.members.length >= 1);
 }
@@ -485,7 +644,9 @@ function generationBlockers(session, roster) {
     ]);
   }
 
-  const setResult = validateSessionTeams(teams, session.format, roster);
+  const setResult = validateSessionTeams(teams, session.format, roster, {
+    existingMemberIds: collectSessionSnapshotPlayerIds(session),
+  });
   if (!setResult.ok) return fail(setResult.errors);
 
   if (teams.some((team) => !Array.isArray(team?.members) || team.members.length < 1)) {
@@ -923,8 +1084,12 @@ export function describeMatchLineupDraft({
     return fail([error('LINEUP_INVALID', 'A escalação precisa ser uma lista de jogadores.')]);
   }
 
-  const lineupA = membersFromIds(lineupAPlayerIds, roster);
-  const lineupB = membersFromIds(lineupBPlayerIds, roster);
+  const lineupA = membersFromIds(lineupAPlayerIds, roster, match?.lineupA, {
+    refreshFromRoster: false,
+  });
+  const lineupB = membersFromIds(lineupBPlayerIds, roster, match?.lineupB, {
+    refreshFromRoster: false,
+  });
   const proposed = {
     teamAId: match?.teamAId,
     teamBId: match?.teamBId,
@@ -932,7 +1097,9 @@ export function describeMatchLineupDraft({
     lineupB,
   };
 
-  const matchResult = validateMatchLineups(proposed, format, teams, roster);
+  const matchResult = validateMatchLineups(proposed, format, teams, roster, {
+    existingMemberIds: collectSessionSnapshotPlayerIds({ teams, rounds: [{ matches: [match] }] }),
+  });
   const assignmentErrors = validateLineupTeamAssignments(proposed, teams);
   const errors = [...(matchResult.ok ? [] : matchResult.errors), ...assignmentErrors];
   if (errors.length > 0) return fail(errors);

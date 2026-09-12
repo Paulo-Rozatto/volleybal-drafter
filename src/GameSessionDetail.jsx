@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import AutomaticTeamBuilder from './AutomaticTeamBuilder.jsx';
 import TeamBuilder from './TeamBuilder.jsx';
 import RoundBoard from './RoundBoard.jsx';
@@ -40,63 +40,7 @@ import {
 } from './teamGameSessions.js';
 import { INVALID_CACHE_CONFIRMATION_REQUIRED } from './persistence/sessionOperations.js';
 
-function ConfirmDialog({ titleId, title, message, confirmLabel, onConfirm, onCancel }) {
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') onCancel?.();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onCancel]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)' }}
-      onClick={onCancel}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="w-full max-w-md rounded-xl border p-4 space-y-3 shadow-2xl"
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          borderColor: 'var(--border-color)',
-          color: 'var(--text-main)',
-        }}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h3 id={titleId} className="font-bold text-base">
-          {title}
-        </h3>
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          {message}
-        </p>
-        <button
-          type="button"
-          onClick={onConfirm}
-          className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer"
-          style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
-        >
-          {confirmLabel}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="w-full font-bold py-3 rounded-xl border cursor-pointer"
-          style={{
-            backgroundColor: 'var(--bg-subtle)',
-            borderColor: 'var(--border-color)',
-            color: 'var(--text-main)',
-          }}
-        >
-          Cancelar
-        </button>
-      </div>
-    </div>
-  );
-}
+import ConfirmDialog from './ConfirmDialog.jsx';
 
 function pluralize(count, singular, plural) {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -108,6 +52,10 @@ export default function GameSessionDetail({
   syncPanel,
   onBack,
   onApplyOperation,
+  onEditSession,
+  onRequestDelete,
+  editButtonRef,
+  deleteButtonRef,
 }) {
   const [teamMode, setTeamMode] = useState('manual');
   const [confirmGenerate, setConfirmGenerate] = useState(false);
@@ -230,6 +178,39 @@ export default function GameSessionDetail({
       </button>
 
       <h2 className="text-xl font-bold">{sessionDisplayName(session)}</h2>
+
+      <div className="flex gap-2">
+        {onEditSession && (
+          <button
+            ref={editButtonRef}
+            type="button"
+            onClick={onEditSession}
+            className="flex-1 font-bold py-2 rounded-xl border text-sm cursor-pointer"
+            style={{
+              backgroundColor: 'var(--bg-subtle)',
+              borderColor: 'var(--border-color)',
+              color: 'var(--text-main)',
+            }}
+          >
+            Editar encontro
+          </button>
+        )}
+        {onRequestDelete && (
+          <button
+            ref={deleteButtonRef}
+            type="button"
+            onClick={onRequestDelete}
+            className="flex-1 font-bold py-2 rounded-xl border text-sm cursor-pointer underline"
+            style={{
+              backgroundColor: 'transparent',
+              borderColor: 'var(--border-color)',
+              color: 'var(--text-main)',
+            }}
+          >
+            Excluir encontro
+          </button>
+        )}
+      </div>
 
       {syncPanel}
 

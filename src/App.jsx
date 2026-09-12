@@ -5,6 +5,7 @@ import GistSyncPanel from './GistSyncPanel';
 import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
 import { appendDraftTeamSession } from './teamGameSessions.js';
+import { createPlayer, deletePlayer, updatePlayer } from './players.js';
 import { calcTeamBalancePenalty, prepareTeamDraftPool } from './domain/teamBalance.js';
 import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
 import {
@@ -30,6 +31,7 @@ import {
   INVALID_CACHE_CONFIRMATION_MESSAGE,
   INVALID_CACHE_CONFIRMATION_REQUIRED,
 } from './persistence/sessionOperations.js';
+import { applyPlayersOperation } from './persistence/playerOperations.js';
 
 
 const INITIAL_ROSTER = [];
@@ -44,6 +46,7 @@ export default function App() {
     const saved = localStorage.getItem('volleyPlayers');
     return saved ? JSON.parse(saved) : INITIAL_ROSTER;
   });
+  const playersRef = useRef(players);
 
   const [draftHistory, setDraftHistory] = useState(() => {
     const saved = localStorage.getItem('volleyDrafts');
@@ -103,11 +106,30 @@ export default function App() {
     localStorage.setItem('volleyDrafts', JSON.stringify(draftHistory));
   }, [draftHistory]);
 
-  const updatePersistedPlayers = (updater) => {
-    setPlayers(updater);
-    markPendingGistChanges();
-    setHasPendingGistChanges(true);
-  };
+  const applyPlayersChange = (operation) =>
+    applyPlayersOperation({
+      getPlayers: () => playersRef.current,
+      setPlayers: (next) => {
+        playersRef.current = next;
+        setPlayers(next);
+      },
+      persistPlayers: (next) => {
+        try {
+          localStorage.setItem('volleyPlayers', JSON.stringify(next));
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: error.message || 'Não foi possível salvar o cache local de jogadores.',
+          };
+        }
+      },
+      markPending: () => {
+        markPendingGistChanges();
+        setHasPendingGistChanges(true);
+      },
+      operation,
+    });
 
   const commitSessionsDocument = (nextDocument) => {
     sessionsRef.current = nextDocument;
@@ -215,7 +237,7 @@ export default function App() {
         );
         const result = applySuccessfulGistLoad({
           strategy,
-          localPlayers: players,
+          localPlayers: playersRef.current,
           localGameSessions: sessionsRef.current,
           remotePlayers: remote.players,
           remoteGameSessions: remoteSessions,
@@ -224,6 +246,7 @@ export default function App() {
 
         if (result.replaceLocal) {
           const persistResult = persistLocalGameSessions(result.gameSessions);
+          playersRef.current = result.players;
           setPlayers(result.players);
           commitSessionsDocument(result.gameSessions);
           cacheInvalidRef.current = false;
@@ -246,7 +269,7 @@ export default function App() {
         const failure = applyGistLoadFailure({
           error: err,
           hasPendingGistChanges,
-          localPlayers: players,
+          localPlayers: playersRef.current,
           localGameSessions: sessionsRef.current,
         });
         setSyncStatus(failure.syncStatus);
@@ -289,7 +312,7 @@ export default function App() {
         setIsSyncing(true);
         setSyncStatus('Verificando o Gist...');
         const result = await saveGistState({
-          players,
+          players: playersRef.current,
           gameSessions: sessionsRef.current,
           expectedRevision: gistRevisionRef.current,
           getToken: async () => {
@@ -326,7 +349,7 @@ export default function App() {
 
     const cleanText = normalize(pastedText);
 
-    const matched = players.filter((p) => {
+    const matched = playersRef.current.filter((p) => {
       const cleanName = normalize(p.name);
       return cleanName.length >= 2 && cleanText.includes(cleanName);
     });
@@ -335,19 +358,26 @@ export default function App() {
   };
 
   // --- State Updates ---
-  const handleUpdateSessionPlayer = (id, field, value) => {
-    setSessionPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
-    updatePersistedPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
-  };
+  const handleCreatePlayer = (input) => applyPlayersChange((current) => createPlayer(current, input));
 
-  const handleUpdatePlayer = (id, field, value) => {
-    updatePersistedPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
-    setSessionPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+  const handleUpdatePlayer = (id, changes) => {
+    const result = applyPlayersChange((current) => updatePlayer(current, id, changes));
+    if (result?.ok && result.player) {
+      setSessionPlayers((prev) =>
+        prev.map((player) => (player.id === id ? { ...player, ...result.player } : player))
+      );
+    }
+    return result;
   };
 
   const handleDeletePlayer = (id) => {
-    updatePersistedPlayers((prev) => prev.filter((p) => p.id !== id));
-    setSessionPlayers((prev) => prev.filter((p) => p.id !== id));
+    const result = applyPlayersChange((current) =>
+      deletePlayer(current, id, { deleteConfirmed: true })
+    );
+    if (result?.ok) {
+      setSessionPlayers((prev) => prev.filter((player) => player.id !== id));
+    }
+    return result;
   };
 
   const handleRemoveFromSession = (id) => {
@@ -358,16 +388,16 @@ export default function App() {
     e.preventDefault();
     if (!newPlayerName.trim()) return;
 
-    const newP = {
-      id: crypto.randomUUID(),
-      name: newPlayerName.trim(),
-      score: 3,
-      gender: 'F',
-      height: 'short',
-    };
-
-    updatePersistedPlayers((prev) => [...prev, newP]);
-    setSessionPlayers((prev) => [...prev, newP]);
+    const result = applyPlayersChange((current) =>
+      createPlayer(current, {
+        name: newPlayerName.trim(),
+        score: 3,
+        gender: 'F',
+        height: 'short',
+      })
+    );
+    if (!result?.ok) return;
+    setSessionPlayers((prev) => [...prev, result.player]);
     setNewPlayerName('');
   };
 
@@ -569,8 +599,8 @@ export default function App() {
                   </div>
 
                   <PlayerList
+                    variant="session"
                     players={sessionPlayers}
-                    onUpdatePlayer={handleUpdateSessionPlayer}
                     onDeletePlayer={handleRemoveFromSession}
                   />
                 </div>
@@ -730,6 +760,7 @@ export default function App() {
 
               <PlayerList
                 players={players}
+                onCreatePlayer={handleCreatePlayer}
                 onUpdatePlayer={handleUpdatePlayer}
                 onDeletePlayer={handleDeletePlayer}
               />

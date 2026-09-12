@@ -51,6 +51,15 @@ export function applyGameSessionsOperation({
     return result;
   }
 
+  if (result.unchanged) {
+    return {
+      ...result,
+      persistOk: true,
+      persistError: null,
+      cacheCleared: false,
+    };
+  }
+
   const persistResult = persistDocument(result.document);
   if (!persistResult?.ok) {
     if (!cacheInvalid) {

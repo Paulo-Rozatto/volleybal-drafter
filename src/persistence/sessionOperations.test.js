@@ -7,7 +7,7 @@ import {
   INVALID_CACHE_CONFIRMATION_REQUIRED,
 } from './sessionOperations.js';
 import { persistLocalGameSessions } from './syncHelpers.js';
-import { addSessionTeam, appendDraftTeamSession } from '../teamGameSessions.js';
+import { addSessionTeam, appendDraftTeamSession, updateTeamSessionDetails } from '../teamGameSessions.js';
 
 const ISO = '2026-09-12T18:00:00.000Z';
 const NOW = () => new Date(ISO);
@@ -208,5 +208,33 @@ describe('applyGameSessionsOperation', () => {
       volleyPlayers: '[{"id":"p1"}]',
       volleyDrafts: '[{"id":"d1"}]',
     });
+  });
+
+  it('edição sem mudança não grava cache nem marca pendência', () => {
+    const storage = createMemoryStorage();
+    const created = appendDraftTeamSession(
+      createEmptyGameSessionsDocument(),
+      { date: '2026-09-12', name: 'Arena' },
+      { idGenerator: () => 'session-1', now: NOW }
+    );
+    const harness = createHarness({
+      document: created.document,
+      storage,
+    });
+
+    const result = harness.apply((document) =>
+      updateTeamSessionDetails(document, 'session-1', {
+        date: '2026-09-12',
+        name: 'Arena',
+        teamSize: 2,
+        teamCount: 2,
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.unchanged).toBe(true);
+    expect(harness.pending()).toBe(false);
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBeNull();
+    expect(harness.current()).toBe(created.document);
   });
 });
