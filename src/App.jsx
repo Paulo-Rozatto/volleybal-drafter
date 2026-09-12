@@ -105,7 +105,7 @@ export default function App() {
       date: input.date,
       name: input.name,
       format: {
-        teamSize: 2,
+        teamSize: input.teamSize,
         teamCount: input.teamCount,
       },
     });

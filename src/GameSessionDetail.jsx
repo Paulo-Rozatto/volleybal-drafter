@@ -2,16 +2,25 @@ import React, { useEffect, useState } from 'react';
 import AutomaticTeamBuilder from './AutomaticTeamBuilder.jsx';
 import TeamBuilder from './TeamBuilder.jsx';
 import RoundBoard from './RoundBoard.jsx';
+import { generateRoundsBlockedReason } from './teamFormationUi.js';
+import {
+  alterTeamsLabel,
+  drawTeamsLabel,
+  formatFormatLabel,
+  formatTeamCountPhrase,
+  generateRoundsConfirmationMessage,
+  resetToDraftConfirmationMessage,
+  resolveTeamSize,
+  teamUnitNoun,
+} from './teamPresentation.js';
 import {
   addSessionTeam,
   canEditSessionTeams,
   canGenerateTeamSessionRounds,
   clearTeamSessionMatchScore,
   formatSessionDate,
-  GENERATE_TEAM_ROUNDS_CONFIRMATION_MESSAGE,
   removeSessionTeam,
   replaceSessionTeams,
-  RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE,
   resetTeamSessionToDraftForTeamEditing,
   sessionDisplayName,
   sessionListStats,
@@ -21,7 +30,6 @@ import {
   teamSessionRoundSummary,
   translateSessionStatus,
   updateSessionTeam,
-  usesDoublesLabels,
 } from './teamGameSessions.js';
 
 function ConfirmDialog({ titleId, title, message, confirmLabel, onConfirm, onCancel }) {
@@ -99,17 +107,15 @@ export default function GameSessionDetail({
   const [confirmReset, setConfirmReset] = useState(false);
   const [actionError, setActionError] = useState(null);
 
-  const doubles = usesDoublesLabels(session);
-  const unit = doubles ? 'dupla' : 'time';
-  const units = doubles ? 'duplas' : 'times';
+  const teamSize = resolveTeamSize(session);
+  const units = teamUnitNoun(teamSize, 2);
   const { teamCount } = sessionListStats(session);
-  const expectedTeamCount = session?.format?.teamCount ?? 2;
   const { roundCount, matchCount, completedCount, pendingCount, invalidCount } =
     teamSessionRoundSummary(session);
   const editable = canEditSessionTeams(session);
   const mode = editable ? teamMode : 'manual';
   const canGenerate = canGenerateTeamSessionRounds(session, players);
-  const incompleteRoster = teamCount !== expectedTeamCount;
+  const generateBlockedReason = editable && !canGenerate ? generateRoundsBlockedReason(session) : null;
   const inProgress = session?.status === 'in_progress';
   const readyToFinalize = teamSessionIsReadyToFinalize(session);
 
@@ -197,10 +203,10 @@ export default function GameSessionDetail({
         </p>
         <p className="text-sm font-semibold">{translateSessionStatus(session.status)}</p>
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-          Formato {session?.format?.teamSize ?? 2}x{session?.format?.teamSize ?? 2}
+          Formato {formatFormatLabel(teamSize)}
         </p>
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-          {pluralize(teamCount, unit, units)}
+          {formatTeamCountPhrase(teamCount, teamSize)}
         </p>
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
           {pluralize(roundCount, 'rodada', 'rodadas')} · {pluralize(matchCount, 'partida', 'partidas')}
@@ -247,7 +253,7 @@ export default function GameSessionDetail({
               color: mode === 'auto' ? 'var(--text-inverse)' : 'var(--text-muted)',
             }}
           >
-            Sortear {units}
+            {drawTeamsLabel(teamSize)}
           </button>
         </div>
       )}
@@ -273,16 +279,16 @@ export default function GameSessionDetail({
         roster={players}
         showForm={mode === 'manual'}
         onRequestEdit={() => setTeamMode('manual')}
-        onAddTeam={(playerA, playerB) =>
+        onAddTeam={(memberIds) =>
           applyTeamChange(
-            addSessionTeam(sessionsDocument, session.id, [playerA?.id, playerB?.id], {
+            addSessionTeam(sessionsDocument, session.id, memberIds, {
               roster: players,
             })
           )
         }
-        onUpdateTeam={(teamId, playerA, playerB) =>
+        onUpdateTeam={(teamId, memberIds) =>
           applyTeamChange(
-            updateSessionTeam(sessionsDocument, session.id, teamId, [playerA?.id, playerB?.id], {
+            updateSessionTeam(sessionsDocument, session.id, teamId, memberIds, {
               roster: players,
             })
           )
@@ -296,9 +302,9 @@ export default function GameSessionDetail({
 
       {editable && (
         <div className="space-y-2">
-          {incompleteRoster && (
+          {generateBlockedReason && (
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Forme todas as {units} para gerar os jogos.
+              {generateBlockedReason}
             </p>
           )}
           {actionError && !confirmGenerate && (
@@ -348,7 +354,7 @@ export default function GameSessionDetail({
               color: 'var(--text-main)',
             }}
           >
-            Alterar {units}
+            {alterTeamsLabel(teamSize)}
           </button>
         </div>
       )}
@@ -357,7 +363,7 @@ export default function GameSessionDetail({
         <ConfirmDialog
           titleId="generate-rounds-title"
           title="Gerar rodadas"
-          message={GENERATE_TEAM_ROUNDS_CONFIRMATION_MESSAGE}
+          message={generateRoundsConfirmationMessage(teamSize)}
           confirmLabel="Gerar rodadas"
           onConfirm={confirmGenerateRounds}
           onCancel={() => setConfirmGenerate(false)}
@@ -367,8 +373,8 @@ export default function GameSessionDetail({
       {confirmReset && (
         <ConfirmDialog
           titleId="reset-draft-title"
-          title={`Alterar ${units}`}
-          message={RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE}
+          title={alterTeamsLabel(teamSize)}
+          message={resetToDraftConfirmationMessage(teamSize)}
           confirmLabel={`Apagar rodadas e alterar ${units}`}
           onConfirm={confirmResetToDraft}
           onCancel={() => setConfirmReset(false)}

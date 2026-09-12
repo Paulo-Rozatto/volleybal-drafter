@@ -1,10 +1,30 @@
 import React, { useState } from 'react';
 import {
+  canSelectAnotherMember,
+  canSubmitManualTeam,
+  manualTeamSubmitError,
+  needsEmptyTeamConfirmation,
+  requiresExactPair,
+  toggleSelectedPlayer,
+} from './teamFormationUi.js';
+import {
+  EMPTY_TEAM_CONFIRM_LABEL,
+  EMPTY_TEAM_CONFIRMATION_MESSAGE,
+  addTeamActionLabel,
+  allTeamsFormedMessage,
+  formedTeamsHeading,
+  formatSessionTeamLabel,
+  noAvailablePlayersMessage,
+  resolveTeamSize,
+  selectedCountLabel,
+  teamUnitSingular,
+  teamsLockedMessage,
+} from './teamPresentation.js';
+import {
   availablePlayersForTeams,
   canEditSessionTeams,
   filterPlayersByName,
   teamMembersForEdit,
-  usesDoublesLabels,
 } from './teamGameSessions.js';
 
 function PlayerSlot({ label, player, onClear }) {
@@ -47,27 +67,27 @@ export default function TeamBuilder({
   onRemoveTeam,
 }) {
   const [query, setQuery] = useState('');
-  const [slotA, setSlotA] = useState(null);
-  const [slotB, setSlotB] = useState(null);
+  const [selected, setSelected] = useState([]);
   const [editingTeamId, setEditingTeamId] = useState(null);
   const [error, setError] = useState(null);
   const [pendingRemovalId, setPendingRemovalId] = useState(null);
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
   const [formVisible, setFormVisible] = useState(showForm);
 
   if (!showForm && formVisible) {
     setFormVisible(false);
-    setSlotA(null);
-    setSlotB(null);
+    setSelected([]);
     setEditingTeamId(null);
     setError(null);
     setQuery('');
+    setConfirmEmpty(false);
   } else if (showForm && !formVisible) {
     setFormVisible(true);
   }
 
-  const doubles = usesDoublesLabels(session);
-  const unit = doubles ? 'dupla' : 'time';
-  const units = doubles ? 'duplas' : 'times';
+  const teamSize = resolveTeamSize(session);
+  const doubles = requiresExactPair(teamSize);
+  const unit = teamUnitSingular(teamSize);
   const editable = canEditSessionTeams(session);
   const teams = session?.teams ?? [];
   const teamCount = session?.format?.teamCount ?? 2;
@@ -77,87 +97,87 @@ export default function TeamBuilder({
     String(left.name ?? '').localeCompare(String(right.name ?? ''), 'pt-BR', { sensitivity: 'base' })
   );
   const showEditor = showForm && (canAddMore || Boolean(editingTeamId));
-
-  const selectedIds = new Set([slotA?.id, slotB?.id].filter(Boolean));
+  const selectedIds = new Set(selected.map((player) => player?.id).filter(Boolean));
 
   const resetSelection = () => {
-    setSlotA(null);
-    setSlotB(null);
+    setSelected([]);
     setEditingTeamId(null);
     setError(null);
     setQuery('');
+    setConfirmEmpty(false);
   };
 
   const togglePlayer = (player) => {
     setError(null);
-    if (slotA?.id === player.id) {
-      setSlotA(null);
-      return;
-    }
-    if (slotB?.id === player.id) {
-      setSlotB(null);
-      return;
-    }
-    if (!slotA) {
-      setSlotA(player);
-      return;
-    }
-    if (!slotB) {
-      setSlotB(player);
-    }
+    setConfirmEmpty(false);
+    setSelected((current) => toggleSelectedPlayer(current, player, teamSize));
   };
 
   const applyResult = (result, { resetOnSuccess } = { resetOnSuccess: true }) => {
     if (!result?.ok) {
-      setError(result?.errors?.[0]?.message || `Não foi possível atualizar a ${unit}.`);
+      setError(result?.errors?.[0]?.message || `Não foi possível atualizar ${doubles ? 'a dupla' : 'o time'}.`);
       return false;
     }
     if (resetOnSuccess) resetSelection();
     setPendingRemovalId(null);
+    setConfirmEmpty(false);
     return true;
   };
 
-  const handleSubmit = () => {
-    if (!slotA || !slotB) {
-      setError(`Selecione dois jogadores para formar a ${unit}.`);
-      return;
-    }
+  const submitMembers = (memberIds) => {
     const result = editingTeamId
-      ? onUpdateTeam?.(editingTeamId, slotA, slotB)
-      : onAddTeam?.(slotA, slotB);
+      ? onUpdateTeam?.(editingTeamId, memberIds)
+      : onAddTeam?.(memberIds);
     applyResult(result);
   };
 
+  const handleSubmit = ({ emptyConfirmed = false } = {}) => {
+    const selectedCount = selected.length;
+    const submitError = manualTeamSubmitError(teamSize, selectedCount);
+    if (submitError) {
+      setError(submitError);
+      return;
+    }
+    if (!canSubmitManualTeam(teamSize, selectedCount)) {
+      setError(`Não foi possível atualizar ${doubles ? 'a dupla' : 'o time'}.`);
+      return;
+    }
+    if (!editingTeamId && needsEmptyTeamConfirmation(teamSize, selectedCount) && !emptyConfirmed) {
+      setConfirmEmpty(true);
+      return;
+    }
+    submitMembers(selected.map((player) => player.id));
+  };
+
   const startEdit = (team) => {
-    const [first, second] = teamMembersForEdit(team, roster);
     setEditingTeamId(team.id);
-    setSlotA(first ?? null);
-    setSlotB(second ?? null);
+    setSelected(teamMembersForEdit(team, roster));
     setError(null);
     setPendingRemovalId(null);
+    setConfirmEmpty(false);
     onRequestEdit?.();
   };
+
+  const teamCardLabel = (team, index) => formatSessionTeamLabel(team, { teamSize, index });
 
   if (!editable) {
     return (
       <div className="space-y-3">
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Este encontro não está em rascunho ou já possui rodadas. As {units} não podem ser alteradas.
+          {teamsLockedMessage(teamSize)}
         </p>
         {teams.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
             Nenhuma {unit} formada neste encontro.
           </p>
         ) : (
-          teams.map((team) => (
+          teams.map((team, index) => (
             <div
               key={team.id}
               className="p-3 rounded-xl border"
               style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
             >
-              <p className="text-sm font-semibold">
-                {(team.members ?? []).map((member) => member.playerName).join(' + ')}
-              </p>
+              <p className="text-sm font-semibold break-words">{teamCardLabel(team, index)}</p>
             </div>
           ))
         )}
@@ -176,10 +196,51 @@ export default function TeamBuilder({
           {editingTeamId ? `Alterar ${unit}` : `Montar ${unit}`}
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <PlayerSlot label="Jogador 1" player={slotA} onClear={() => setSlotA(null)} />
-          <PlayerSlot label="Jogador 2" player={slotB} onClear={() => setSlotB(null)} />
-        </div>
+        {doubles ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <PlayerSlot
+              label="Jogador 1"
+              player={selected[0] ?? null}
+              onClear={() => setSelected((current) => current.filter((_, index) => index !== 0))}
+            />
+            <PlayerSlot
+              label="Jogador 2"
+              player={selected[1] ?? null}
+              onClear={() => setSelected((current) => current.filter((_, index) => index !== 1))}
+            />
+          </div>
+        ) : (
+          <>
+            <p className="text-sm font-semibold">{selectedCountLabel(selected.length, teamSize)}</p>
+            <div
+              className="rounded-xl border p-3 space-y-2"
+              style={{ backgroundColor: 'var(--bg-app)', borderColor: 'var(--border-color)' }}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                Prévia
+              </p>
+              {selected.length === 0 ? (
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                  Nenhum jogador selecionado
+                </p>
+              ) : (
+                selected.map((player) => (
+                  <div key={player.id} className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold truncate">{player.name}</p>
+                    <button
+                      type="button"
+                      onClick={() => togglePlayer(player)}
+                      className="text-xs font-bold px-2 py-1 rounded-lg cursor-pointer"
+                      style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
 
         <input
           type="search"
@@ -200,23 +261,25 @@ export default function TeamBuilder({
             style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}
           >
             {available.length === 0
-              ? `Não há jogadores disponíveis para novas ${units}.`
+              ? noAvailablePlayersMessage(teamSize)
               : 'Nenhum jogador encontrado com essa busca.'}
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
             {visiblePlayers.map((player) => {
-              const selected = selectedIds.has(player.id);
+              const isSelected = selectedIds.has(player.id);
+              const disabled = !isSelected && !canSelectAnotherMember(teamSize, selected.length);
               return (
                 <button
                   key={player.id}
                   type="button"
                   onClick={() => togglePlayer(player)}
-                  className="w-full text-left px-3 py-3 rounded-xl border font-semibold text-sm cursor-pointer"
+                  disabled={disabled}
+                  className="w-full text-left px-3 py-3 rounded-xl border font-semibold text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
-                    backgroundColor: selected ? 'var(--primary)' : 'var(--bg-app)',
-                    color: selected ? 'var(--text-inverse)' : 'var(--text-main)',
-                    borderColor: selected ? 'var(--primary)' : 'var(--border-color)',
+                    backgroundColor: isSelected ? 'var(--primary)' : 'var(--bg-app)',
+                    color: isSelected ? 'var(--text-inverse)' : 'var(--text-main)',
+                    borderColor: isSelected ? 'var(--primary)' : 'var(--border-color)',
                   }}
                 >
                   {player.name}
@@ -231,11 +294,11 @@ export default function TeamBuilder({
         <div className="flex flex-col sm:flex-row gap-2">
           <button
             type="button"
-            onClick={handleSubmit}
+            onClick={() => handleSubmit()}
             className="flex-1 font-bold py-3 rounded-xl shadow-md cursor-pointer"
             style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
           >
-            {editingTeamId ? 'Salvar alteração' : `Adicionar ${unit}`}
+            {addTeamActionLabel(teamSize, Boolean(editingTeamId))}
           </button>
           {editingTeamId && (
             <button
@@ -252,37 +315,63 @@ export default function TeamBuilder({
             </button>
           )}
         </div>
+
+        {confirmEmpty && (
+          <div className="space-y-2 pt-1">
+            <p className="text-xs font-semibold text-red-500">{EMPTY_TEAM_CONFIRMATION_MESSAGE}</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => handleSubmit({ emptyConfirmed: true })}
+                className="flex-1 font-bold py-2 rounded-xl text-sm cursor-pointer"
+                style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+              >
+                {EMPTY_TEAM_CONFIRM_LABEL}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmEmpty(false)}
+                className="flex-1 font-bold py-2 rounded-xl border text-sm cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--bg-subtle)',
+                  borderColor: 'var(--border-color)',
+                  color: 'var(--text-main)',
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       )}
 
       {!canAddMore && showForm && !editingTeamId && (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Todas as {units} já foram formadas ({teams.length}/{teamCount}).
+          {allTeamsFormedMessage(teams.length, teamCount, teamSize)}
         </p>
       )}
 
       <div className="space-y-2">
-        <h3 className="font-bold text-sm">
-          {doubles
-            ? `Duplas formadas (${teams.length}/${teamCount})`
-            : `Times formados (${teams.length}/${teamCount})`}
-        </h3>
+        <h3 className="font-bold text-sm">{formedTeamsHeading(teams.length, teamCount, teamSize)}</h3>
         {teams.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
             {showForm
-              ? `Nenhuma ${unit} ainda. Selecione dois jogadores e toque em “Adicionar ${unit}”.`
-              : `Nenhuma ${unit} ainda.`}
+              ? doubles
+                ? 'Nenhuma dupla ainda. Selecione dois jogadores e toque em “Adicionar dupla”.'
+                : 'Nenhum time ainda. Selecione os jogadores e toque em “Adicionar time”.'
+              : doubles
+                ? 'Nenhuma dupla ainda.'
+                : 'Nenhum time ainda.'}
           </p>
         ) : (
-          teams.map((team) => (
+          teams.map((team, index) => (
             <div
               key={team.id}
               className="p-3 rounded-xl border space-y-2"
               style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
             >
-              <p className="text-sm font-semibold">
-                {(team.members ?? []).map((member) => member.playerName).join(' + ')}
-              </p>
+              <p className="text-sm font-semibold break-words">{teamCardLabel(team, index)}</p>
               <div className="flex gap-2">
                 <button
                   type="button"

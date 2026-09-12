@@ -1,28 +1,38 @@
 import { isMatchCompleted, isMatchPending } from './domain/sessionValidation.js';
+import {
+  formatDoublesNames,
+  formatMatchSideLabel,
+  formatSessionTeamLabel,
+  memberNames,
+  missingTeamLabel,
+} from './teamPresentation.js';
 
-export const MISSING_TEAM_LABEL = 'Dupla não encontrada';
+export const MISSING_TEAM_LABEL = missingTeamLabel(2);
 
-export function formatTeamLabel(team) {
-  const names = (team?.members ?? [])
-    .map((member) => (typeof member?.playerName === 'string' ? member.playerName.trim() : ''))
-    .filter((name) => name.length > 0);
-
-  if (names.length === 0) return MISSING_TEAM_LABEL;
-  return names.join(' + ');
+export function formatTeamLabel(team, { teamSize = 2, index = 0 } = {}) {
+  if (teamSize === 2) return formatDoublesNames(memberNames(team?.members));
+  return formatSessionTeamLabel(team, { teamSize, index });
 }
 
-export function resolveTeamLabel(teams, teamId) {
+export function resolveTeamLabel(teams, teamId, { teamSize = 2 } = {}) {
   if (typeof teamId !== 'string' || teamId.trim().length === 0) {
-    return MISSING_TEAM_LABEL;
+    return missingTeamLabel(teamSize);
   }
 
-  const team = (teams ?? []).find((item) => item?.id === teamId);
-  return team ? formatTeamLabel(team) : MISSING_TEAM_LABEL;
+  const index = (teams ?? []).findIndex((item) => item?.id === teamId);
+  if (index < 0) return missingTeamLabel(teamSize);
+  return formatTeamLabel(teams[index], { teamSize, index });
 }
 
-export function resolveByeLabel(teams, byeTeamId) {
+export function resolveByeLabel(teams, byeTeamId, { teamSize = 2 } = {}) {
   if (byeTeamId == null) return null;
-  return resolveTeamLabel(teams, byeTeamId);
+  return resolveTeamLabel(teams, byeTeamId, { teamSize });
+}
+
+export function resolveMatchSideLabel(match, side, teams, teamSize = 2) {
+  const lineup = side === 'A' ? match?.lineupA : match?.lineupB;
+  const teamId = side === 'A' ? match?.teamAId : match?.teamBId;
+  return formatMatchSideLabel({ lineup, teams, teamId, teamSize });
 }
 
 export function roundsInOrder(rounds) {

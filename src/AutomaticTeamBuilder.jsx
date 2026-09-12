@@ -1,11 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { generateBalancedPairs } from './domain/balancedPairs.js';
 import {
+  automaticDrawAvailable,
+  automaticDrawRequiredPlayers,
+} from './teamFormationUi.js';
+import {
+  AUTOMATIC_DRAW_UNAVAILABLE_MESSAGE,
+  drawTeamsLabel,
+  replaceTeamsConfirmationMessage,
+  resolveTeamSize,
+  teamUnitNoun,
+  teamUnitSingular,
+} from './teamPresentation.js';
+import {
   canEditSessionTeams,
   filterPlayersByName,
-  REPLACE_TEAMS_CONFIRMATION_MESSAGE,
   sessionTeamMemberIdsInRoster,
-  usesDoublesLabels,
 } from './teamGameSessions.js';
 
 export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTeams }) {
@@ -18,12 +28,13 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
   const [error, setError] = useState(null);
   const [pendingTeams, setPendingTeams] = useState(null);
 
-  const doubles = usesDoublesLabels(session);
-  const unit = doubles ? 'dupla' : 'time';
-  const units = doubles ? 'duplas' : 'times';
+  const teamSize = resolveTeamSize(session);
+  const doubles = automaticDrawAvailable(teamSize);
+  const unit = teamUnitSingular(teamSize);
+  const units = teamUnitNoun(teamSize, 2);
   const editable = canEditSessionTeams(session);
   const teamCount = session?.format?.teamCount ?? 2;
-  const requiredCount = teamCount * 2;
+  const requiredCount = automaticDrawRequiredPlayers(teamCount);
   const selectedCount = selectedIds.length;
   const exactSelection = selectedCount === requiredCount;
 
@@ -65,7 +76,7 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
   };
 
   const handleDraw = () => {
-    if (!editable) return;
+    if (!editable || !doubles) return;
 
     const selectedPlayers = selectedIds
       .map((id) => roster.find((player) => player?.id === id))
@@ -101,12 +112,26 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
 
   if (!editable) return null;
 
+  if (!doubles) {
+    return (
+      <div
+        className="p-4 rounded-xl border space-y-2"
+        style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
+      >
+        <h3 className="font-bold text-sm">{drawTeamsLabel(teamSize)}</h3>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          {AUTOMATIC_DRAW_UNAVAILABLE_MESSAGE}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
       className="p-4 rounded-xl border space-y-3"
       style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
     >
-      <h3 className="font-bold text-sm">Sortear {units}</h3>
+      <h3 className="font-bold text-sm">{drawTeamsLabel(teamSize)}</h3>
       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
         O balanceamento por nível está sempre ativo.
       </p>
@@ -238,7 +263,7 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
         className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
         style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
       >
-        Sortear {units}
+        {drawTeamsLabel(teamSize)}
       </button>
 
       {pendingTeams && (
@@ -263,7 +288,7 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
               Substituir {units}
             </h3>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              {REPLACE_TEAMS_CONFIRMATION_MESSAGE}
+              {replaceTeamsConfirmationMessage(teamSize)}
             </p>
             <button
               type="button"

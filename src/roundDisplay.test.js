@@ -5,6 +5,7 @@ import {
   matchWinningSide,
   MISSING_TEAM_LABEL,
   resolveByeLabel,
+  resolveMatchSideLabel,
   resolveTeamLabel,
   roundsInOrder,
 } from './roundDisplay.js';
@@ -35,6 +36,22 @@ describe('formatTeamLabel', () => {
     expect(formatTeamLabel(null)).toBe(MISSING_TEAM_LABEL);
     expect(formatTeamLabel({ members: [] })).toBe(MISSING_TEAM_LABEL);
   });
+
+  it('usa índice e lineup nos formatos maiores', () => {
+    const six = {
+      id: 'team-6',
+      members: [
+        { playerId: 'p1', playerName: 'Ana' },
+        { playerId: 'p2', playerName: 'André' },
+        { playerId: 'p3', playerName: 'Luiza' },
+      ],
+    };
+    expect(formatTeamLabel(six, { teamSize: 6, index: 0 })).toBe('Time 1: Ana, André, Luiza');
+    expect(formatTeamLabel({ members: [] }, { teamSize: 6, index: 2 })).toBe(
+      'Time 3: Sem jogadores'
+    );
+    expect(resolveTeamLabel([six], 'missing', { teamSize: 6 })).toBe('Time não encontrado');
+  });
 });
 
 describe('resolveTeamLabel', () => {
@@ -57,6 +74,17 @@ describe('resolveByeLabel', () => {
   it('mostra o time de folga ou uma indicação segura', () => {
     expect(resolveByeLabel(teams, 'pair-1')).toBe('Gabi + Wellington');
     expect(resolveByeLabel(teams, 'gone')).toBe(MISSING_TEAM_LABEL);
+  });
+
+  it('usa a lineup da partida no placar', () => {
+    const match = {
+      teamAId: 'pair-1',
+      teamBId: 'pair-2',
+      lineupA: teams[0].members,
+      lineupB: [{ playerId: 'p3', playerName: 'Luiza' }],
+    };
+    expect(resolveMatchSideLabel(match, 'A', teams, 2)).toBe('Gabi + Wellington');
+    expect(resolveMatchSideLabel(match, 'B', teams, 2)).toBe('Luiza');
   });
 });
 

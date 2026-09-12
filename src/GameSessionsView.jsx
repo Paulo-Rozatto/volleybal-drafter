@@ -1,20 +1,25 @@
 import React, { useState } from 'react';
 import GameSessionDetail from './GameSessionDetail.jsx';
 import { validateDate } from './domain/sessionValidation.js';
-import { validateFormat } from './domain/teamSession.js';
+import { parseSessionFormatInput } from './teamFormationUi.js';
+import {
+  SESSION_FORMAT_OPTIONS,
+  formatTeamCountPhrase,
+  resolveTeamSize,
+} from './teamPresentation.js';
 import {
   formatSessionDate,
   localDateString,
   sessionListStats,
   sessionsForDisplay,
   translateSessionStatus,
-  usesDoublesLabels,
 } from './teamGameSessions.js';
 
 function emptyForm() {
   return {
     date: localDateString(),
     name: '',
+    teamSize: 2,
     teamCount: 2,
   };
 }
@@ -30,6 +35,7 @@ export default function GameSessionsView({
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [dateError, setDateError] = useState(null);
+  const [teamSizeError, setTeamSizeError] = useState(null);
   const [teamCountError, setTeamCountError] = useState(null);
   const [openSessionId, setOpenSessionId] = useState(null);
 
@@ -68,17 +74,22 @@ export default function GameSessionsView({
     );
   }
 
+  const clearFormatErrors = () => {
+    setTeamSizeError(null);
+    setTeamCountError(null);
+  };
+
   const openForm = () => {
     setForm(emptyForm());
     setDateError(null);
-    setTeamCountError(null);
+    clearFormatErrors();
     setIsCreating(true);
   };
 
   const closeForm = () => {
     setForm(emptyForm());
     setDateError(null);
-    setTeamCountError(null);
+    clearFormatErrors();
     setIsCreating(false);
   };
 
@@ -90,17 +101,31 @@ export default function GameSessionsView({
       return;
     }
 
-    const teamCount = Number(form.teamCount);
-    const formatResult = validateFormat({ teamSize: 2, teamCount });
-    if (!Number.isInteger(teamCount) || !formatResult.ok) {
+    const formatResult = parseSessionFormatInput({
+      teamSize: form.teamSize,
+      teamCount: form.teamCount,
+    });
+    if (!formatResult.ok) {
+      setTeamSizeError(formatResult.teamSizeError);
       setTeamCountError(
-        formatResult.errors?.[0]?.message || 'Informe uma quantidade de times inteira de no mínimo 2.'
+        formatResult.teamCountError || 'Informe uma quantidade de times inteira de no mínimo 2.'
       );
       return;
     }
 
-    onCreateSession?.({ date: form.date, name: form.name, teamCount });
+    onCreateSession?.({
+      date: form.date,
+      name: form.name,
+      teamSize: formatResult.format.teamSize,
+      teamCount: formatResult.format.teamCount,
+    });
     closeForm();
+  };
+
+  const inputStyle = {
+    backgroundColor: 'var(--bg-app)',
+    color: 'var(--text-main)',
+    borderColor: 'var(--border-color)',
   };
 
   return (
@@ -138,11 +163,7 @@ export default function GameSessionsView({
                 setDateError(null);
               }}
               className="mt-1 w-full border rounded-lg p-2 text-sm outline-none"
-              style={{
-                backgroundColor: 'var(--bg-app)',
-                color: 'var(--text-main)',
-                borderColor: 'var(--border-color)',
-              }}
+              style={inputStyle}
             />
           </label>
 
@@ -150,9 +171,29 @@ export default function GameSessionsView({
             <p className="text-xs font-semibold text-red-500">{dateError}</p>
           )}
 
-          <p className="text-sm font-bold" style={{ color: 'var(--text-main)' }}>
-            Formato 2x2
-          </p>
+          <label className="block text-sm font-bold" style={{ color: 'var(--text-main)' }}>
+            Formato
+            <select
+              required
+              value={form.teamSize}
+              onChange={(event) => {
+                setForm((current) => ({ ...current, teamSize: Number(event.target.value) }));
+                setTeamSizeError(null);
+              }}
+              className="mt-1 w-full border rounded-lg p-2 text-sm outline-none"
+              style={inputStyle}
+            >
+              {SESSION_FORMAT_OPTIONS.map((option) => (
+                <option key={option.teamSize} value={option.teamSize}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {teamSizeError && (
+            <p className="text-xs font-semibold text-red-500">{teamSizeError}</p>
+          )}
 
           <label className="block text-sm font-bold" style={{ color: 'var(--text-main)' }}>
             Quantidade de times
@@ -167,11 +208,7 @@ export default function GameSessionsView({
                 setTeamCountError(null);
               }}
               className="mt-1 w-full border rounded-lg p-2 text-sm outline-none"
-              style={{
-                backgroundColor: 'var(--bg-app)',
-                color: 'var(--text-main)',
-                borderColor: 'var(--border-color)',
-              }}
+              style={inputStyle}
             />
           </label>
 
@@ -187,11 +224,7 @@ export default function GameSessionsView({
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
               placeholder="Sábado na Arena"
               className="mt-1 w-full border rounded-lg p-2 text-sm outline-none"
-              style={{
-                backgroundColor: 'var(--bg-app)',
-                color: 'var(--text-main)',
-                borderColor: 'var(--border-color)',
-              }}
+              style={inputStyle}
             />
           </label>
 
@@ -234,7 +267,7 @@ export default function GameSessionsView({
         <div className="space-y-3">
           {visibleSessions.map((session) => {
             const { teamCount, matchCount } = sessionListStats(session);
-            const doubles = usesDoublesLabels(session);
+            const teamSize = resolveTeamSize(session);
             return (
               <article
                 key={session.id}
@@ -258,7 +291,7 @@ export default function GameSessionsView({
                   </span>
                 </div>
                 <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-                  {teamCount} {teamCount === 1 ? (doubles ? 'dupla' : 'time') : doubles ? 'duplas' : 'times'} · {matchCount}{' '}
+                  {formatTeamCountPhrase(teamCount, teamSize)} · {matchCount}{' '}
                   {matchCount === 1 ? 'jogo' : 'jogos'}
                 </p>
                 <button

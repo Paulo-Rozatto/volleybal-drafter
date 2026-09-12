@@ -8,20 +8,24 @@ import {
   validateSessionTeams,
   validateTeam,
 } from './domain/teamSession.js';
+import {
+  generateRoundsConfirmationMessage,
+  replaceTeamsConfirmationMessage,
+  resetToDraftConfirmationMessage,
+} from './teamPresentation.js';
+
+export { usesDoublesLabels } from './teamPresentation.js';
 
 export const DEFAULT_TEAM_SESSION_FORMAT = {
   teamSize: 2,
   teamCount: 2,
 };
 
-export const REPLACE_TEAMS_CONFIRMATION_MESSAGE =
-  'Este sorteio substituirá todos os times atuais. Deseja continuar?';
+export const REPLACE_TEAMS_CONFIRMATION_MESSAGE = replaceTeamsConfirmationMessage(6);
 
-export const GENERATE_TEAM_ROUNDS_CONFIRMATION_MESSAGE =
-  'Depois de gerar as rodadas, os times ficarão bloqueados. Deseja continuar?';
+export const GENERATE_TEAM_ROUNDS_CONFIRMATION_MESSAGE = generateRoundsConfirmationMessage(6);
 
-export const RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE =
-  'Alterar os times apagará todas as rodadas e placares deste encontro. Deseja continuar?';
+export const RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE = resetToDraftConfirmationMessage(6);
 
 export const CLEAR_SCORE_CONFIRMATION_MESSAGE =
   'Remover o placar desta partida e marcá-la novamente como pendente?';
@@ -107,9 +111,6 @@ export function filterPlayersByName(players, query) {
   return list.filter((player) => normalizeSearch(player?.name).includes(needle));
 }
 
-export function usesDoublesLabels(session) {
-  return session?.format?.teamSize === 2;
-}
 
 /**
  * Sorteio automático futuro (não implementado nesta etapa).
@@ -421,7 +422,7 @@ export function replaceSessionTeams(document, sessionId, teams, options = {}) {
   const hasExisting = (session.teams?.length ?? 0) > 0;
   if (hasExisting && !replaceConfirmed) {
     return fail([
-      error('REPLACE_CONFIRMATION_REQUIRED', REPLACE_TEAMS_CONFIRMATION_MESSAGE),
+      error('REPLACE_CONFIRMATION_REQUIRED', replaceTeamsConfirmationMessage(session.format?.teamSize)),
     ]);
   }
 
@@ -508,7 +509,10 @@ export function startTeamSessionRoundRobin(document, sessionId, options = {}) {
 
   if (!generateConfirmed) {
     return fail([
-      error('GENERATE_ROUNDS_CONFIRMATION_REQUIRED', GENERATE_TEAM_ROUNDS_CONFIRMATION_MESSAGE),
+      error(
+        'GENERATE_ROUNDS_CONFIRMATION_REQUIRED',
+        generateRoundsConfirmationMessage(session.format?.teamSize)
+      ),
     ]);
   }
 
@@ -564,7 +568,10 @@ export function resetTeamSessionToDraftForTeamEditing(document, sessionId, optio
 
   if (!resetConfirmed) {
     return fail([
-      error('RESET_TO_DRAFT_CONFIRMATION_REQUIRED', RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE),
+      error(
+        'RESET_TO_DRAFT_CONFIRMATION_REQUIRED',
+        resetToDraftConfirmationMessage(session.format?.teamSize)
+      ),
     ]);
   }
 

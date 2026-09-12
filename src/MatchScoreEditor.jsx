@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { isMatchPending } from './domain/sessionValidation.js';
-import { formatMatchScore, matchWinningSide, resolveTeamLabel } from './roundDisplay.js';
+import { formatMatchScore, matchWinningSide, resolveMatchSideLabel } from './roundDisplay.js';
 import { messageForScoreErrors, scoreFieldsToValues } from './scoreInput.js';
 import { CLEAR_SCORE_CONFIRMATION_MESSAGE } from './teamGameSessions.js';
 
@@ -11,7 +11,7 @@ function scoreDraftValue(value) {
 function TeamName({ label, winner }) {
   return (
     <p
-      className="text-sm font-semibold"
+      className="text-sm font-semibold break-words leading-snug"
       style={{ color: winner ? 'var(--primary)' : 'var(--text-main)' }}
     >
       {label}
@@ -22,6 +22,7 @@ function TeamName({ label, winner }) {
 export default function MatchScoreEditor({
   match,
   teams = [],
+  teamSize = 2,
   canEdit = false,
   onSave,
   onClear,
@@ -34,8 +35,8 @@ export default function MatchScoreEditor({
 
   const pending = isMatchPending(match);
   const winner = matchWinningSide(match);
-  const labelA = resolveTeamLabel(teams, match?.teamAId);
-  const labelB = resolveTeamLabel(teams, match?.teamBId);
+  const labelA = resolveMatchSideLabel(match, 'A', teams, teamSize);
+  const labelB = resolveMatchSideLabel(match, 'B', teams, teamSize);
 
   useEffect(() => {
     if (!confirmClear) return undefined;
@@ -110,7 +111,7 @@ export default function MatchScoreEditor({
                 setDraftA(event.target.value);
                 setError(null);
               }}
-              aria-label="Placar da dupla A"
+              aria-label={teamSize === 2 ? 'Placar da dupla A' : 'Placar do time A'}
               className="w-full border rounded-lg p-2 text-center text-sm font-bold outline-none"
               style={{
                 backgroundColor: 'var(--bg-surface)',
@@ -131,7 +132,7 @@ export default function MatchScoreEditor({
                 setDraftB(event.target.value);
                 setError(null);
               }}
-              aria-label="Placar da dupla B"
+              aria-label={teamSize === 2 ? 'Placar da dupla B' : 'Placar do time B'}
               className="w-full border rounded-lg p-2 text-center text-sm font-bold outline-none"
               style={{
                 backgroundColor: 'var(--bg-surface)',

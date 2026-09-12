@@ -1,10 +1,12 @@
 import React from 'react';
 import MatchScoreEditor from './MatchScoreEditor.jsx';
 import { resolveByeLabel, roundsInOrder } from './roundDisplay.js';
+import { resolveTeamSize } from './teamPresentation.js';
 
 export default function RoundBoard({ session, canEditScores = false, onSaveScore, onClearScore }) {
   const rounds = roundsInOrder(session?.rounds);
   const teams = session?.teams ?? [];
+  const teamSize = resolveTeamSize(session);
 
   if (rounds.length === 0) return null;
 
@@ -12,7 +14,7 @@ export default function RoundBoard({ session, canEditScores = false, onSaveScore
     <div className="space-y-3">
       <h3 className="font-bold text-sm">Rodadas</h3>
       {rounds.map((round) => {
-        const byeLabel = resolveByeLabel(teams, round.byeTeamId);
+        const byeLabel = resolveByeLabel(teams, round.byeTeamId, { teamSize });
         return (
           <section
             key={round.id}
@@ -25,13 +27,14 @@ export default function RoundBoard({ session, canEditScores = false, onSaveScore
                 key={match.id}
                 match={match}
                 teams={teams}
+                teamSize={teamSize}
                 canEdit={canEditScores}
                 onSave={(scoreA, scoreB) => onSaveScore?.(round.id, match.id, scoreA, scoreB)}
                 onClear={(options) => onClearScore?.(round.id, match.id, options)}
               />
             ))}
             {byeLabel && (
-              <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-xs font-semibold break-words" style={{ color: 'var(--text-muted)' }}>
                 Folga: {byeLabel}
               </p>
             )}

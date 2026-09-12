@@ -223,6 +223,18 @@ describe('CRUD de times-base', () => {
       }).errors.some((item) => item.code === 'TEAM_DUPLICATE_PLAYER')
     ).toBe(true);
 
+    for (const teamSize of [2, 3, 4, 5, 6]) {
+      const oversizedIds = makeRoster(teamSize + 1).map((player) => player.id);
+      expect(
+        addSessionTeam(
+          documentWith(draftSession({ format: { teamSize, teamCount: 2 } })),
+          'session-1',
+          oversizedIds,
+          { roster: makeRoster(teamSize + 1), idGenerator: () => 'team-x', now: NOW }
+        ).errors[0].code
+      ).toBe('TEAM_CAPACITY_EXCEEDED');
+    }
+
     const withFirst = addSessionTeam(documentWith(session), 'session-1', ['p1'], {
       roster,
       idGenerator: () => 'team-1',
@@ -267,9 +279,24 @@ describe('CRUD de times-base', () => {
   it('permite esvaziar um time na edição e remove somente o indicado', () => {
     const original = documentWith(
       draftSession({
+        format: { teamSize: 6, teamCount: 2 },
         teams: [team('team-1', [member('p1', 'Erik')]), team('team-2', [member('p2', 'André')])],
       })
     );
+
+    const reduced = updateSessionTeam(original, 'session-1', 'team-1', ['p1'], { roster, now: NOW });
+    expect(reduced.team.id).toBe('team-1');
+    expect(reduced.team.members).toEqual([member('p1', 'Erik')]);
+
+    const expanded = updateSessionTeam(reduced.document, 'session-1', 'team-1', ['p1', 'p4', 'p5'], {
+      roster,
+      now: LATER,
+    });
+    expect(expanded.team.members).toEqual([
+      member('p1', 'Erik'),
+      member('p4', 'Luiza'),
+      member('p5', 'Ian'),
+    ]);
 
     const emptied = updateSessionTeam(original, 'session-1', 'team-1', [], { roster, now: NOW });
     expect(emptied.session.teams[0]).toEqual({ id: 'team-1', members: [] });
@@ -634,6 +661,42 @@ describe('16 jogadores em três times 6x6', () => {
     );
     expect(sixVsFive).toBeTruthy();
     expect(result.session.teams[1].members).toHaveLength(5);
+
+    const incompleteMatch = allMatches(result.session.rounds).find(
+      (match) => match.lineupA.length === 5 || match.lineupB.length === 5
+    );
+    const scoredRound = result.session.rounds.find((round) =>
+      (round.matches ?? []).some((match) => match.id === incompleteMatch.id)
+    );
+    const scored = setTeamSessionMatchScore(
+      result.document,
+      'session-1',
+      scoredRound.id,
+      incompleteMatch.id,
+      21,
+      18,
+      { now: LATER }
+    );
+    expect(scored.ok).toBe(true);
+    expect(
+      scored.session.rounds
+        .flatMap((round) => round.matches)
+        .find((match) => match.id === incompleteMatch.id)
+    ).toMatchObject({
+      scoreA: 21,
+      scoreB: 18,
+    });
+
+    const reset = resetTeamSessionToDraftForTeamEditing(scored.document, 'session-1', {
+      now: LATER,
+      resetConfirmed: true,
+    });
+    expect(reset.session.status).toBe('draft');
+    expect(reset.session.rounds).toEqual([]);
+    expect(reset.session.teams.map((item) => item.members.length)).toEqual([6, 5, 5]);
+    expect(
+      reset.session.teams.flatMap((item) => item.members.map((entry) => entry.playerId))
+    ).toHaveLength(16);
   });
 });
 
