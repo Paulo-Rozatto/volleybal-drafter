@@ -1,3 +1,4 @@
+import { generateRoundRobin } from './domain/roundRobin.js';
 import { countSessionMatches, validateDate, validatePair, validateSessionPairs } from './domain/sessionValidation.js';
 import { GAME_SESSIONS_SCHEMA_VERSION } from './persistence/constants.js';
 import { nextGameSessionsDocument } from './persistence/syncHelpers.js';
@@ -314,5 +315,154 @@ export function pairMembersForEdit(pair, roster) {
   return (pair?.members ?? []).map((member) => {
     const current = (roster ?? []).find((player) => player?.id === member?.playerId);
     return current ? { ...current } : { id: member?.playerId, name: member?.playerName };
+  });
+}
+
+export const GENERATE_ROUNDS_CONFIRMATION_MESSAGE =
+  'Depois de gerar as rodadas, as duplas ficarão bloqueadas. Deseja continuar?';
+
+export const RESET_TO_DRAFT_CONFIRMATION_MESSAGE =
+  'Alterar as duplas apagará todas as rodadas e placares deste encontro. Deseja continuar?';
+
+export function sessionRoundSummary(session) {
+  const roundCount = Array.isArray(session?.rounds) ? session.rounds.length : 0;
+  const matches = countSessionMatches(session);
+  return {
+    roundCount,
+    matchCount: matches.total,
+    completedCount: matches.completed,
+    pendingCount: matches.pending,
+  };
+}
+
+export function canGenerateSessionRounds(session, roster) {
+  if (!session || session.status !== 'draft') return false;
+  if (Array.isArray(session.rounds) && session.rounds.length > 0) return false;
+  if (!Array.isArray(session.pairs) || session.pairs.length < 2) return false;
+  return validateSessionPairs(session.pairs, roster).ok;
+}
+
+export function startSessionRoundRobin(document, sessionId, options = {}) {
+  const { idGenerator, now, roster, generateConfirmed = false } = options;
+  const session = findSession(document, sessionId);
+
+  if (!session) {
+    return fail([{ code: 'SESSION_NOT_FOUND', message: 'Encontro não encontrado.' }]);
+  }
+
+  if (session.status !== 'draft') {
+    return fail([
+      {
+        code: 'SESSION_NOT_DRAFT',
+        message: 'Só é possível gerar rodadas em um encontro em rascunho.',
+      },
+    ]);
+  }
+
+  if (Array.isArray(session.rounds) && session.rounds.length > 0) {
+    return fail([
+      {
+        code: 'ROUNDS_ALREADY_EXIST',
+        message: 'Este encontro já possui rodadas.',
+      },
+    ]);
+  }
+
+  const pairs = Array.isArray(session.pairs) ? session.pairs : [];
+  if (pairs.length < 2) {
+    return fail([
+      {
+        code: 'TOO_FEW_PAIRS',
+        message: 'Forme pelo menos duas duplas para gerar os jogos.',
+      },
+    ]);
+  }
+
+  const pairValidation = validateSessionPairs(pairs, roster);
+  if (!pairValidation.ok) return fail(pairValidation.errors);
+
+  if (!generateConfirmed) {
+    return fail([
+      {
+        code: 'GENERATE_ROUNDS_CONFIRMATION_REQUIRED',
+        message: GENERATE_ROUNDS_CONFIRMATION_MESSAGE,
+      },
+    ]);
+  }
+
+  let rounds;
+  try {
+    rounds = generateRoundRobin(pairs, idGenerator ?? (() => crypto.randomUUID()));
+  } catch (error) {
+    return fail([
+      {
+        code: 'ROUND_ROBIN_FAILED',
+        message: error.message || 'Não foi possível gerar as rodadas.',
+      },
+    ]);
+  }
+
+  const clock = now ?? (() => new Date());
+  const updatedSession = {
+    ...session,
+    status: 'in_progress',
+    pairs: [...pairs],
+    rounds,
+    updatedAt: clock().toISOString(),
+  };
+
+  return succeed({
+    document: replaceSession(document, session.id, updatedSession),
+    session: updatedSession,
+  });
+}
+
+export function resetSessionToDraftForPairEditing(document, sessionId, options = {}) {
+  const { now, resetConfirmed = false } = options;
+  const session = findSession(document, sessionId);
+
+  if (!session) {
+    return fail([{ code: 'SESSION_NOT_FOUND', message: 'Encontro não encontrado.' }]);
+  }
+
+  if (session.status === 'finished') {
+    return fail([
+      {
+        code: 'SESSION_FINISHED',
+        message: 'Não é possível alterar duplas de um encontro finalizado.',
+      },
+    ]);
+  }
+
+  if (session.status !== 'in_progress') {
+    return fail([
+      {
+        code: 'SESSION_NOT_IN_PROGRESS',
+        message: 'Só é possível alterar duplas de um encontro em andamento.',
+      },
+    ]);
+  }
+
+  if (!resetConfirmed) {
+    return fail([
+      {
+        code: 'RESET_TO_DRAFT_CONFIRMATION_REQUIRED',
+        message: RESET_TO_DRAFT_CONFIRMATION_MESSAGE,
+      },
+    ]);
+  }
+
+  const clock = now ?? (() => new Date());
+  const updatedSession = {
+    ...session,
+    status: 'draft',
+    pairs: [...(session.pairs ?? [])],
+    rounds: [],
+    updatedAt: clock().toISOString(),
+  };
+
+  return succeed({
+    document: replaceSession(document, session.id, updatedSession),
+    session: updatedSession,
   });
 }

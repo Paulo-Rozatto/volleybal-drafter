@@ -1,17 +1,86 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import AutomaticPairBuilder from './AutomaticPairBuilder.jsx';
 import PairBuilder from './PairBuilder.jsx';
+import RoundBoard from './RoundBoard.jsx';
 import {
   addSessionPair,
   canEditSessionPairs,
+  canGenerateSessionRounds,
   formatSessionDate,
+  GENERATE_ROUNDS_CONFIRMATION_MESSAGE,
   removeSessionPair,
   replaceSessionPairs,
+  RESET_TO_DRAFT_CONFIRMATION_MESSAGE,
+  resetSessionToDraftForPairEditing,
   sessionDisplayName,
   sessionListStats,
+  sessionRoundSummary,
+  startSessionRoundRobin,
   translateSessionStatus,
   updateSessionPair,
 } from './gameSessions.js';
+
+function ConfirmDialog({ titleId, title, message, confirmLabel, onConfirm, onCancel }) {
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onCancel?.();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)' }}
+      onClick={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="w-full max-w-md rounded-xl border p-4 space-y-3 shadow-2xl"
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          borderColor: 'var(--border-color)',
+          color: 'var(--text-main)',
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h3 id={titleId} className="font-bold text-base">
+          {title}
+        </h3>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          {message}
+        </p>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer"
+          style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+        >
+          {confirmLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="w-full font-bold py-3 rounded-xl border cursor-pointer"
+          style={{
+            backgroundColor: 'var(--bg-subtle)',
+            borderColor: 'var(--border-color)',
+            color: 'var(--text-main)',
+          }}
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function pluralize(count, singular, plural) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
 
 export default function GameSessionDetail({
   session,
@@ -22,13 +91,76 @@ export default function GameSessionDetail({
   onApplyDocument,
 }) {
   const [pairMode, setPairMode] = useState('manual');
+  const [confirmGenerate, setConfirmGenerate] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [actionError, setActionError] = useState(null);
+
   const { pairCount } = sessionListStats(session);
+  const { roundCount, matchCount, completedCount, pendingCount } = sessionRoundSummary(session);
   const editable = canEditSessionPairs(session);
   const mode = editable ? pairMode : 'manual';
+  const canGenerate = canGenerateSessionRounds(session, players);
+  const tooFewPairs = (session?.pairs?.length ?? 0) < 2;
+  const inProgress = session?.status === 'in_progress';
 
-  const applyPairChange = (result) => {
-    if (result?.ok) onApplyDocument?.(result.document);
+  const persistIfOk = (result) => {
+    if (result?.ok) {
+      onApplyDocument?.(result.document);
+      setConfirmGenerate(false);
+      setConfirmReset(false);
+      setActionError(null);
+    }
     return result;
+  };
+
+  const applyPairChange = (result) => persistIfOk(result);
+
+  const applyRoundAction = (result) => {
+    if (result?.ok) return persistIfOk(result);
+    if (result?.errors?.[0]?.message) setActionError(result.errors[0].message);
+    return result;
+  };
+
+  const requestGenerateRounds = () => {
+    const result = startSessionRoundRobin(sessionsDocument, session.id, {
+      roster: players,
+      generateConfirmed: false,
+    });
+    if (result?.errors?.[0]?.code === 'GENERATE_ROUNDS_CONFIRMATION_REQUIRED') {
+      setConfirmGenerate(true);
+      setActionError(null);
+      return;
+    }
+    applyRoundAction(result);
+  };
+
+  const confirmGenerateRounds = () => {
+    applyRoundAction(
+      startSessionRoundRobin(sessionsDocument, session.id, {
+        roster: players,
+        generateConfirmed: true,
+      })
+    );
+  };
+
+  const requestResetToDraft = () => {
+    const result = resetSessionToDraftForPairEditing(sessionsDocument, session.id, {
+      resetConfirmed: false,
+    });
+    if (result?.errors?.[0]?.code === 'RESET_TO_DRAFT_CONFIRMATION_REQUIRED') {
+      setConfirmReset(true);
+      setActionError(null);
+      return;
+    }
+    applyRoundAction(result);
+  };
+
+  const confirmResetToDraft = () => {
+    applyRoundAction(
+      resetSessionToDraftForPairEditing(sessionsDocument, session.id, {
+        resetConfirmed: true,
+      })
+    );
   };
 
   return (
@@ -55,7 +187,14 @@ export default function GameSessionDetail({
         </p>
         <p className="text-sm font-semibold">{translateSessionStatus(session.status)}</p>
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-          {pairCount} {pairCount === 1 ? 'dupla' : 'duplas'}
+          {pluralize(pairCount, 'dupla', 'duplas')}
+        </p>
+        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+          {pluralize(roundCount, 'rodada', 'rodadas')} · {pluralize(matchCount, 'partida', 'partidas')}
+        </p>
+        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+          {pluralize(completedCount, 'partida concluída', 'partidas concluídas')} ·{' '}
+          {pluralize(pendingCount, 'partida pendente', 'partidas pendentes')}
         </p>
       </div>
 
@@ -116,6 +255,72 @@ export default function GameSessionDetail({
           applyPairChange(removeSessionPair(sessionsDocument, session.id, pairId, players))
         }
       />
+
+      {editable && (
+        <div className="space-y-2">
+          {tooFewPairs && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              Forme pelo menos duas duplas para gerar os jogos.
+            </p>
+          )}
+          {actionError && !confirmGenerate && (
+            <p className="text-xs font-semibold text-red-500">{actionError}</p>
+          )}
+          <button
+            type="button"
+            onClick={requestGenerateRounds}
+            disabled={!canGenerate}
+            className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+            style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+          >
+            Gerar rodadas
+          </button>
+        </div>
+      )}
+
+      <RoundBoard session={session} />
+
+      {inProgress && (
+        <div className="space-y-2">
+          {actionError && !confirmReset && (
+            <p className="text-xs font-semibold text-red-500">{actionError}</p>
+          )}
+          <button
+            type="button"
+            onClick={requestResetToDraft}
+            className="w-full font-bold py-3 rounded-xl border cursor-pointer"
+            style={{
+              backgroundColor: 'var(--bg-subtle)',
+              borderColor: 'var(--border-color)',
+              color: 'var(--text-main)',
+            }}
+          >
+            Alterar duplas
+          </button>
+        </div>
+      )}
+
+      {confirmGenerate && (
+        <ConfirmDialog
+          titleId="generate-rounds-title"
+          title="Gerar rodadas"
+          message={GENERATE_ROUNDS_CONFIRMATION_MESSAGE}
+          confirmLabel="Gerar rodadas"
+          onConfirm={confirmGenerateRounds}
+          onCancel={() => setConfirmGenerate(false)}
+        />
+      )}
+
+      {confirmReset && (
+        <ConfirmDialog
+          titleId="reset-draft-title"
+          title="Alterar duplas"
+          message={RESET_TO_DRAFT_CONFIRMATION_MESSAGE}
+          confirmLabel="Apagar rodadas e alterar duplas"
+          onConfirm={confirmResetToDraft}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
     </div>
   );
 }
