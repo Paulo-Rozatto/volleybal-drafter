@@ -164,6 +164,18 @@ export function formatLineupLoanLabel(playerName, teamIndex, teamSize = 6) {
   return `${playerName} — empréstimo ${prep} ${origin}`;
 }
 
+export const FINALIZE_SCORES_REQUIRED_MESSAGE =
+  'Complete todos os placares para finalizar o encontro.';
+
+export const FINALIZE_SESSION_HEADING = 'Encontro finalizado';
+
+export const FINALIZE_SESSION_READY_MESSAGE =
+  'Todos os jogos foram concluídos. O encontro já pode ser finalizado.';
+
+export function formatFinalizeMatchProgress(completedCount, matchCount) {
+  return `${completedCount} de ${matchCount} partidas concluídas`;
+}
+
 export function formatLineupMemberLabel(member, teams, ownTeamId, teamSize = 6) {
   const name = typeof member?.playerName === 'string' ? member.playerName.trim() : '';
   const displayName = name || 'Jogador';

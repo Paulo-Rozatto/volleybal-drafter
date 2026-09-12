@@ -6,6 +6,7 @@ import {
   appendDraftTeamSession,
   availablePlayersForTeams,
   canEditSessionTeams,
+  canEnableFinalizeTeamSession,
   canGenerateTeamSessionRounds,
   classifyLineupMember,
   clearTeamSessionMatchScore,
@@ -13,6 +14,7 @@ import {
   describeMatchLineupDraft,
   eligiblePlayersForMatchSide,
   filterPlayersByName,
+  finalizeTeamSession,
   playerBaseTeam,
   removeSessionTeam,
   replaceSessionTeams,
@@ -22,6 +24,7 @@ import {
   startTeamSessionRoundRobin,
   takenTeamPlayerIds,
   teamMemberIdsInRoster,
+  teamSessionFinalizeProgressLabel,
   teamSessionIsReadyToFinalize,
   updateSessionTeam,
   setTeamSessionMatchScore,
@@ -1101,5 +1104,213 @@ describe('escalações por partida', () => {
         roster,
       }).ok
     ).toBe(true);
+  });
+});
+
+describe('finalização de encontros V2', () => {
+  const twoTeams = [
+    team('team-1', [member('p1', 'Erik'), member('p2', 'André')]),
+    team('team-2', [member('p3', 'Gabi'), member('p4', 'Luiza')]),
+  ];
+  const otherSession = draftSession({ id: 'session-2', name: 'Outro' });
+
+  function inProgressTwoTeams() {
+    return startTeamSessionRoundRobin(
+      documentWith(draftSession({ teams: twoTeams }), [otherSession]),
+      'session-1',
+      { roster, idGenerator: sequentialIds(), now: NOW, generateConfirmed: true }
+    ).document;
+  }
+
+  function inProgressThreeTeams() {
+    const sixRoster = makeRoster(16);
+    const sized = (id, start, count) =>
+      team(
+        id,
+        sixRoster.slice(start, start + count).map((player) => member(player.id, player.name))
+      );
+    return startTeamSessionRoundRobin(
+      documentWith(
+        draftSession({
+          format: { teamSize: 6, teamCount: 3 },
+          teams: [sized('t1', 0, 6), sized('t2', 6, 5), sized('t3', 11, 5)],
+        })
+      ),
+      'session-1',
+      { roster: sixRoster, idGenerator: sequentialIds(), now: NOW, generateConfirmed: true }
+    ).document;
+  }
+
+  function scoreEveryMatch(document, now = LATER) {
+    let current = document;
+    for (const round of current.sessions[0].rounds) {
+      for (const match of round.matches) {
+        const result = setTeamSessionMatchScore(
+          current,
+          'session-1',
+          round.id,
+          match.id,
+          21,
+          18,
+          { now }
+        );
+        if (!result.ok) {
+          throw new Error(result.errors[0]?.code ?? 'score failed');
+        }
+        current = result.document;
+      }
+    }
+    return current;
+  }
+
+  it('finaliza encontro completo preservando times, lineups, placares e schema', () => {
+    const original = scoreEveryMatch(inProgressTwoTeams());
+    const snapshot = JSON.parse(JSON.stringify(original));
+    const session = original.sessions[0];
+    const match = session.rounds[0].matches[0];
+
+    expect(canEnableFinalizeTeamSession(session)).toBe(true);
+    expect(teamSessionIsReadyToFinalize(session)).toBe(true);
+    expect(teamSessionFinalizeProgressLabel(session)).toBe('1 de 1 partidas concluídas');
+    expect(session.status).toBe('in_progress');
+
+    const cancelled = finalizeTeamSession(original, 'session-1', {
+      now: LATER,
+      finalizeConfirmed: false,
+    });
+    expect(cancelled.ok).toBe(false);
+    expect(cancelled.errors[0].code).toBe('FINALIZE_CONFIRMATION_REQUIRED');
+    expect(original).toEqual(snapshot);
+
+    const finished = finalizeTeamSession(original, 'session-1', {
+      now: LATER,
+      finalizeConfirmed: true,
+    });
+    expect(finished.ok).toBe(true);
+    expect(finished.session.status).toBe('finished');
+    expect(finished.session.createdAt).toBe(ISO_CREATED);
+    expect(finished.session.updatedAt).toBe('2026-09-12T20:00:00.000Z');
+    expect(finished.session.format).toEqual({ teamSize: 2, teamCount: 2 });
+    expect(finished.session.teams).toEqual(session.teams);
+    expect(finished.session.rounds).toEqual(session.rounds);
+    expect(finished.session.rounds[0].matches[0].lineupA).toEqual(match.lineupA);
+    expect(finished.session.rounds[0].matches[0].lineupB).toEqual(match.lineupB);
+    expect(finished.session.rounds[0].matches[0]).toMatchObject({ scoreA: 21, scoreB: 18 });
+    expect(finished.document.schemaVersion).toBe(TEAM_SESSION_SCHEMA_VERSION);
+    expect(finished.document.sessions[1]).toEqual(otherSession);
+    expect(canEnableFinalizeTeamSession(finished.session)).toBe(false);
+    expect(original).toEqual(snapshot);
+
+    expect(
+      addSessionTeam(finished.document, 'session-1', ['p5'], { roster, now: LATER }).errors[0].code
+    ).toBe('TEAMS_LOCKED');
+    expect(
+      startTeamSessionRoundRobin(finished.document, 'session-1', {
+        roster,
+        generateConfirmed: true,
+      }).errors[0].code
+    ).toBe('SESSION_NOT_DRAFT');
+    expect(
+      resetTeamSessionToDraftForTeamEditing(finished.document, 'session-1', {
+        resetConfirmed: true,
+      }).errors[0].code
+    ).toBe('SESSION_FINISHED');
+    expect(
+      setTeamSessionMatchLineups(
+        finished.document,
+        'session-1',
+        session.rounds[0].id,
+        match.id,
+        ['p1'],
+        ['p3'],
+        { roster }
+      ).errors[0].code
+    ).toBe('SESSION_FINISHED');
+    expect(
+      setTeamSessionMatchScore(
+        finished.document,
+        'session-1',
+        session.rounds[0].id,
+        match.id,
+        25,
+        20
+      ).errors[0].code
+    ).toBe('SESSION_FINISHED');
+    expect(
+      clearTeamSessionMatchScore(finished.document, 'session-1', session.rounds[0].id, match.id, {
+        clearConfirmed: true,
+      }).errors[0].code
+    ).toBe('SESSION_FINISHED');
+  });
+
+  it('aceita múltiplas rodadas e lineup incompleta, e rejeita estados inválidos', () => {
+    const three = scoreEveryMatch(inProgressThreeTeams());
+    const incompleteLineup = setTeamSessionMatchLineups(
+      three,
+      'session-1',
+      three.sessions[0].rounds[0].id,
+      three.sessions[0].rounds[0].matches[0].id,
+      three.sessions[0].rounds[0].matches[0].lineupA.slice(0, 5).map((item) => item.playerId),
+      three.sessions[0].rounds[0].matches[0].lineupB.map((item) => item.playerId),
+      { roster: makeRoster(16), now: LATER }
+    );
+    expect(incompleteLineup.ok).toBe(true);
+    expect(incompleteLineup.session.status).toBe('in_progress');
+    expect(incompleteLineup.session.rounds[0].matches[0].scoreA).toBe(21);
+    expect(canEnableFinalizeTeamSession(incompleteLineup.session)).toBe(true);
+
+    const finished = finalizeTeamSession(incompleteLineup.document, 'session-1', {
+      now: LATER,
+      finalizeConfirmed: true,
+    });
+    expect(finished.ok).toBe(true);
+    expect(finished.session.status).toBe('finished');
+    expect(finished.session.rounds).toHaveLength(3);
+    expect(countSessionMatches(finished.session)).toEqual({
+      total: 3,
+      completed: 3,
+      pending: 0,
+      invalid: 0,
+    });
+    expect(finished.session.rounds[0].matches[0].lineupA).toHaveLength(5);
+
+    const pending = inProgressTwoTeams();
+    expect(canEnableFinalizeTeamSession(pending.sessions[0])).toBe(false);
+    expect(teamSessionFinalizeProgressLabel(pending.sessions[0])).toBe(
+      '0 de 1 partidas concluídas'
+    );
+    expect(
+      finalizeTeamSession(pending, 'session-1', { finalizeConfirmed: true }).errors[0].code
+    ).toBe('FINALIZE_INCOMPLETE');
+
+    const draft = documentWith(draftSession({ teams: twoTeams }));
+    expect(
+      finalizeTeamSession(draft, 'session-1', { finalizeConfirmed: true }).errors[0].code
+    ).toBe('SESSION_NOT_IN_PROGRESS');
+    expect(
+      finalizeTeamSession(finished.document, 'session-1', { finalizeConfirmed: true }).errors[0]
+        .code
+    ).toBe('SESSION_FINISHED');
+    expect(
+      finalizeTeamSession(pending, 'missing', { finalizeConfirmed: true }).errors[0].code
+    ).toBe('SESSION_NOT_FOUND');
+
+    const emptyRounds = documentWith(
+      draftSession({ status: 'in_progress', teams: twoTeams, rounds: [] })
+    );
+    expect(
+      finalizeTeamSession(emptyRounds, 'session-1', { finalizeConfirmed: true }).errors[0].code
+    ).toBe('FINALIZE_NO_MATCHES');
+
+    const withInvalid = (scoreA, scoreB) => {
+      const doc = JSON.parse(JSON.stringify(scoreEveryMatch(inProgressTwoTeams())));
+      doc.sessions[0].rounds[0].matches[0].scoreA = scoreA;
+      doc.sessions[0].rounds[0].matches[0].scoreB = scoreB;
+      return finalizeTeamSession(doc, 'session-1', { finalizeConfirmed: true }).errors[0].code;
+    };
+    expect(withInvalid(21, 21)).toBe('FINALIZE_INCOMPLETE');
+    expect(withInvalid(21, null)).toBe('FINALIZE_INCOMPLETE');
+    expect(withInvalid(-1, 18)).toBe('FINALIZE_INCOMPLETE');
+    expect(withInvalid(21.5, 18)).toBe('FINALIZE_INCOMPLETE');
   });
 });

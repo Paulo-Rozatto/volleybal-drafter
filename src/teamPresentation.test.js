@@ -6,6 +6,7 @@ import {
   drawTeamsLabel,
   formatDoublesNames,
   formatFormatLabel,
+  formatFinalizeMatchProgress,
   formatIndexedTeamNames,
   formatLineupLoanLabel,
   formatLineupMemberLabel,
@@ -68,6 +69,8 @@ describe('terminologia de formato', () => {
     expect(alterTeamsLabel(5)).toBe('Alterar times');
     expect(drawTeamsLabel(2)).toBe('Sortear duplas');
     expect(drawTeamsLabel(4)).toBe('Sortear times');
+    expect(formatFinalizeMatchProgress(1, 3)).toBe('1 de 3 partidas concluídas');
+    expect(formatFinalizeMatchProgress(3, 3)).toBe('3 de 3 partidas concluídas');
     expect(formatMatchLineupCount('A', 5, 6)).toBe('Time A: 5/6');
     expect(formatMatchLineupCount('B', 2, 2)).toBe('Dupla B: 2/2');
     expect(formatLineupLoanLabel('Luiza', 2, 6)).toBe('Luiza — empréstimo do Time 3');

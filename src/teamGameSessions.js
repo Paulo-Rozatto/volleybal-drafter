@@ -1,8 +1,14 @@
 import { generateRoundRobinSchedule } from './domain/roundRobin.js';
-import { countSessionMatches, validateDate, validateScore } from './domain/sessionValidation.js';
+import {
+  countSessionMatches,
+  validateCanFinalize,
+  validateDate,
+  validateScore,
+} from './domain/sessionValidation.js';
 import {
   TEAM_SESSION_SCHEMA_VERSION,
   cloneTeamMembers,
+  cloneV2Round,
   cloneV2Team,
   createInitialLineups,
   validateFormat,
@@ -10,7 +16,9 @@ import {
   validateSessionTeams,
   validateTeam,
 } from './domain/teamSession.js';
+import { sessionIsReadyToFinalize } from './gameSessions.js';
 import {
+  formatFinalizeMatchProgress,
   generateRoundsConfirmationMessage,
   replaceTeamsConfirmationMessage,
   resetToDraftConfirmationMessage,
@@ -31,6 +39,9 @@ export const RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE = resetToDraftConf
 
 export const CLEAR_SCORE_CONFIRMATION_MESSAGE =
   'Remover o placar desta partida e marcá-la novamente como pendente?';
+
+export const FINALIZE_TEAM_SESSION_CONFIRMATION_MESSAGE =
+  'Depois da finalização, times, escalações e placares ficarão bloqueados para edição.';
 
 const STATUS_LABELS = {
   draft: 'Rascunho',
@@ -94,8 +105,16 @@ export function teamSessionRoundSummary(session) {
 }
 
 export function teamSessionIsReadyToFinalize(session) {
-  const { total, completed, invalid } = countSessionMatches(session);
-  return total > 0 && completed === total && invalid === 0;
+  return sessionIsReadyToFinalize(session);
+}
+
+export function canEnableFinalizeTeamSession(session) {
+  return session?.status === 'in_progress' && sessionIsReadyToFinalize(session);
+}
+
+export function teamSessionFinalizeProgressLabel(session) {
+  const { completed, total } = countSessionMatches(session);
+  return formatFinalizeMatchProgress(completed, total);
 }
 
 function normalizeSearch(value) {
@@ -695,6 +714,88 @@ export function clearTeamSessionMatchScore(document, sessionId, roundId, matchId
   return commitMatchScore(document, located.session, roundId, matchId, null, null, now);
 }
 
+function requireV2Document(document) {
+  if (document == null) {
+    return fail([error('DOCUMENT_REQUIRED', 'O documento de encontros é obrigatório.')]);
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(document, 'schemaVersion')) {
+    return fail([error('SCHEMA_VERSION_REQUIRED', 'A versão do schema é obrigatória.')]);
+  }
+
+  if (document.schemaVersion !== TEAM_SESSION_SCHEMA_VERSION) {
+    return fail([
+      error(
+        'SCHEMA_VERSION_UNSUPPORTED',
+        `Versão de schema de encontros não suportada: ${String(document.schemaVersion)}.`,
+        { schemaVersion: document.schemaVersion }
+      ),
+    ]);
+  }
+
+  return null;
+}
+
+export function finalizeTeamSession(document, sessionId, options = {}) {
+  const { now, finalizeConfirmed = false } = options;
+  const schemaError = requireV2Document(document);
+  if (schemaError) return schemaError;
+
+  const session = findSession(document, sessionId);
+  if (!session) {
+    return fail([error('SESSION_NOT_FOUND', 'Encontro não encontrado.')]);
+  }
+
+  if (session.status === 'finished') {
+    return fail([error('SESSION_FINISHED', 'Este encontro já está finalizado.')]);
+  }
+
+  if (session.status !== 'in_progress') {
+    return fail([
+      error('SESSION_NOT_IN_PROGRESS', 'Só é possível finalizar um encontro em andamento.'),
+    ]);
+  }
+
+  const validation = validateCanFinalize(session);
+  const ready = sessionIsReadyToFinalize(session);
+  if (!validation.ok || !ready) {
+    return fail(
+      validation.errors.length > 0
+        ? validation.errors
+        : [
+            error(
+              'FINALIZE_INCOMPLETE',
+              'Todos os jogos precisam ter placar antes de finalizar.'
+            ),
+          ]
+    );
+  }
+
+  if (!finalizeConfirmed) {
+    return fail([
+      error('FINALIZE_CONFIRMATION_REQUIRED', FINALIZE_TEAM_SESSION_CONFIRMATION_MESSAGE),
+    ]);
+  }
+
+  const clock = now ?? (() => new Date());
+  const updatedSession = {
+    ...session,
+    status: 'finished',
+    format: {
+      teamSize: session.format.teamSize,
+      teamCount: session.format.teamCount,
+    },
+    teams: cloneTeams(session.teams),
+    rounds: (session.rounds ?? []).map(cloneV2Round),
+    updatedAt: clock().toISOString(),
+  };
+
+  return succeed({
+    document: replaceSession(document, session.id, updatedSession),
+    session: updatedSession,
+  });
+}
+
 export function playerBaseTeam(teams, playerId) {
   if (typeof playerId !== 'string' || playerId.trim().length === 0) return null;
   for (const team of teams ?? []) {
@@ -876,23 +977,8 @@ export function setTeamSessionMatchLineups(
   lineupBPlayerIds,
   options = {}
 ) {
-  if (document == null) {
-    return fail([error('DOCUMENT_REQUIRED', 'O documento de encontros é obrigatório.')]);
-  }
-
-  if (!Object.prototype.hasOwnProperty.call(document, 'schemaVersion')) {
-    return fail([error('SCHEMA_VERSION_REQUIRED', 'A versão do schema é obrigatória.')]);
-  }
-
-  if (document.schemaVersion !== TEAM_SESSION_SCHEMA_VERSION) {
-    return fail([
-      error(
-        'SCHEMA_VERSION_UNSUPPORTED',
-        `Versão de schema de encontros não suportada: ${String(document.schemaVersion)}.`,
-        { schemaVersion: document.schemaVersion }
-      ),
-    ]);
-  }
+  const schemaError = requireV2Document(document);
+  if (schemaError) return schemaError;
 
   const located = locateInProgressMatch(
     document,

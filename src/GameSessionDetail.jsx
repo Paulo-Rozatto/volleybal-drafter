@@ -6,6 +6,9 @@ import { generateRoundsBlockedReason } from './teamFormationUi.js';
 import {
   alterTeamsLabel,
   drawTeamsLabel,
+  FINALIZE_SCORES_REQUIRED_MESSAGE,
+  FINALIZE_SESSION_HEADING,
+  FINALIZE_SESSION_READY_MESSAGE,
   formatFormatLabel,
   formatTeamCountPhrase,
   generateRoundsConfirmationMessage,
@@ -16,8 +19,11 @@ import {
 import {
   addSessionTeam,
   canEditSessionTeams,
+  canEnableFinalizeTeamSession,
   canGenerateTeamSessionRounds,
   clearTeamSessionMatchScore,
+  FINALIZE_TEAM_SESSION_CONFIRMATION_MESSAGE,
+  finalizeTeamSession,
   formatSessionDate,
   removeSessionTeam,
   replaceSessionTeams,
@@ -26,7 +32,7 @@ import {
   sessionListStats,
   setTeamSessionMatchScore,
   startTeamSessionRoundRobin,
-  teamSessionIsReadyToFinalize,
+  teamSessionFinalizeProgressLabel,
   teamSessionRoundSummary,
   translateSessionStatus,
   updateSessionTeam,
@@ -106,6 +112,7 @@ export default function GameSessionDetail({
   const [teamMode, setTeamMode] = useState('manual');
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmFinalize, setConfirmFinalize] = useState(false);
   const [actionError, setActionError] = useState(null);
 
   const teamSize = resolveTeamSize(session);
@@ -118,13 +125,16 @@ export default function GameSessionDetail({
   const canGenerate = canGenerateTeamSessionRounds(session, players);
   const generateBlockedReason = editable && !canGenerate ? generateRoundsBlockedReason(session) : null;
   const inProgress = session?.status === 'in_progress';
-  const readyToFinalize = teamSessionIsReadyToFinalize(session);
+  const finished = session?.status === 'finished';
+  const canFinalize = canEnableFinalizeTeamSession(session);
+  const finalizeProgressLabel = teamSessionFinalizeProgressLabel(session);
 
   const persistIfOk = (result) => {
     if (result?.ok) {
       onApplyDocument?.(result.document);
       setConfirmGenerate(false);
       setConfirmReset(false);
+      setConfirmFinalize(false);
       setActionError(null);
     }
     return result;
@@ -180,6 +190,26 @@ export default function GameSessionDetail({
     );
   };
 
+  const requestFinalize = () => {
+    const result = finalizeTeamSession(sessionsDocument, session.id, {
+      finalizeConfirmed: false,
+    });
+    if (result?.errors?.[0]?.code === 'FINALIZE_CONFIRMATION_REQUIRED') {
+      setConfirmFinalize(true);
+      setActionError(null);
+      return;
+    }
+    applyRoundAction(result);
+  };
+
+  const confirmFinalizeSession = () => {
+    applyRoundAction(
+      finalizeTeamSession(sessionsDocument, session.id, {
+        finalizeConfirmed: true,
+      })
+    );
+  };
+
   return (
     <div className="space-y-4">
       <button
@@ -221,14 +251,21 @@ export default function GameSessionDetail({
         </p>
       </div>
 
-      {readyToFinalize && (
+      {inProgress && canFinalize && (
         <div
           className="p-4 rounded-xl border"
           style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--primary)' }}
         >
-          <p className="text-sm font-bold">
-            Todos os jogos foram concluídos. O encontro já pode ser finalizado.
-          </p>
+          <p className="text-sm font-bold">{FINALIZE_SESSION_READY_MESSAGE}</p>
+        </div>
+      )}
+
+      {finished && (
+        <div
+          className="p-4 rounded-xl border"
+          style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--border-color)' }}
+        >
+          <p className="text-sm font-bold">{FINALIZE_SESSION_HEADING}</p>
         </div>
       )}
 
@@ -357,9 +394,26 @@ export default function GameSessionDetail({
 
       {inProgress && (
         <div className="space-y-2">
-          {actionError && !confirmReset && (
+          {!canFinalize && (
+            <>
+              <p className="text-sm font-semibold">{finalizeProgressLabel}</p>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                {FINALIZE_SCORES_REQUIRED_MESSAGE}
+              </p>
+            </>
+          )}
+          {actionError && !confirmReset && !confirmFinalize && (
             <p className="text-xs font-semibold text-red-500">{actionError}</p>
           )}
+          <button
+            type="button"
+            onClick={requestFinalize}
+            disabled={!canFinalize}
+            className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+            style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+          >
+            Finalizar encontro
+          </button>
           <button
             type="button"
             onClick={requestResetToDraft}
@@ -394,6 +448,17 @@ export default function GameSessionDetail({
           confirmLabel={`Apagar rodadas e alterar ${units}`}
           onConfirm={confirmResetToDraft}
           onCancel={() => setConfirmReset(false)}
+        />
+      )}
+
+      {confirmFinalize && (
+        <ConfirmDialog
+          titleId="finalize-session-title"
+          title="Finalizar este encontro?"
+          message={FINALIZE_TEAM_SESSION_CONFIRMATION_MESSAGE}
+          confirmLabel="Finalizar encontro"
+          onConfirm={confirmFinalizeSession}
+          onCancel={() => setConfirmFinalize(false)}
         />
       )}
     </div>
