@@ -10,6 +10,8 @@ import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocum
 import {
   applySuccessfulGistLoad,
   applyGistLoadFailure,
+  applyGistSaveFailure,
+  applyGistSaveSuccess,
   canSaveToGist,
   clearPendingGistChanges,
   createSyncLock,
@@ -71,12 +73,14 @@ export default function App() {
   const cacheInvalidRef = useRef(Boolean(localSessions.error));
   const pendingGameSessionsOperationRef = useRef(null);
   const syncLockRef = useRef(createSyncLock());
+  const gistRevisionRef = useRef(null);
 
   // --- GitHub Gist Sync States ---
   const [appPassword, setAppPassword] = useState(() => sessionStorage.getItem('app_password') || '');
   const [syncStatus, setSyncStatus] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [gistLoaded, setGistLoaded] = useState(false);
+  const [gistRevision, setGistRevision] = useState(null);
   const [hasPendingGistChanges, setHasPendingGistChanges] = useState(
     () => Boolean(localSessions.migrated) || readPendingGistChanges()
   );
@@ -87,6 +91,7 @@ export default function App() {
     gistLoaded,
     isSyncing,
     hasPassword: Boolean(appPassword),
+    hasRevision: Boolean(gistRevision),
   });
 
   // LocalStorage Persistence
@@ -107,6 +112,28 @@ export default function App() {
   const commitSessionsDocument = (nextDocument) => {
     sessionsRef.current = nextDocument;
     setGameSessions(nextDocument);
+  };
+
+  const commitGistRevision = (revision) => {
+    gistRevisionRef.current = revision;
+    setGistRevision(revision);
+  };
+
+  const applySaveOutcome = (outcome) => {
+    if (outcome.clearRevision) {
+      commitGistRevision(null);
+    } else if (outcome.revision !== undefined) {
+      commitGistRevision(outcome.revision);
+    }
+    setGistLoaded(outcome.gistLoaded);
+    if (outcome.hasPendingGistChanges) {
+      markPendingGistChanges();
+      setHasPendingGistChanges(true);
+    } else {
+      clearPendingGistChanges();
+      setHasPendingGistChanges(false);
+    }
+    setSyncStatus(outcome.syncStatus);
   };
 
   const requestGameSessionsOperation = (operation, { discardConfirmed = false } = {}) => {
@@ -204,6 +231,8 @@ export default function App() {
           setLocalWriteError(persistResult.ok ? null : persistResult.error);
         }
 
+        commitGistRevision(remote.revision);
+
         if (result.hasPendingGistChanges) {
           markPendingGistChanges();
         } else {
@@ -258,19 +287,28 @@ export default function App() {
       let decryptedPat;
       try {
         setIsSyncing(true);
-        setSyncStatus('Descriptografando token...');
-        decryptedPat = await decryptToken(ENCRYPTED_GITHUB_TOKEN, appPassword);
-        setSyncStatus('Salvando no Gist...');
-        await saveGistState({
+        setSyncStatus('Verificando o Gist...');
+        const result = await saveGistState({
           players,
           gameSessions: sessionsRef.current,
-          token: decryptedPat,
+          expectedRevision: gistRevisionRef.current,
+          getToken: async () => {
+            setSyncStatus('Descriptografando token...');
+            decryptedPat = await decryptToken(ENCRYPTED_GITHUB_TOKEN, appPassword);
+            setSyncStatus('Salvando no Gist...');
+            return decryptedPat;
+          },
         });
-        clearPendingGistChanges();
-        setHasPendingGistChanges(false);
-        setSyncStatus('Salvo no Gist com sucesso!');
+        applySaveOutcome(applyGistSaveSuccess({ revision: result.revision }));
       } catch (err) {
-        setSyncStatus(`Erro ao salvar: ${err.message}`);
+        applySaveOutcome(
+          applyGistSaveFailure({
+            error: err,
+            gistLoaded,
+            revision: gistRevisionRef.current,
+            hasPendingGistChanges,
+          })
+        );
       } finally {
         decryptedPat = undefined;
         setIsSyncing(false);

@@ -4,6 +4,7 @@ import {
   createEmptyGameSessionsDocument,
 } from './gameSessionsDocument.js';
 import { loadGameSessionsRecord, saveGameSessionsDocument } from './gameSessionsStorage.js';
+import { GIST_REVISION_CONFLICT } from '../gistRevision.js';
 
 export const GIST_LOAD_STRATEGY = {
   FRESH: 'fresh',
@@ -14,6 +15,12 @@ export const GIST_LOAD_STRATEGY = {
 
 export const GIST_SESSIONS_MIGRATED_MESSAGE =
   'Os encontros foram migrados para o novo formato. Salve no Gist para concluir a atualização.';
+
+export const GIST_KEEP_LOCAL_MESSAGE =
+  'Gist carregado. As alterações locais foram mantidas. Salvar substituirá os arquivos remotos.';
+
+export const GIST_SAVE_REVISION_UNCONFIRMED_MESSAGE =
+  'Salvo no Gist, mas a revisão remota não foi confirmada. Recarregue os dados antes de salvar novamente.';
 
 function resolveStorage(storage) {
   if (storage) return storage;
@@ -119,8 +126,8 @@ export function getGistGateMessage({ gistLoaded, hasPendingGistChanges }) {
   return 'Dados sincronizados com o Gist';
 }
 
-export function canSaveToGist({ gistLoaded, isSyncing, hasPassword }) {
-  return Boolean(gistLoaded && !isSyncing && hasPassword);
+export function canSaveToGist({ gistLoaded, isSyncing, hasPassword, hasRevision = true }) {
+  return Boolean(gistLoaded && !isSyncing && hasPassword && hasRevision);
 }
 
 export function readPendingGistChanges(storage) {
@@ -200,7 +207,7 @@ export function applySuccessfulGistLoad({
       replaceLocal: false,
       gistLoaded: true,
       hasPendingGistChanges: true,
-      syncStatus: 'Gist carregado. As alterações locais foram mantidas e ainda precisam ser salvas.',
+      syncStatus: GIST_KEEP_LOCAL_MESSAGE,
     };
   }
 
@@ -228,5 +235,50 @@ export function applyGistLoadFailure({ error, hasPendingGistChanges, localPlayer
     replaceLocal: false,
     hasPendingGistChanges,
     syncStatus: `Erro ao carregar: ${error?.message || error}`,
+  };
+}
+
+export function applyGistSaveSuccess({ revision }) {
+  if (!revision) {
+    return {
+      gistLoaded: false,
+      revision: null,
+      clearRevision: true,
+      hasPendingGistChanges: true,
+      syncStatus: GIST_SAVE_REVISION_UNCONFIRMED_MESSAGE,
+    };
+  }
+
+  return {
+    gistLoaded: true,
+    revision,
+    clearRevision: false,
+    hasPendingGistChanges: false,
+    syncStatus: 'Salvo no Gist com sucesso!',
+  };
+}
+
+export function applyGistSaveFailure({
+  error,
+  gistLoaded,
+  revision,
+  hasPendingGistChanges,
+}) {
+  if (error?.code === GIST_REVISION_CONFLICT) {
+    return {
+      gistLoaded: false,
+      revision,
+      clearRevision: false,
+      hasPendingGistChanges,
+      syncStatus: error.message,
+    };
+  }
+
+  return {
+    gistLoaded,
+    revision,
+    clearRevision: false,
+    hasPendingGistChanges,
+    syncStatus: `Erro ao salvar: ${error?.message || error}`,
   };
 }

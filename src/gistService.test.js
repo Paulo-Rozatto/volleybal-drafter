@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  GIST_EXPECTED_REVISION_REQUIRED_MESSAGE,
   GIST_ID,
   loadGistState,
   loadPlayersFromGist,
@@ -35,12 +36,27 @@ function jsonResponse(body, { status = 200, statusText = 'OK' } = {}) {
   };
 }
 
-function gistPayload(files) {
-  return { files };
+function gistPayload(files, extras = {}) {
+  const payload = { files, ...extras };
+  if (!Object.prototype.hasOwnProperty.call(payload, 'history') && payload.updated_at == null) {
+    payload.history = [{ version: 'rev-test' }];
+  }
+  return payload;
 }
 
 function mockFetch(response) {
   return vi.fn(async () => response);
+}
+
+function mockFetchQueue(responses) {
+  const queue = [...responses];
+  return vi.fn(async () => {
+    const next = queue.shift();
+    if (next == null) {
+      throw new Error('fetch inesperado');
+    }
+    return typeof next === 'function' ? next() : next;
+  });
 }
 
 function captureConsole() {
@@ -99,6 +115,7 @@ describe('loadGistState', () => {
       rounds: [],
     });
     expect(state.gameSessions.sessions[0]).not.toHaveProperty('pairs');
+    expect(state.revision).toBe('version:rev-test');
   });
 
   it('GET V2 valida sem migrar', async () => {
@@ -118,6 +135,7 @@ describe('loadGistState', () => {
     expect(state.migrated).toBe(false);
     expect(state.sourceVersion).toBe(2);
     expect(state.gameSessions).toEqual(createEmptyGameSessionsDocument());
+    expect(state.revision).toBe('version:rev-test');
   });
 
   it('retorna array vazio quando players.json está ausente e ainda migra encontros V1', async () => {
@@ -291,17 +309,28 @@ describe('loadGistState', () => {
 });
 
 describe('patchGistFiles e saveGistState', () => {
-  it('salva os dois arquivos em um único PATCH', async () => {
+  it('salva os dois arquivos em um único PATCH depois do GET de preflight', async () => {
     const players = [{ id: 'p1' }];
     const gameSessions = createEmptyGameSessionsDocument();
-    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
+    const fetchImpl = mockFetchQueue([
+      jsonResponse(gistPayload({})),
+      jsonResponse({ id: GIST_ID, history: [{ version: 'rev-after' }] }),
+    ]);
 
-    await saveGistState({ players, gameSessions, token: TOKEN, fetchImpl });
+    const saved = await saveGistState({
+      players,
+      gameSessions,
+      expectedRevision: 'version:rev-test',
+      token: TOKEN,
+      fetchImpl,
+    });
 
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const [, options] = fetchImpl.mock.calls[0];
-    expect(options.method).toBe('PATCH');
-    const body = JSON.parse(options.body);
+    expect(saved.revision).toBe('version:rev-after');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[0][1].method).toBeUndefined();
+    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBeUndefined();
+    expect(fetchImpl.mock.calls[1][1].method).toBe('PATCH');
+    const body = JSON.parse(fetchImpl.mock.calls[1][1].body);
     expect(Object.keys(body.files).sort()).toEqual(
       [GAME_SESSIONS_FILENAME, PLAYERS_FILENAME].sort()
     );
@@ -381,7 +410,7 @@ describe('patchGistFiles e saveGistState', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('exige token', async () => {
+  it('exige revisão esperada antes de qualquer fetch', async () => {
     const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
     await expect(
       patchGistFiles({ [PLAYERS_FILENAME]: [] }, '', { fetchImpl })
@@ -390,9 +419,10 @@ describe('patchGistFiles e saveGistState', () => {
       saveGistState({
         players: [],
         gameSessions: createEmptyGameSessionsDocument(),
+        token: TOKEN,
         fetchImpl,
       })
-    ).rejects.toThrow('GitHub Personal Access Token is required to save.');
+    ).rejects.toThrow(GIST_EXPECTED_REVISION_REQUIRED_MESSAGE);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -404,13 +434,18 @@ describe('patchGistFiles e saveGistState', () => {
   });
 
   it('não registra o token em logs', async () => {
-    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
+    const fetchImpl = mockFetchQueue([
+      jsonResponse(gistPayload({})),
+      jsonResponse({ id: GIST_ID, history: [{ version: 'rev-after' }] }),
+      jsonResponse({ id: GIST_ID }),
+    ]);
     const consoleCapture = captureConsole();
 
     try {
       await saveGistState({
         players: [],
         gameSessions: createEmptyGameSessionsDocument(),
+        expectedRevision: 'version:rev-test',
         token: TOKEN,
         fetchImpl,
       });

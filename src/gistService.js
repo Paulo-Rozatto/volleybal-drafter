@@ -4,12 +4,26 @@ import {
   interpretGameSessionsJson,
   validateGameSessionsDocument,
 } from './persistence/gameSessionsDocument.js';
+import {
+  extractGistRevision,
+  GIST_EXPECTED_REVISION_REQUIRED_MESSAGE,
+  GistRevisionConflictError,
+} from './gistRevision.js';
 
 export const GIST_ID = '58f047706f0f4c48bc83b18aab5e5949';
 export const DEFAULT_FILENAME = PLAYERS_FILENAME;
 export const ENCRYPTED_GITHUB_TOKEN = 'Dh4mcqVeMAbw4SEOao+YGy+FZy6eEzQDxZ3fu30e3XuRWA7d/GATh9n0dQASmvfH5DLwOCJT+uak41sEDSPlolIN1NyCsqBc0olt7GkR7mIUStS1dFTA+cjZmaBlAtmPDOqFrxsA4LsnrxES85OWKKxxjUdoWWFDuQ==';
 
 export { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME };
+export {
+  extractGistRevision,
+  GIST_EXPECTED_REVISION_REQUIRED_MESSAGE,
+  GIST_REVISION_CONFLICT,
+  GIST_REVISION_CONFLICT_MESSAGE,
+  GIST_REVISION_MISSING_MESSAGE,
+  GistRevisionConflictError,
+  isGistRevisionConflict,
+} from './gistRevision.js';
 
 function gistUrl() {
   return `https://api.github.com/gists/${GIST_ID}`;
@@ -68,7 +82,11 @@ function parseGameSessionsContent(content) {
   }
 }
 
-async function fetchGistFiles(fetchImpl) {
+function isUsableRevision(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+async function fetchGist(fetchImpl) {
   const response = await resolveFetch(fetchImpl)(gistUrl(), {
     headers: { Accept: 'application/vnd.github.v3+json' },
   });
@@ -76,11 +94,14 @@ async function fetchGistFiles(fetchImpl) {
   assertOk(response, 'carregar');
 
   const data = await response.json();
-  return data.files ?? {};
+  return {
+    files: data.files ?? {},
+    revision: extractGistRevision(data),
+  };
 }
 
 export async function loadGistState({ fetchImpl } = {}) {
-  const files = await fetchGistFiles(fetchImpl);
+  const { files, revision } = await fetchGist(fetchImpl);
   const sessions = parseGameSessionsContent(files[GAME_SESSIONS_FILENAME]?.content);
 
   return {
@@ -88,6 +109,7 @@ export async function loadGistState({ fetchImpl } = {}) {
     gameSessions: sessions.document,
     migrated: sessions.migrated,
     sourceVersion: sessions.sourceVersion,
+    revision,
   };
 }
 
@@ -124,24 +146,61 @@ export async function patchGistFiles(fileMap, token, { fetchImpl } = {}) {
   return response.json();
 }
 
-export async function saveGistState({ players, gameSessions, token, fetchImpl } = {}) {
+async function resolveSaveToken({ token, getToken }) {
+  if (typeof getToken === 'function') {
+    return getToken();
+  }
+  return token;
+}
+
+function readSavedRevision(patchBody) {
+  try {
+    return extractGistRevision(patchBody);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveGistState({
+  players,
+  gameSessions,
+  expectedRevision,
+  token,
+  getToken,
+  fetchImpl,
+} = {}) {
   if (!Array.isArray(players)) {
     throw new Error('players precisa ser um array.');
   }
   const validSessions = validateGameSessionsDocument(gameSessions);
 
-  return patchGistFiles(
+  if (!isUsableRevision(expectedRevision)) {
+    throw new Error(GIST_EXPECTED_REVISION_REQUIRED_MESSAGE);
+  }
+
+  const { revision: currentRevision } = await fetchGist(fetchImpl);
+  if (currentRevision !== expectedRevision) {
+    throw new GistRevisionConflictError();
+  }
+
+  const resolvedToken = await resolveSaveToken({ token, getToken });
+  const patchBody = await patchGistFiles(
     {
       [PLAYERS_FILENAME]: players,
       [GAME_SESSIONS_FILENAME]: validSessions,
     },
-    token,
+    resolvedToken,
     { fetchImpl }
   );
+
+  return {
+    revision: readSavedRevision(patchBody),
+    response: patchBody,
+  };
 }
 
 export async function loadPlayersFromGist({ fetchImpl } = {}) {
-  const files = await fetchGistFiles(fetchImpl);
+  const { files } = await fetchGist(fetchImpl);
   return parsePlayersContent(files[PLAYERS_FILENAME]?.content);
 }
 

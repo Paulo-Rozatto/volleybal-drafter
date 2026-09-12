@@ -9,6 +9,7 @@ import {
   createSyncLock,
   getGistGateMessage,
   gistLoadNeedsFetch,
+  GIST_KEEP_LOCAL_MESSAGE,
   GIST_LOAD_STRATEGY,
   GIST_SESSIONS_MIGRATED_MESSAGE,
   markPendingGistChanges,
@@ -180,6 +181,9 @@ describe('mensagens e permissão de salvamento', () => {
     expect(canSaveToGist({ gistLoaded: true, isSyncing: false, hasPassword: true })).toBe(true);
     expect(canSaveToGist({ gistLoaded: true, isSyncing: true, hasPassword: true })).toBe(false);
     expect(canSaveToGist({ gistLoaded: true, isSyncing: false, hasPassword: false })).toBe(false);
+    expect(
+      canSaveToGist({ gistLoaded: true, isSyncing: false, hasPassword: true, hasRevision: false })
+    ).toBe(false);
   });
 
   it('não bloqueia o salvamento só por existir alteração pendente', () => {
@@ -269,9 +273,7 @@ describe('estratégias de carregamento do Gist', () => {
     expect(result.gameSessions).toBe(localGameSessions);
     expect(result.gistLoaded).toBe(true);
     expect(result.hasPendingGistChanges).toBe(true);
-    expect(result.syncStatus).toBe(
-      'Gist carregado. As alterações locais foram mantidas e ainda precisam ser salvas.'
-    );
+    expect(result.syncStatus).toBe(GIST_KEEP_LOCAL_MESSAGE);
   });
 
   it('Usar dados do Gist V2 limpa a pendência', () => {
