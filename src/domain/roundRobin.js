@@ -4,27 +4,43 @@ function defaultIdGenerator() {
   return crypto.randomUUID();
 }
 
-function assertPairs(pairs) {
-  if (!Array.isArray(pairs) || pairs.length < 2) {
-    throw new Error('São necessárias pelo menos duas duplas para gerar o torneio.');
+function assertItemIds(items, { tooFew, invalidId, duplicateId }) {
+  if (!Array.isArray(items) || items.length < 2) {
+    throw new Error(tooFew);
   }
 
   const ids = [];
   const seen = new Set();
 
-  for (const pair of pairs) {
-    const id = pair?.id;
+  for (const item of items) {
+    const id = item?.id;
     if (typeof id !== 'string' || id.trim().length === 0) {
-      throw new Error('Todas as duplas precisam ter um ID válido.');
+      throw new Error(invalidId);
     }
     if (seen.has(id)) {
-      throw new Error('As duplas precisam ter IDs distintos.');
+      throw new Error(duplicateId);
     }
     seen.add(id);
     ids.push(id);
   }
 
   return ids;
+}
+
+function assertPairs(pairs) {
+  return assertItemIds(pairs, {
+    tooFew: 'São necessárias pelo menos duas duplas para gerar o torneio.',
+    invalidId: 'Todas as duplas precisam ter um ID válido.',
+    duplicateId: 'As duplas precisam ter IDs distintos.',
+  });
+}
+
+function assertTeams(items) {
+  return assertItemIds(items, {
+    tooFew: 'São necessários pelo menos dois times para gerar o torneio.',
+    invalidId: 'Todos os times precisam ter um ID válido.',
+    duplicateId: 'Os times precisam ter IDs distintos.',
+  });
 }
 
 function nextGeneratedId(idGenerator, usedIds) {
@@ -39,18 +55,79 @@ function nextGeneratedId(idGenerator, usedIds) {
   return id;
 }
 
-function createMatch(pairAId, pairBId, getId) {
-  return {
-    id: getId(),
-    pairAId,
-    pairBId,
-    scoreA: null,
-    scoreB: null,
-  };
+/**
+ * Gera o calendário todos contra todos (método do círculo / Berger) só com IDs.
+ * Não inclui placar, escalação nem campos V1. Não modifica `items`.
+ *
+ * @param {Array<{ id: string }>} items
+ * @param {() => string} [idGenerator]
+ * @returns {Array<{
+ *   id: string,
+ *   number: number,
+ *   byeTeamId: string | null,
+ *   matches: Array<{
+ *     id: string,
+ *     teamAId: string,
+ *     teamBId: string
+ *   }>
+ * }>}
+ */
+export function generateRoundRobinSchedule(items, idGenerator = defaultIdGenerator) {
+  const ids = assertTeams(items);
+
+  if (typeof idGenerator !== 'function') {
+    throw new Error('O gerador de IDs precisa ser uma função.');
+  }
+
+  const usedIds = new Set();
+  const getId = () => nextGeneratedId(idGenerator, usedIds);
+  const isOdd = ids.length % 2 === 1;
+  const rotation = isOdd ? [...ids, BYE] : [...ids];
+  const n = rotation.length;
+  const roundCount = n - 1;
+  const half = n / 2;
+  const rounds = [];
+
+  for (let roundIndex = 0; roundIndex < roundCount; roundIndex += 1) {
+    const matches = [];
+    let byeTeamId = null;
+
+    for (let i = 0; i < half; i += 1) {
+      const home = rotation[i];
+      const away = rotation[n - 1 - i];
+
+      if (home === BYE) {
+        byeTeamId = away;
+        continue;
+      }
+      if (away === BYE) {
+        byeTeamId = home;
+        continue;
+      }
+
+      matches.push({
+        id: getId(),
+        teamAId: home,
+        teamBId: away,
+      });
+    }
+
+    rounds.push({
+      id: getId(),
+      number: roundIndex + 1,
+      byeTeamId,
+      matches,
+    });
+
+    const last = rotation.pop();
+    rotation.splice(1, 0, last);
+  }
+
+  return rounds;
 }
 
 /**
- * Gera rodadas de um torneio todos contra todos (método do círculo / Berger).
+ * Wrapper V1: mapeia o calendário genérico para duplas e placares nulos.
  * Não modifica `pairs` nem os objetos recebidos.
  *
  * @param {Array<{ id: string }>} pairs
@@ -69,51 +146,17 @@ function createMatch(pairAId, pairBId, getId) {
  * }>}
  */
 export function generateRoundRobin(pairs, idGenerator = defaultIdGenerator) {
-  const ids = assertPairs(pairs);
-
-  if (typeof idGenerator !== 'function') {
-    throw new Error('O gerador de IDs precisa ser uma função.');
-  }
-
-  const usedIds = new Set();
-  const getId = () => nextGeneratedId(idGenerator, usedIds);
-  const isOdd = ids.length % 2 === 1;
-  const rotation = isOdd ? [...ids, BYE] : [...ids];
-  const n = rotation.length;
-  const roundCount = n - 1;
-  const half = n / 2;
-  const rounds = [];
-
-  for (let roundIndex = 0; roundIndex < roundCount; roundIndex += 1) {
-    const matches = [];
-    let byePairId = null;
-
-    for (let i = 0; i < half; i += 1) {
-      const home = rotation[i];
-      const away = rotation[n - 1 - i];
-
-      if (home === BYE) {
-        byePairId = away;
-        continue;
-      }
-      if (away === BYE) {
-        byePairId = home;
-        continue;
-      }
-
-      matches.push(createMatch(home, away, getId));
-    }
-
-    rounds.push({
-      id: getId(),
-      number: roundIndex + 1,
-      byePairId,
-      matches,
-    });
-
-    const last = rotation.pop();
-    rotation.splice(1, 0, last);
-  }
-
-  return rounds;
+  assertPairs(pairs);
+  return generateRoundRobinSchedule(pairs, idGenerator).map((round) => ({
+    id: round.id,
+    number: round.number,
+    byePairId: round.byeTeamId,
+    matches: round.matches.map((match) => ({
+      id: match.id,
+      pairAId: match.teamAId,
+      pairBId: match.teamBId,
+      scoreA: null,
+      scoreB: null,
+    })),
+  }));
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateRoundRobin } from './roundRobin.js';
+import { generateRoundRobin, generateRoundRobinSchedule } from './roundRobin.js';
 
 function makePairs(count) {
   return Array.from({ length: count }, (_, index) => ({
@@ -204,6 +204,173 @@ describe('generateRoundRobin', () => {
   it('rejeita colisão entre ID de partida e ID de rodada', () => {
     const ids = ['match-1', 'match-2', 'match-1'];
     expect(() => generateRoundRobin(makePairs(4), () => ids.shift())).toThrow(
+      'O gerador de IDs retornou um identificador repetido.'
+    );
+  });
+
+  it('preserva o contrato V1 sem campos de time', () => {
+    const rounds = generateRoundRobin(makePairs(3), createIdGenerator());
+    const payload = JSON.stringify(rounds);
+
+    expect(rounds[0]).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        number: 1,
+      })
+    );
+    expect(rounds[0]).toHaveProperty('byePairId');
+    expect(rounds[0]).not.toHaveProperty('byeTeamId');
+    expect(rounds[0].matches[0]).toEqual({
+      id: expect.any(String),
+      pairAId: expect.any(String),
+      pairBId: expect.any(String),
+      scoreA: null,
+      scoreB: null,
+    });
+    expect(payload).not.toContain('teamAId');
+    expect(payload).not.toContain('teamBId');
+    expect(payload).not.toContain('byeTeamId');
+    expect(payload).not.toContain('lineupA');
+    expect(payload).not.toContain('lineupB');
+  });
+});
+
+function makeTeams(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `team-${index + 1}`,
+    extra: { label: `Time ${index + 1}` },
+  }));
+}
+
+function scheduleMatchKey(teamAId, teamBId) {
+  return teamAId < teamBId ? `${teamAId}|${teamBId}` : `${teamBId}|${teamAId}`;
+}
+
+function assertScheduleInvariants(teams, rounds) {
+  const n = teams.length;
+  const teamIds = teams.map((team) => team.id);
+
+  expect(rounds).toHaveLength(expectedRoundCount(n));
+  expect(allMatches(rounds)).toHaveLength(expectedMatchCount(n));
+
+  const pairingKeys = new Set();
+  const roundIds = new Set();
+  const matchIds = new Set();
+
+  rounds.forEach((round, index) => {
+    expect(round.number).toBe(index + 1);
+    expect(round.id).toEqual(expect.any(String));
+    expect(round.id.length).toBeGreaterThan(0);
+    roundIds.add(round.id);
+    expect(round).not.toHaveProperty('byePairId');
+
+    const seenThisRound = new Set();
+
+    round.matches.forEach((match) => {
+      expect(match.teamAId).not.toBe(match.teamBId);
+      expect(teamIds).toContain(match.teamAId);
+      expect(teamIds).toContain(match.teamBId);
+      expect(match).not.toHaveProperty('scoreA');
+      expect(match).not.toHaveProperty('scoreB');
+      expect(match).not.toHaveProperty('lineupA');
+      expect(match).not.toHaveProperty('lineupB');
+      expect(match).not.toHaveProperty('pairAId');
+      expect(match).not.toHaveProperty('pairBId');
+      expect(match.id).toEqual(expect.any(String));
+      expect(match.id.length).toBeGreaterThan(0);
+      matchIds.add(match.id);
+
+      const key = scheduleMatchKey(match.teamAId, match.teamBId);
+      expect(pairingKeys.has(key)).toBe(false);
+      pairingKeys.add(key);
+
+      expect(seenThisRound.has(match.teamAId)).toBe(false);
+      expect(seenThisRound.has(match.teamBId)).toBe(false);
+      seenThisRound.add(match.teamAId);
+      seenThisRound.add(match.teamBId);
+    });
+
+    if (n % 2 === 0) {
+      expect(round.byeTeamId).toBeNull();
+    } else {
+      expect(teamIds).toContain(round.byeTeamId);
+      expect(seenThisRound.has(round.byeTeamId)).toBe(false);
+      seenThisRound.add(round.byeTeamId);
+    }
+
+    expect(seenThisRound.size).toBe(n);
+  });
+
+  expect(pairingKeys.size).toBe(expectedMatchCount(n));
+  expect(roundIds.size).toBe(rounds.length);
+  expect(matchIds.size).toBe(allMatches(rounds).length);
+  expect(new Set([...roundIds, ...matchIds]).size).toBe(rounds.length + allMatches(rounds).length);
+
+  if (n % 2 === 1) {
+    const byes = rounds.map((round) => round.byeTeamId);
+    expect(new Set(byes).size).toBe(n);
+    expect([...byes].sort()).toEqual([...teamIds].sort());
+  }
+}
+
+describe('generateRoundRobinSchedule', () => {
+  [2, 3, 4, 5, 6, 7].forEach((n) => {
+    it(`gera um todos-contra-todos válido para ${n} times`, () => {
+      const teams = makeTeams(n);
+      const rounds = generateRoundRobinSchedule(teams, createIdGenerator());
+      assertScheduleInvariants(teams, rounds);
+    });
+  });
+
+  it('não modifica o array nem os objetos recebidos', () => {
+    const teams = makeTeams(4);
+    const original = structuredClone(teams);
+    const firstTeam = teams[0];
+    const extra = teams[0].extra;
+
+    generateRoundRobinSchedule(teams, createIdGenerator());
+
+    expect(teams).toEqual(original);
+    expect(teams[0]).toBe(firstTeam);
+    expect(teams[0].extra).toBe(extra);
+  });
+
+  it('usa somente os IDs dos times e nunca expõe BYE', () => {
+    const teams = makeTeams(3);
+    const rounds = generateRoundRobinSchedule(teams, createIdGenerator());
+    const usedIds = rounds.flatMap((round) => [
+      round.byeTeamId,
+      ...round.matches.flatMap((match) => [match.teamAId, match.teamBId]),
+    ]);
+
+    usedIds.forEach((id) => {
+      expect(id === null || teams.some((team) => team.id === id)).toBe(true);
+      expect(typeof id === 'symbol').toBe(false);
+    });
+    expect(JSON.stringify(rounds)).not.toContain('Time ');
+    expect(JSON.stringify(rounds)).not.toContain('extra');
+  });
+
+  it('rejeita menos de dois times e IDs inválidos sem resultado parcial', () => {
+    expect(() => generateRoundRobinSchedule([], createIdGenerator())).toThrow(
+      'São necessários pelo menos dois times para gerar o torneio.'
+    );
+    expect(() => generateRoundRobinSchedule(makeTeams(1), createIdGenerator())).toThrow(
+      'São necessários pelo menos dois times para gerar o torneio.'
+    );
+    expect(() => generateRoundRobinSchedule([{ id: 'a' }, { id: '   ' }], createIdGenerator())).toThrow(
+      'Todos os times precisam ter um ID válido.'
+    );
+    expect(() => generateRoundRobinSchedule([{ id: 'same' }, { id: 'same' }], createIdGenerator())).toThrow(
+      'Os times precisam ter IDs distintos.'
+    );
+  });
+
+  it('rejeita gerador inválido e IDs gerados repetidos', () => {
+    expect(() => generateRoundRobinSchedule(makeTeams(2), 'uuid')).toThrow(
+      'O gerador de IDs precisa ser uma função.'
+    );
+    expect(() => generateRoundRobinSchedule(makeTeams(2), () => 'same')).toThrow(
       'O gerador de IDs retornou um identificador repetido.'
     );
   });
