@@ -1,7 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import PlayerList from './PlayerList';
-import { GIST_ID, DEFAULT_FILENAME, ENCRYPTED_GITHUB_TOKEN } from './gistService';
+import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
+import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
+import {
+  canSaveToGist,
+  getGistGateMessage,
+  nextGameSessionsDocument,
+  persistLocalGameSessions,
+  readLocalGameSessions,
+} from './persistence/syncHelpers.js';
 
 
 const INITIAL_ROSTER = [];
@@ -34,10 +42,26 @@ export default function App() {
   const [draftPreview, setDraftPreview] = useState(null);
   const [currentDraftIndex, setCurrentDraftIndex] = useState(0);
 
+  const [localSessions] = useState(() => readLocalGameSessions());
+  const [gameSessions, setGameSessions] = useState(
+    () => localSessions.document ?? createEmptyGameSessionsDocument()
+  );
+  const [localCacheError, setLocalCacheError] = useState(() => localSessions.error);
+  const [localWriteError, setLocalWriteError] = useState(null);
+
   // --- GitHub Gist Sync States ---
   const [appPassword, setAppPassword] = useState(() => sessionStorage.getItem('app_password') || '');
   const [syncStatus, setSyncStatus] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [gistLoaded, setGistLoaded] = useState(false);
+  const [hasPendingGistChanges, setHasPendingGistChanges] = useState(false);
+
+  const gistGateMessage = getGistGateMessage({ gistLoaded, hasPendingGistChanges });
+  const saveEnabled = canSaveToGist({
+    gistLoaded,
+    isSyncing,
+    hasPassword: Boolean(appPassword),
+  });
 
   // LocalStorage Persistence
   useEffect(() => {
@@ -48,35 +72,43 @@ export default function App() {
     localStorage.setItem('volleyDrafts', JSON.stringify(draftHistory));
   }, [draftHistory]);
 
+  const updatePersistedPlayers = (updater) => {
+    setPlayers(updater);
+    setHasPendingGistChanges(true);
+  };
+
   // --- Gist API Handlers ---
   const handleLoadGist = async () => {
+    if (hasPendingGistChanges) {
+      const confirmed = window.confirm(
+        'Há alterações não salvas no Gist. Carregar agora vai descartá-las. Continuar?'
+      );
+      if (!confirmed) return;
+    }
+
     try {
       setIsSyncing(true);
       setSyncStatus('Carregando do Gist...');
-      const response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-        headers: { Accept: 'application/vnd.github.v3+json' },
-      });
+      const state = await loadGistState();
+      const nextSessions = nextGameSessionsDocument(
+        createEmptyGameSessionsDocument(),
+        state.gameSessions
+      );
+      const persistResult = persistLocalGameSessions(nextSessions);
 
-      if (!response.ok) throw new Error(`Status ${response.status}`);
-      const data = await response.json();
-      const file = data.files[DEFAULT_FILENAME] || Object.values(data.files)[0];
-
-      if (file && file.content) {
-        console.log(file.content)
-        const loadedPlayers = JSON.parse(file.content);
-        setPlayers(loadedPlayers);
-        setSyncStatus('Carregado do Gist com sucesso!');
-      } else {
-        setSyncStatus('Nenhum dado encontrado no Gist.');
-      }
+      setPlayers(state.players);
+      setGameSessions(nextSessions);
+      setLocalCacheError(null);
+      setLocalWriteError(persistResult.ok ? null : persistResult.error);
+      setGistLoaded(true);
+      setHasPendingGistChanges(false);
+      setSyncStatus('Carregado do Gist com sucesso!');
     } catch (err) {
       setSyncStatus(`Erro ao carregar: ${err.message}`);
     } finally {
       setIsSyncing(false);
     }
   };
-
-
 
   // Keep password in sessionStorage so you only type it once per session on any device
   const handlePasswordChange = (e) => {
@@ -86,44 +118,33 @@ export default function App() {
   };
 
   const handleSaveGist = async () => {
+    if (!gistLoaded) {
+      setSyncStatus('Carregue o Gist antes de salvar');
+      return;
+    }
+
     if (!appPassword) {
       alert('Por favor, digite sua senha de desbloqueio.');
       return;
     }
 
+    let decryptedPat;
     try {
       setIsSyncing(true);
       setSyncStatus('Descriptografando token...');
-
-      // 1. Decrypt token in RAM using the typed password
-      const decryptedPat = await decryptToken(ENCRYPTED_GITHUB_TOKEN, appPassword);
-      console.log(decryptedPat)
-
+      decryptedPat = await decryptToken(ENCRYPTED_GITHUB_TOKEN, appPassword);
       setSyncStatus('Salvando no Gist...');
-
-      // 2. Send PATCH request with decrypted token
-      const response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-        method: 'PATCH',
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'Authorization': `Bearer ${decryptedPat}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          files: {
-            'players.json': {
-              content: JSON.stringify(players, null, 2),
-            },
-          },
-        }),
+      await saveGistState({
+        players,
+        gameSessions,
+        token: decryptedPat,
       });
-
-      if (!response.ok) throw new Error(`Status ${response.status}`);
+      setHasPendingGistChanges(false);
       setSyncStatus('Salvo no Gist com sucesso!');
     } catch (err) {
-      console.error(err)
-      setSyncStatus('Senha incorreta ou erro no Gist!');
+      setSyncStatus(`Erro ao salvar: ${err.message}`);
     } finally {
+      decryptedPat = undefined;
       setIsSyncing(false);
     }
   };
@@ -149,16 +170,16 @@ export default function App() {
   // --- State Updates ---
   const handleUpdateSessionPlayer = (id, field, value) => {
     setSessionPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
-    setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+    updatePersistedPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
   };
 
   const handleUpdatePlayer = (id, field, value) => {
-    setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+    updatePersistedPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
     setSessionPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
   };
 
   const handleDeletePlayer = (id) => {
-    setPlayers((prev) => prev.filter((p) => p.id !== id));
+    updatePersistedPlayers((prev) => prev.filter((p) => p.id !== id));
     setSessionPlayers((prev) => prev.filter((p) => p.id !== id));
   };
 
@@ -178,7 +199,7 @@ export default function App() {
       height: 'short',
     };
 
-    setPlayers((prev) => [...prev, newP]);
+    updatePersistedPlayers((prev) => [...prev, newP]);
     setSessionPlayers((prev) => [...prev, newP]);
     setNewPlayerName('');
   };
@@ -561,13 +582,29 @@ export default function App() {
 
                   <button
                     onClick={handleSaveGist}
-                    disabled={isSyncing || !appPassword}
+                    disabled={!saveEnabled}
                     className="px-3 py-2 rounded font-bold cursor-pointer disabled:opacity-50"
                     style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
                   >
                     💾 Salvar no Gist
                   </button>
                 </div>
+
+                {localCacheError && (
+                  <p className="text-xs font-semibold text-red-500">
+                    Erro no cache local de encontros: {localCacheError}
+                  </p>
+                )}
+
+                {localWriteError && (
+                  <p className="text-xs font-semibold text-red-500">
+                    Erro ao salvar encontros no cache local: {localWriteError}
+                  </p>
+                )}
+
+                <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
+                  {gistGateMessage}
+                </p>
 
                 {syncStatus && (
                   <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
