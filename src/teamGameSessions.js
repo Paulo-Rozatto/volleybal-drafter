@@ -2,9 +2,11 @@ import { generateRoundRobinSchedule } from './domain/roundRobin.js';
 import { countSessionMatches, validateDate, validateScore } from './domain/sessionValidation.js';
 import {
   TEAM_SESSION_SCHEMA_VERSION,
+  cloneTeamMembers,
   cloneV2Team,
   createInitialLineups,
   validateFormat,
+  validateMatchLineups,
   validateSessionTeams,
   validateTeam,
 } from './domain/teamSession.js';
@@ -590,22 +592,28 @@ export function resetTeamSessionToDraftForTeamEditing(document, sessionId, optio
   });
 }
 
-function locateInProgressMatch(document, sessionId, roundId, matchId) {
+const SCORE_LOCK_MESSAGES = {
+  finished: 'Não é possível alterar placares de um encontro finalizado.',
+  notInProgress: 'Só é possível alterar placares em um encontro em andamento.',
+};
+
+const LINEUP_LOCK_MESSAGES = {
+  finished: 'Não é possível alterar escalações de um encontro finalizado.',
+  notInProgress: 'Só é possível alterar escalações em um encontro em andamento.',
+};
+
+function locateInProgressMatch(document, sessionId, roundId, matchId, messages = SCORE_LOCK_MESSAGES) {
   const session = findSession(document, sessionId);
   if (!session) {
     return fail([error('SESSION_NOT_FOUND', 'Encontro não encontrado.')]);
   }
 
   if (session.status === 'finished') {
-    return fail([
-      error('SESSION_FINISHED', 'Não é possível alterar placares de um encontro finalizado.'),
-    ]);
+    return fail([error('SESSION_FINISHED', messages.finished)]);
   }
 
   if (session.status !== 'in_progress') {
-    return fail([
-      error('SESSION_NOT_IN_PROGRESS', 'Só é possível alterar placares em um encontro em andamento.'),
-    ]);
+    return fail([error('SESSION_NOT_IN_PROGRESS', messages.notInProgress)]);
   }
 
   const round = (session.rounds ?? []).find((item) => item?.id === roundId);
@@ -685,4 +693,249 @@ export function clearTeamSessionMatchScore(document, sessionId, roundId, matchId
   }
 
   return commitMatchScore(document, located.session, roundId, matchId, null, null, now);
+}
+
+export function playerBaseTeam(teams, playerId) {
+  if (typeof playerId !== 'string' || playerId.trim().length === 0) return null;
+  for (const team of teams ?? []) {
+    if ((team?.members ?? []).some((member) => member?.playerId === playerId)) {
+      return team;
+    }
+  }
+  return null;
+}
+
+export function playerBaseTeamIndex(teams, playerId) {
+  if (typeof playerId !== 'string' || playerId.trim().length === 0) return -1;
+  return (teams ?? []).findIndex((team) =>
+    (team?.members ?? []).some((member) => member?.playerId === playerId)
+  );
+}
+
+export function eligiblePlayersForMatchSide(teams, match, side, options = {}) {
+  const ownTeamId = side === 'A' ? match?.teamAId : match?.teamBId;
+  const opponentTeamId = side === 'A' ? match?.teamBId : match?.teamAId;
+  const blocked = new Set(options.selectedOpponentIds ?? []);
+  const rosterById = new Map((options.roster ?? []).map((player) => [player?.id, player]));
+  const candidates = [];
+
+  (teams ?? []).forEach((team, teamIndex) => {
+    if (!team?.id || team.id === opponentTeamId) return;
+    for (const member of team?.members ?? []) {
+      const playerId = member?.playerId;
+      if (typeof playerId !== 'string' || playerId.trim().length === 0) continue;
+      if (blocked.has(playerId)) continue;
+      const rosterPlayer = rosterById.get(playerId);
+      candidates.push({
+        id: playerId,
+        name:
+          typeof rosterPlayer?.name === 'string' && rosterPlayer.name.trim()
+            ? rosterPlayer.name.trim()
+            : member.playerName,
+        teamId: team.id,
+        teamIndex,
+        isOwnTeam: team.id === ownTeamId,
+      });
+    }
+  });
+
+  return candidates;
+}
+
+export function restoreMatchLineupsFromBaseTeams(teams, match) {
+  const teamA = (teams ?? []).find((team) => team?.id === match?.teamAId) ?? null;
+  const teamB = (teams ?? []).find((team) => team?.id === match?.teamBId) ?? null;
+
+  if (!teamA || !teamB) {
+    return {
+      ok: false,
+      errors: [error('MATCH_TEAM_NOT_FOUND', 'Time referenciado na partida não existe.')],
+      lineupAPlayerIds: null,
+      lineupBPlayerIds: null,
+    };
+  }
+
+  if ((teamA.members?.length ?? 0) < 1 || (teamB.members?.length ?? 0) < 1) {
+    return {
+      ok: false,
+      errors: [
+        error(
+          'TEAM_EMPTY',
+          'Cada time precisa de pelo menos um jogador para restaurar as escalações.'
+        ),
+      ],
+      lineupAPlayerIds: null,
+      lineupBPlayerIds: null,
+    };
+  }
+
+  return {
+    ok: true,
+    errors: [],
+    lineupAPlayerIds: teamA.members.map((member) => member.playerId),
+    lineupBPlayerIds: teamB.members.map((member) => member.playerId),
+  };
+}
+
+function validateLineupTeamAssignments(match, teams) {
+  const errors = [];
+
+  const checkSide = (lineup, field, opponentTeamId) => {
+    for (const member of Array.isArray(lineup) ? lineup : []) {
+      const playerId = member?.playerId;
+      if (typeof playerId !== 'string' || playerId.trim().length === 0) continue;
+      const base = playerBaseTeam(teams, playerId);
+      if (!base) {
+        errors.push(
+          error(
+            'LINEUP_PLAYER_WITHOUT_TEAM',
+            'O jogador precisa pertencer a um time-base deste encontro.',
+            { field, playerId }
+          )
+        );
+      } else if (base.id === opponentTeamId) {
+        errors.push(
+          error(
+            'LINEUP_PLAYER_FROM_OPPONENT',
+            'Jogador do time adversário não pode atuar neste lado.',
+            { field, playerId }
+          )
+        );
+      }
+    }
+  };
+
+  checkSide(match?.lineupA, 'lineupA', match?.teamBId);
+  checkSide(match?.lineupB, 'lineupB', match?.teamAId);
+  return errors;
+}
+
+export function describeMatchLineupDraft({
+  lineupAPlayerIds,
+  lineupBPlayerIds,
+  match,
+  teams,
+  format,
+  roster,
+} = {}) {
+  if (!Array.isArray(lineupAPlayerIds) || !Array.isArray(lineupBPlayerIds)) {
+    return fail([error('LINEUP_INVALID', 'A escalação precisa ser uma lista de jogadores.')]);
+  }
+
+  const lineupA = membersFromIds(lineupAPlayerIds, roster);
+  const lineupB = membersFromIds(lineupBPlayerIds, roster);
+  const proposed = {
+    teamAId: match?.teamAId,
+    teamBId: match?.teamBId,
+    lineupA,
+    lineupB,
+  };
+
+  const matchResult = validateMatchLineups(proposed, format, teams, roster);
+  const assignmentErrors = validateLineupTeamAssignments(proposed, teams);
+  const errors = [...(matchResult.ok ? [] : matchResult.errors), ...assignmentErrors];
+  if (errors.length > 0) return fail(errors);
+
+  return { ok: true, errors: [], lineupA, lineupB };
+}
+
+function withUpdatedMatchLineups(session, roundId, matchId, lineupA, lineupB, now) {
+  const clock = now ?? (() => new Date());
+  return {
+    ...session,
+    format: {
+      teamSize: session.format.teamSize,
+      teamCount: session.format.teamCount,
+    },
+    teams: cloneTeams(session.teams),
+    rounds: (session.rounds ?? []).map((round) => {
+      if (round.id !== roundId) return round;
+      return {
+        ...round,
+        matches: (round.matches ?? []).map((match) =>
+          match.id === matchId
+            ? {
+                ...match,
+                lineupA: cloneTeamMembers(lineupA),
+                lineupB: cloneTeamMembers(lineupB),
+              }
+            : match
+        ),
+      };
+    }),
+    updatedAt: clock().toISOString(),
+  };
+}
+
+export function setTeamSessionMatchLineups(
+  document,
+  sessionId,
+  roundId,
+  matchId,
+  lineupAPlayerIds,
+  lineupBPlayerIds,
+  options = {}
+) {
+  if (document == null) {
+    return fail([error('DOCUMENT_REQUIRED', 'O documento de encontros é obrigatório.')]);
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(document, 'schemaVersion')) {
+    return fail([error('SCHEMA_VERSION_REQUIRED', 'A versão do schema é obrigatória.')]);
+  }
+
+  if (document.schemaVersion !== TEAM_SESSION_SCHEMA_VERSION) {
+    return fail([
+      error(
+        'SCHEMA_VERSION_UNSUPPORTED',
+        `Versão de schema de encontros não suportada: ${String(document.schemaVersion)}.`,
+        { schemaVersion: document.schemaVersion }
+      ),
+    ]);
+  }
+
+  const located = locateInProgressMatch(
+    document,
+    sessionId,
+    roundId,
+    matchId,
+    LINEUP_LOCK_MESSAGES
+  );
+  if (!located.ok) return located;
+
+  const proposed = describeMatchLineupDraft({
+    lineupAPlayerIds,
+    lineupBPlayerIds,
+    match: located.match,
+    teams: located.session.teams,
+    format: located.session.format,
+    roster: options.roster,
+  });
+  if (!proposed.ok) return proposed;
+
+  const updatedSession = withUpdatedMatchLineups(
+    located.session,
+    roundId,
+    matchId,
+    proposed.lineupA,
+    proposed.lineupB,
+    options.now
+  );
+
+  return succeed({
+    document: replaceSession(document, located.session.id, updatedSession),
+    session: updatedSession,
+  });
+}
+
+export function classifyLineupMember(member, teams, ownTeamId) {
+  const teamIndex = playerBaseTeamIndex(teams, member?.playerId);
+  const team = teamIndex >= 0 ? teams[teamIndex] : null;
+  return {
+    playerId: member?.playerId,
+    playerName: member?.playerName,
+    teamId: team?.id ?? null,
+    teamIndex,
+    isLoan: Boolean(team && team.id !== ownTeamId),
+  };
 }

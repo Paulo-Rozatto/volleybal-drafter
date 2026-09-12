@@ -7,6 +7,9 @@ import {
   formatDoublesNames,
   formatFormatLabel,
   formatIndexedTeamNames,
+  formatLineupLoanLabel,
+  formatLineupMemberLabel,
+  formatMatchLineupCount,
   formatMatchSideLabel,
   formatSessionTeamLabel,
   formatTeamCountPhrase,
@@ -65,6 +68,30 @@ describe('terminologia de formato', () => {
     expect(alterTeamsLabel(5)).toBe('Alterar times');
     expect(drawTeamsLabel(2)).toBe('Sortear duplas');
     expect(drawTeamsLabel(4)).toBe('Sortear times');
+    expect(formatMatchLineupCount('A', 5, 6)).toBe('Time A: 5/6');
+    expect(formatMatchLineupCount('B', 2, 2)).toBe('Dupla B: 2/2');
+    expect(formatLineupLoanLabel('Luiza', 2, 6)).toBe('Luiza — empréstimo do Time 3');
+    expect(formatLineupLoanLabel('Erik', 1, 2)).toBe('Erik — empréstimo da Dupla 2');
+    expect(
+      formatLineupMemberLabel(
+        { playerId: 'p3', playerName: 'Luiza' },
+        [
+          { id: 't1', members: [{ playerId: 'p1', playerName: 'Ana' }] },
+          { id: 't2', members: [{ playerId: 'p2', playerName: 'André' }] },
+          { id: 't3', members: [{ playerId: 'p3', playerName: 'Luiza' }] },
+        ],
+        't1',
+        6
+      )
+    ).toBe('Luiza — empréstimo do Time 3');
+    expect(
+      formatLineupMemberLabel(
+        { playerId: 'p1', playerName: 'Ana' },
+        [{ id: 't1', members: [{ playerId: 'p1', playerName: 'Ana' }] }],
+        't1',
+        6
+      )
+    ).toBe('Ana');
     expect(generateRoundsConfirmationMessage(2)).toMatch(/duplas/);
     expect(generateRoundsConfirmationMessage(6)).toMatch(/times/);
     expect(resetToDraftConfirmationMessage(2)).toMatch(/duplas/);

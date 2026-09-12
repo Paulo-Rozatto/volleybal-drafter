@@ -7,17 +7,24 @@ import {
   availablePlayersForTeams,
   canEditSessionTeams,
   canGenerateTeamSessionRounds,
+  classifyLineupMember,
+  clearTeamSessionMatchScore,
   createDraftTeamSession,
+  describeMatchLineupDraft,
+  eligiblePlayersForMatchSide,
+  filterPlayersByName,
+  playerBaseTeam,
   removeSessionTeam,
   replaceSessionTeams,
+  restoreMatchLineupsFromBaseTeams,
   resetTeamSessionToDraftForTeamEditing,
+  setTeamSessionMatchLineups,
   startTeamSessionRoundRobin,
   takenTeamPlayerIds,
   teamMemberIdsInRoster,
   teamSessionIsReadyToFinalize,
   updateSessionTeam,
   setTeamSessionMatchScore,
-  clearTeamSessionMatchScore,
 } from './teamGameSessions.js';
 
 const NOW = () => new Date('2026-09-12T19:00:00.000Z');
@@ -754,5 +761,345 @@ describe('placares V2', () => {
       setTeamSessionMatchScore(original, 'session-1', round.id, match.id, 21, 21).errors[0].code
     ).toBe('SCORE_TIE');
     expect(original).toEqual(snapshot);
+  });
+});
+
+describe('escalações por partida', () => {
+  const extraRoster = [...roster, { id: 'p9', name: 'Fora', score: 1 }];
+  const sixRoster = makeRoster(16);
+
+  function sizedTeam(id, start, count) {
+    return team(
+      id,
+      sixRoster.slice(start, start + count).map((player) => member(player.id, player.name))
+    );
+  }
+
+  function matchShape({ id, teamAId, teamBId, lineupA, lineupB, scoreA = null, scoreB = null }) {
+    return { id, teamAId, teamBId, lineupA, lineupB, scoreA, scoreB };
+  }
+
+  function inProgressSixes() {
+    const teams = [sizedTeam('team-1', 0, 6), sizedTeam('team-2', 6, 5), sizedTeam('team-3', 11, 5)];
+    return documentWith(
+      draftSession({
+        name: '16/3/6',
+        status: 'in_progress',
+        updatedAt: ISO_UPDATED,
+        format: { teamSize: 6, teamCount: 3 },
+        teams,
+        rounds: [
+          {
+            id: 'r1',
+            number: 1,
+            byeTeamId: 'team-3',
+            matches: [
+              matchShape({
+                id: 'm1',
+                teamAId: 'team-1',
+                teamBId: 'team-2',
+                lineupA: teams[0].members,
+                lineupB: teams[1].members,
+                scoreA: 21,
+                scoreB: 18,
+              }),
+            ],
+          },
+          {
+            id: 'r2',
+            number: 2,
+            byeTeamId: 'team-2',
+            matches: [
+              matchShape({
+                id: 'm2',
+                teamAId: 'team-1',
+                teamBId: 'team-3',
+                lineupA: teams[0].members,
+                lineupB: teams[2].members,
+              }),
+            ],
+          },
+        ],
+      })
+    );
+  }
+
+  function inProgressFourTeams() {
+    const teams = [
+      team('t1', [member('p1', 'Erik'), member('p2', 'André')]),
+      team('t2', [member('p3', 'Gabi'), member('p4', 'Luiza')]),
+      team('t3', [member('p5', 'Ian'), member('p6', 'Ana')]),
+      team('t4', [member('p7', 'BH'), member('p8', 'Arthur')]),
+    ];
+    return documentWith(
+      draftSession({
+        status: 'in_progress',
+        updatedAt: ISO_UPDATED,
+        format: { teamSize: 6, teamCount: 4 },
+        teams,
+        rounds: [
+          {
+            id: 'r1',
+            number: 1,
+            byeTeamId: null,
+            matches: [
+              matchShape({
+                id: 'm1',
+                teamAId: 't1',
+                teamBId: 't2',
+                lineupA: [member('p1', 'Erik')],
+                lineupB: [member('p3', 'Gabi')],
+                scoreA: 21,
+                scoreB: 19,
+              }),
+              matchShape({
+                id: 'm2',
+                teamAId: 't3',
+                teamBId: 't4',
+                lineupA: [member('p5', 'Ian')],
+                lineupB: [member('p7', 'BH')],
+              }),
+            ],
+          },
+        ],
+      })
+    );
+  }
+
+  it('aceita lineup inicial, incompleta e empréstimo sem alterar o time-base', () => {
+    const original = inProgressSixes();
+    const snapshot = JSON.parse(JSON.stringify(original));
+    const session = original.sessions[0];
+    const initial = session.rounds[0].matches[0];
+    expect(initial.lineupA).toHaveLength(6);
+    expect(initial.lineupB).toHaveLength(5);
+
+    const incomplete = setTeamSessionMatchLineups(
+      original,
+      'session-1',
+      'r1',
+      'm1',
+      ['p1', 'p2'],
+      ['p7'],
+      { roster: sixRoster, now: LATER }
+    );
+    expect(incomplete.ok).toBe(true);
+    expect(incomplete.session.rounds[0].matches[0].lineupA).toHaveLength(2);
+    expect(incomplete.session.rounds[0].matches[0].lineupB).toHaveLength(1);
+
+    const completed = setTeamSessionMatchLineups(
+      original,
+      'session-1',
+      'r1',
+      'm1',
+      initial.lineupA.map((item) => item.playerId),
+      [...initial.lineupB.map((item) => item.playerId), 'p12'],
+      { roster: sixRoster, now: LATER }
+    );
+    expect(completed.ok).toBe(true);
+    expect(completed.session.rounds[0].matches[0].lineupA).toHaveLength(6);
+    expect(completed.session.rounds[0].matches[0].lineupB).toHaveLength(6);
+    expect(completed.session.rounds[0].matches[0].lineupB.map((item) => item.playerId)).toContain('p12');
+    expect(completed.session.teams[2].members.map((item) => item.playerId)).toContain('p12');
+    expect(completed.session.teams).toEqual(session.teams);
+    expect(completed.session.rounds[0].matches[0].scoreA).toBe(21);
+    expect(completed.session.rounds[0].matches[0].scoreB).toBe(18);
+    expect(completed.session.rounds[1]).toEqual(session.rounds[1]);
+    expect(completed.session.format).toEqual({ teamSize: 6, teamCount: 3 });
+    expect(completed.session.status).toBe('in_progress');
+    expect(completed.session.createdAt).toBe(ISO_CREATED);
+    expect(completed.session.updatedAt).toBe('2026-09-12T20:00:00.000Z');
+    expect(completed.document.schemaVersion).toBe(TEAM_SESSION_SCHEMA_VERSION);
+    expect(original).toEqual(snapshot);
+    expect(completed.session.rounds[0].matches[0].lineupB.find((item) => item.playerId === 'p12')).toEqual({
+      playerId: 'p12',
+      playerName: 'Jogador 12',
+    });
+    expect(completed.session.rounds[0].matches[0].lineupB[0]).not.toHaveProperty('score');
+  });
+
+  it('permite o mesmo jogador em partidas diferentes da mesma rodada', () => {
+    const original = inProgressFourTeams();
+    const snapshot = JSON.parse(JSON.stringify(original));
+    const loaned = setTeamSessionMatchLineups(
+      original,
+      'session-1',
+      'r1',
+      'm1',
+      ['p1', 'p5'],
+      ['p3'],
+      { roster, now: LATER }
+    );
+    expect(loaned.ok).toBe(true);
+    expect(loaned.session.rounds[0].matches[0].lineupA.map((item) => item.playerId)).toEqual(['p1', 'p5']);
+    expect(loaned.session.rounds[0].matches[1].lineupA.map((item) => item.playerId)).toEqual(['p5']);
+    expect(loaned.session.rounds[0].matches[1].scoreA).toBeNull();
+    expect(original).toEqual(snapshot);
+
+    const both = setTeamSessionMatchLineups(
+      loaned.document,
+      'session-1',
+      'r1',
+      'm2',
+      ['p5', 'p6'],
+      ['p7'],
+      { roster, now: LATER }
+    );
+    expect(both.ok).toBe(true);
+    expect(both.session.rounds[0].matches[0].lineupA.map((item) => item.playerId)).toEqual(['p1', 'p5']);
+    expect(both.session.rounds[0].matches[1].lineupA.map((item) => item.playerId)).toEqual(['p5', 'p6']);
+  });
+
+  it('rejeita duplicado, dois lados, capacidade, vazio, inexistente, sem time e adversário', () => {
+    const original = inProgressFourTeams();
+    const snapshot = JSON.parse(JSON.stringify(original));
+
+    expect(
+      setTeamSessionMatchLineups(original, 'session-1', 'r1', 'm1', ['p1', 'p1'], ['p3'], { roster })
+        .errors[0].code
+    ).toBe('LINEUP_DUPLICATE_PLAYER');
+    expect(
+      setTeamSessionMatchLineups(original, 'session-1', 'r1', 'm1', ['p1'], ['p1'], { roster }).errors.some(
+        (item) => item.code === 'MATCH_PLAYER_BOTH_SIDES'
+      )
+    ).toBe(true);
+    expect(
+      setTeamSessionMatchLineups(
+        original,
+        'session-1',
+        'r1',
+        'm1',
+        ['p1', 'p2', 'p5', 'p6', 'p7', 'p8', 'p4'],
+        ['p3'],
+        { roster }
+      ).errors[0].code
+    ).toBe('LINEUP_CAPACITY_EXCEEDED');
+    expect(
+      setTeamSessionMatchLineups(original, 'session-1', 'r1', 'm1', [], ['p3'], { roster }).errors[0].code
+    ).toBe('LINEUP_EMPTY');
+    expect(
+      setTeamSessionMatchLineups(original, 'session-1', 'r1', 'm1', ['missing'], ['p3'], { roster })
+        .errors[0].code
+    ).toBe('LINEUP_PLAYER_NOT_FOUND');
+    expect(
+      setTeamSessionMatchLineups(original, 'session-1', 'r1', 'm1', ['p9'], ['p3'], { roster: extraRoster })
+        .errors[0].code
+    ).toBe('LINEUP_PLAYER_WITHOUT_TEAM');
+    expect(
+      setTeamSessionMatchLineups(original, 'session-1', 'r1', 'm1', ['p3'], ['p1'], { roster }).errors.some(
+        (item) => item.code === 'LINEUP_PLAYER_FROM_OPPONENT'
+      )
+    ).toBe(true);
+    expect(original).toEqual(snapshot);
+  });
+
+  it('rejeita draft, finished e referências inexistentes, e preserva schema', () => {
+    const draft = documentWith(draftSession({ teams: [team('t1', [member('p1', 'Erik')])] }));
+    expect(
+      setTeamSessionMatchLineups(draft, 'session-1', 'r1', 'm1', ['p1'], ['p3'], { roster }).errors[0].code
+    ).toBe('SESSION_NOT_IN_PROGRESS');
+
+    const finished = inProgressFourTeams();
+    finished.sessions[0].status = 'finished';
+    expect(
+      setTeamSessionMatchLineups(finished, 'session-1', 'r1', 'm1', ['p1'], ['p3'], { roster }).errors[0]
+        .code
+    ).toBe('SESSION_FINISHED');
+
+    const live = inProgressFourTeams();
+    expect(
+      setTeamSessionMatchLineups(live, 'missing', 'r1', 'm1', ['p1'], ['p3'], { roster }).errors[0].code
+    ).toBe('SESSION_NOT_FOUND');
+    expect(
+      setTeamSessionMatchLineups(live, 'session-1', 'missing', 'm1', ['p1'], ['p3'], { roster }).errors[0]
+        .code
+    ).toBe('ROUND_NOT_FOUND');
+    expect(
+      setTeamSessionMatchLineups(live, 'session-1', 'r1', 'missing', ['p1'], ['p3'], { roster }).errors[0]
+        .code
+    ).toBe('MATCH_NOT_FOUND');
+    expect(
+      setTeamSessionMatchLineups(
+        { schemaVersion: 1, sessions: live.sessions },
+        'session-1',
+        'r1',
+        'm1',
+        ['p1'],
+        ['p3'],
+        { roster }
+      ).errors[0].code
+    ).toBe('SCHEMA_VERSION_UNSUPPORTED');
+  });
+
+  it('atualiza o nome só na partida editada e restaura times-base só no rascunho', () => {
+    const original = inProgressFourTeams();
+    original.sessions[0].rounds[0].matches[0].lineupA = [member('p1', 'Erik antigo')];
+    original.sessions[0].rounds[0].matches[1].lineupA = [member('p5', 'Ian antigo')];
+    const renamedRoster = roster.map((player) =>
+      player.id === 'p1' ? { ...player, name: 'Erik atual' } : player
+    );
+
+    const updated = setTeamSessionMatchLineups(original, 'session-1', 'r1', 'm1', ['p1'], ['p3'], {
+      roster: renamedRoster,
+      now: LATER,
+    });
+    expect(updated.session.rounds[0].matches[0].lineupA[0].playerName).toBe('Erik atual');
+    expect(updated.session.rounds[0].matches[1].lineupA[0].playerName).toBe('Ian antigo');
+    expect(updated.session.teams[0].members[0].playerName).toBe('Erik');
+
+    const restored = restoreMatchLineupsFromBaseTeams(
+      original.sessions[0].teams,
+      original.sessions[0].rounds[0].matches[0]
+    );
+    expect(restored.ok).toBe(true);
+    expect(restored.lineupAPlayerIds).toEqual(['p1', 'p2']);
+    expect(restored.lineupBPlayerIds).toEqual(['p3', 'p4']);
+    expect(original.sessions[0].rounds[0].matches[0].lineupA).toEqual([member('p1', 'Erik antigo')]);
+
+    const emptyRestore = restoreMatchLineupsFromBaseTeams(
+      [team('t1', []), team('t2', [member('p3', 'Gabi')])],
+      { teamAId: 't1', teamBId: 't2' }
+    );
+    expect(emptyRestore.ok).toBe(false);
+    expect(emptyRestore.errors[0].code).toBe('TEAM_EMPTY');
+  });
+
+  it('calcula elegibilidade dos dois lados e busca ignorando acento', () => {
+    const session = inProgressFourTeams().sessions[0];
+    const match = session.rounds[0].matches[0];
+    const sideA = eligiblePlayersForMatchSide(session.teams, match, 'A', {
+      selectedOpponentIds: ['p3'],
+      roster,
+    });
+    const sideB = eligiblePlayersForMatchSide(session.teams, match, 'B', {
+      selectedOpponentIds: ['p1'],
+      roster,
+    });
+
+    expect(sideA.map((player) => player.id)).toEqual(['p1', 'p2', 'p5', 'p6', 'p7', 'p8']);
+    expect(sideA.find((player) => player.id === 'p1').isOwnTeam).toBe(true);
+    expect(sideA.find((player) => player.id === 'p5').isOwnTeam).toBe(false);
+    expect(sideA.map((player) => player.id)).not.toContain('p3');
+    expect(sideA.map((player) => player.id)).not.toContain('p4');
+    expect(sideB.map((player) => player.id)).toEqual(['p3', 'p4', 'p5', 'p6', 'p7', 'p8']);
+    expect(sideB.map((player) => player.id)).not.toContain('p1');
+    expect(playerBaseTeam(session.teams, 'p5').id).toBe('t3');
+    expect(classifyLineupMember(member('p5', 'Ian'), session.teams, 't1').isLoan).toBe(true);
+
+    const withAccent = [
+      { id: 'p2', name: 'Estêvão' },
+      { id: 'p3', name: 'Gabi' },
+    ];
+    expect(filterPlayersByName(withAccent, 'estevao').map((player) => player.id)).toEqual(['p2']);
+    expect(
+      describeMatchLineupDraft({
+        lineupAPlayerIds: ['p1'],
+        lineupBPlayerIds: ['p3'],
+        match,
+        teams: session.teams,
+        format: session.format,
+        roster,
+      }).ok
+    ).toBe(true);
   });
 });

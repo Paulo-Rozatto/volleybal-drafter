@@ -1,9 +1,18 @@
 import React from 'react';
+import MatchLineupEditor from './MatchLineupEditor.jsx';
 import MatchScoreEditor from './MatchScoreEditor.jsx';
 import { resolveByeLabel, roundsInOrder } from './roundDisplay.js';
 import { resolveTeamSize } from './teamPresentation.js';
 
-export default function RoundBoard({ session, canEditScores = false, onSaveScore, onClearScore }) {
+export default function RoundBoard({
+  session,
+  roster = [],
+  canEditScores = false,
+  canEditLineups = false,
+  onSaveScore,
+  onClearScore,
+  onSaveLineups,
+}) {
   const rounds = roundsInOrder(session?.rounds);
   const teams = session?.teams ?? [];
   const teamSize = resolveTeamSize(session);
@@ -23,15 +32,26 @@ export default function RoundBoard({ session, canEditScores = false, onSaveScore
           >
             <h4 className="font-bold text-sm">Rodada {round.number}</h4>
             {(round.matches ?? []).map((match) => (
-              <MatchScoreEditor
-                key={match.id}
-                match={match}
-                teams={teams}
-                teamSize={teamSize}
-                canEdit={canEditScores}
-                onSave={(scoreA, scoreB) => onSaveScore?.(round.id, match.id, scoreA, scoreB)}
-                onClear={(options) => onClearScore?.(round.id, match.id, options)}
-              />
+              <div key={match.id} className="space-y-3">
+                <MatchLineupEditor
+                  match={match}
+                  teams={teams}
+                  roster={roster}
+                  teamSize={teamSize}
+                  canEdit={canEditLineups}
+                  onSave={(lineupAPlayerIds, lineupBPlayerIds) =>
+                    onSaveLineups?.(round.id, match.id, lineupAPlayerIds, lineupBPlayerIds)
+                  }
+                />
+                <MatchScoreEditor
+                  match={match}
+                  teams={teams}
+                  teamSize={teamSize}
+                  canEdit={canEditScores}
+                  onSave={(scoreA, scoreB) => onSaveScore?.(round.id, match.id, scoreA, scoreB)}
+                  onClear={(options) => onClearScore?.(round.id, match.id, options)}
+                />
+              </div>
             ))}
             {byeLabel && (
               <p className="text-xs font-semibold break-words" style={{ color: 'var(--text-muted)' }}>

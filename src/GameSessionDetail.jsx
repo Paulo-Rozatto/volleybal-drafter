@@ -30,6 +30,7 @@ import {
   teamSessionRoundSummary,
   translateSessionStatus,
   updateSessionTeam,
+  setTeamSessionMatchLineups,
 } from './teamGameSessions.js';
 
 function ConfirmDialog({ titleId, title, message, confirmLabel, onConfirm, onCancel }) {
@@ -324,7 +325,9 @@ export default function GameSessionDetail({
 
       <RoundBoard
         session={session}
+        roster={players}
         canEditScores={inProgress}
+        canEditLineups={inProgress}
         onSaveScore={(roundId, matchId, scoreA, scoreB) =>
           persistIfOk(
             setTeamSessionMatchScore(sessionsDocument, session.id, roundId, matchId, scoreA, scoreB)
@@ -335,6 +338,19 @@ export default function GameSessionDetail({
             clearTeamSessionMatchScore(sessionsDocument, session.id, roundId, matchId, {
               clearConfirmed,
             })
+          )
+        }
+        onSaveLineups={(roundId, matchId, lineupAPlayerIds, lineupBPlayerIds) =>
+          persistIfOk(
+            setTeamSessionMatchLineups(
+              sessionsDocument,
+              session.id,
+              roundId,
+              matchId,
+              lineupAPlayerIds,
+              lineupBPlayerIds,
+              { roster: players }
+            )
           )
         }
       />

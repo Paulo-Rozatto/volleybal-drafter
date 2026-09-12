@@ -145,3 +145,33 @@ export function alterTeamsLabel(teamSize) {
 export function drawTeamsLabel(teamSize) {
   return teamSize === 2 ? 'Sortear duplas' : 'Sortear times';
 }
+
+export function matchSideUnitLabel(teamSize) {
+  return teamSize === 2 ? 'Dupla' : 'Time';
+}
+
+export function formatMatchLineupCount(side, count, teamSize) {
+  return `${matchSideUnitLabel(teamSize)} ${side}: ${count}/${teamSize}`;
+}
+
+export function formatTeamIndexLabel(index, teamSize = 6) {
+  return `${matchSideUnitLabel(teamSize)} ${index + 1}`;
+}
+
+export function formatLineupLoanLabel(playerName, teamIndex, teamSize = 6) {
+  const origin = formatTeamIndexLabel(teamIndex, teamSize);
+  const prep = teamSize === 2 ? 'da' : 'do';
+  return `${playerName} — empréstimo ${prep} ${origin}`;
+}
+
+export function formatLineupMemberLabel(member, teams, ownTeamId, teamSize = 6) {
+  const name = typeof member?.playerName === 'string' ? member.playerName.trim() : '';
+  const displayName = name || 'Jogador';
+  const teamIndex = (teams ?? []).findIndex((team) =>
+    (team?.members ?? []).some((item) => item?.playerId === member?.playerId)
+  );
+  if (teamIndex < 0) return displayName;
+  const team = teams[teamIndex];
+  if (team?.id === ownTeamId) return displayName;
+  return formatLineupLoanLabel(displayName, teamIndex, teamSize);
+}
