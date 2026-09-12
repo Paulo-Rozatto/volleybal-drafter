@@ -432,6 +432,7 @@ export default function App() {
       onKeepLocalChanges={() => loadGistWithStrategy(GIST_LOAD_STRATEGY.KEEP_LOCAL)}
       onUseRemoteData={() => loadGistWithStrategy(GIST_LOAD_STRATEGY.USE_REMOTE)}
       onCancelLoad={() => setShowLoadConflict(false)}
+      gameSessions={gameSessions}
     />
   );
 

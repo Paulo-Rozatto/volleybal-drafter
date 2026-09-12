@@ -9,7 +9,10 @@ import {
   savePlayersToGist,
 } from './gistService.js';
 import { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constants.js';
-import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
+import {
+  createEmptyGameSessionsDocument,
+  serializeGameSessionsDocument,
+} from './persistence/gameSessionsDocument.js';
 
 const TOKEN = 'ghp_test_token_secret';
 const ISO = '2026-09-12T18:00:00.000Z';
@@ -308,6 +311,161 @@ describe('loadGistState', () => {
   });
 });
 
+describe('arquivos truncados pela API', () => {
+  const RAW_PLAYERS = 'https://gist.githubusercontent.com/owner/id/raw/rev/players.json';
+  const RAW_SESSIONS = 'https://gist.githubusercontent.com/owner/id/raw/rev/game-sessions.json';
+  const gistApiUrl = `https://api.github.com/gists/${GIST_ID}`;
+
+  function textResponse(text, { status = 200, statusText = 'OK' } = {}) {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText,
+      text: vi.fn(async () => text),
+      json: async () => {
+        throw new Error('json() não deve ser chamado no GET raw');
+      },
+    };
+  }
+
+  function mockGistAndRaw({ gist, raw = {} }) {
+    return vi.fn(async (url) => {
+      const href = String(url);
+      if (href === gistApiUrl) return gist;
+      if (Object.prototype.hasOwnProperty.call(raw, href)) return raw[href];
+      throw new Error(`fetch inesperado: ${href}`);
+    });
+  }
+
+  it('players.json truncado usa raw_url e ignora content parcial', async () => {
+    const players = [{ id: 'p1', name: 'Erik' }];
+    const fetchImpl = mockGistAndRaw({
+      gist: jsonResponse(
+        gistPayload({
+          [PLAYERS_FILENAME]: {
+            truncated: true,
+            content: '[{"id":"parcial"',
+            raw_url: RAW_PLAYERS,
+          },
+          [GAME_SESSIONS_FILENAME]: {
+            content: JSON.stringify({ schemaVersion: 2, sessions: [] }),
+          },
+        })
+      ),
+      raw: { [RAW_PLAYERS]: textResponse(JSON.stringify(players)) },
+    });
+
+    const state = await loadGistState({ fetchImpl });
+    expect(state.players).toEqual(players);
+    expect(state.revision).toBe('version:rev-test');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[0][0]).toBe(gistApiUrl);
+    expect(fetchImpl.mock.calls[1][0]).toBe(RAW_PLAYERS);
+  });
+
+  it('game-sessions.json truncado usa JSON completo válido do raw', async () => {
+    const gameSessions = { schemaVersion: 2, sessions: [] };
+    const fetchImpl = mockGistAndRaw({
+      gist: jsonResponse(
+        gistPayload({
+          [PLAYERS_FILENAME]: { content: JSON.stringify([{ id: 'p1' }]) },
+          [GAME_SESSIONS_FILENAME]: {
+            truncated: true,
+            content: '{"schemaVersion":2',
+            raw_url: RAW_SESSIONS,
+          },
+        })
+      ),
+      raw: { [RAW_SESSIONS]: textResponse(JSON.stringify(gameSessions)) },
+    });
+
+    const state = await loadGistState({ fetchImpl });
+    expect(state.gameSessions).toEqual(createEmptyGameSessionsDocument());
+    expect(state.migrated).toBe(false);
+    expect(state.sourceVersion).toBe(2);
+    expect(state.revision).toBe('version:rev-test');
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([gistApiUrl, RAW_SESSIONS]);
+  });
+
+  it('rejeita JSON raw inválido de players.json', async () => {
+    const fetchImpl = mockGistAndRaw({
+      gist: jsonResponse(
+        gistPayload({
+          [PLAYERS_FILENAME]: {
+            truncated: true,
+            content: '[{"id":"parcial"',
+            raw_url: RAW_PLAYERS,
+          },
+        })
+      ),
+      raw: { [RAW_PLAYERS]: textResponse('{not-json') },
+    });
+
+    await expect(loadGistState({ fetchImpl })).rejects.toThrow('JSON inválido em players.json.');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejeita JSON raw inválido de game-sessions.json', async () => {
+    const fetchImpl = mockGistAndRaw({
+      gist: jsonResponse(
+        gistPayload({
+          [GAME_SESSIONS_FILENAME]: {
+            truncated: true,
+            content: '{"schemaVersion":2',
+            raw_url: RAW_SESSIONS,
+          },
+        })
+      ),
+      raw: { [RAW_SESSIONS]: textResponse('{not-json') },
+    });
+
+    await expect(loadGistState({ fetchImpl })).rejects.toThrow(
+      'JSON inválido em game-sessions.json.'
+    );
+  });
+
+  it('arquivo truncado ausente de raw_url não cai no primeiro arquivo', async () => {
+    const fetchImpl = mockGistAndRaw({
+      gist: jsonResponse(
+        gistPayload({
+          'other.json': { content: JSON.stringify([{ id: 'should-not-load' }]) },
+          [PLAYERS_FILENAME]: { truncated: true, content: '[{"id":"parcial"' },
+        })
+      ),
+      raw: {},
+    });
+
+    await expect(loadGistState({ fetchImpl })).rejects.toThrow(
+      'A URL raw do arquivo do Gist está ausente ou é inválida.'
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('loadPlayersFromGist busca raw só de players.json truncado', async () => {
+    const players = [{ id: 'p1' }];
+    const fetchImpl = mockGistAndRaw({
+      gist: jsonResponse(
+        gistPayload({
+          [PLAYERS_FILENAME]: {
+            truncated: true,
+            content: '[',
+            raw_url: RAW_PLAYERS,
+          },
+          [GAME_SESSIONS_FILENAME]: {
+            truncated: true,
+            content: '{',
+            raw_url: RAW_SESSIONS,
+          },
+        })
+      ),
+      raw: { [RAW_PLAYERS]: textResponse(JSON.stringify(players)) },
+    });
+
+    await expect(loadPlayersFromGist({ fetchImpl })).resolves.toEqual(players);
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([gistApiUrl, RAW_PLAYERS]);
+  });
+});
+
 describe('patchGistFiles e saveGistState', () => {
   it('salva os dois arquivos em um único PATCH depois do GET de preflight', async () => {
     const players = [{ id: 'p1' }];
@@ -335,6 +493,9 @@ describe('patchGistFiles e saveGistState', () => {
       [GAME_SESSIONS_FILENAME, PLAYERS_FILENAME].sort()
     );
     expect(JSON.parse(body.files[PLAYERS_FILENAME].content)).toEqual(players);
+    expect(body.files[GAME_SESSIONS_FILENAME].content).toBe(
+      serializeGameSessionsDocument(gameSessions)
+    );
     expect(JSON.parse(body.files[GAME_SESSIONS_FILENAME].content)).toEqual(gameSessions);
   });
 

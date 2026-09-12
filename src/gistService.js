@@ -2,8 +2,10 @@ import { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constant
 import {
   createEmptyGameSessionsDocument,
   interpretGameSessionsJson,
+  serializeGameSessionsDocument,
   validateGameSessionsDocument,
 } from './persistence/gameSessionsDocument.js';
+import { readGistFileContent } from './gistFileContent.js';
 import {
   extractGistRevision,
   GIST_EXPECTED_REVISION_REQUIRED_MESSAGE,
@@ -102,10 +104,14 @@ async function fetchGist(fetchImpl) {
 
 export async function loadGistState({ fetchImpl } = {}) {
   const { files, revision } = await fetchGist(fetchImpl);
-  const sessions = parseGameSessionsContent(files[GAME_SESSIONS_FILENAME]?.content);
+  const playersContent = await readGistFileContent(files, PLAYERS_FILENAME, { fetchImpl });
+  const sessionsContent = await readGistFileContent(files, GAME_SESSIONS_FILENAME, {
+    fetchImpl,
+  });
+  const sessions = parseGameSessionsContent(sessionsContent);
 
   return {
-    players: parsePlayersContent(files[PLAYERS_FILENAME]?.content),
+    players: parsePlayersContent(playersContent),
     gameSessions: sessions.document,
     migrated: sessions.migrated,
     sourceVersion: sessions.sourceVersion,
@@ -128,7 +134,10 @@ export async function patchGistFiles(fileMap, token, { fetchImpl } = {}) {
       throw new Error(`Não é permitido enviar ${filename} como null ou undefined.`);
     }
     files[filename] = {
-      content: JSON.stringify(value, null, 2),
+      content:
+        filename === GAME_SESSIONS_FILENAME
+          ? serializeGameSessionsDocument(value)
+          : JSON.stringify(value, null, 2),
     };
   }
 
@@ -201,7 +210,8 @@ export async function saveGistState({
 
 export async function loadPlayersFromGist({ fetchImpl } = {}) {
   const { files } = await fetchGist(fetchImpl);
-  return parsePlayersContent(files[PLAYERS_FILENAME]?.content);
+  const playersContent = await readGistFileContent(files, PLAYERS_FILENAME, { fetchImpl });
+  return parsePlayersContent(playersContent);
 }
 
 export async function savePlayersToGist(players, token, options) {

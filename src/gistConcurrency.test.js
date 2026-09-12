@@ -161,6 +161,85 @@ describe('preflight de salvamento', () => {
     expect(getToken).not.toHaveBeenCalled();
   });
 
+  it('preflight faz somente o GET principal mesmo com arquivos truncados', async () => {
+    const fetchImpl = mockFetchQueue([
+      jsonResponse(
+        gistBody({
+          version: 'rev-A',
+          files: {
+            [PLAYERS_FILENAME]: {
+              truncated: true,
+              content: '[{"id":"parcial"',
+              raw_url: 'https://gist.githubusercontent.com/owner/id/raw/players.json',
+            },
+            [GAME_SESSIONS_FILENAME]: {
+              truncated: true,
+              content: '{"schemaVersion":2',
+              raw_url: 'https://gist.githubusercontent.com/owner/id/raw/game-sessions.json',
+            },
+          },
+        })
+      ),
+      jsonResponse({ history: [{ version: 'rev-C' }] }),
+    ]);
+
+    const saved = await saveGistState({
+      players: [{ id: 'p1' }],
+      gameSessions: EMPTY,
+      expectedRevision: 'version:rev-A',
+      token: TOKEN,
+      fetchImpl,
+    });
+
+    expect(saved.revision).toBe('version:rev-C');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[0][0]).toBe(`https://api.github.com/gists/${GIST_ID}`);
+    expect(fetchImpl.mock.calls[0][1].method).toBeUndefined();
+    expect(fetchImpl.mock.calls[1][1].method).toBe('PATCH');
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('githubusercontent'))).toBe(
+      false
+    );
+  });
+
+  it('conflito de revisão com arquivos truncados continua com zero PATCH', async () => {
+    const getToken = vi.fn(async () => TOKEN);
+    const fetchImpl = mockFetchQueue([
+      jsonResponse(
+        gistBody({
+          version: 'rev-B',
+          files: {
+            [PLAYERS_FILENAME]: {
+              truncated: true,
+              content: '[',
+              raw_url: 'https://gist.githubusercontent.com/owner/id/raw/players.json',
+            },
+            [GAME_SESSIONS_FILENAME]: {
+              truncated: true,
+              content: '{',
+              raw_url: 'https://gist.githubusercontent.com/owner/id/raw/game-sessions.json',
+            },
+          },
+        })
+      ),
+      jsonResponse({ history: [{ version: 'rev-C' }] }),
+    ]);
+
+    const error = await saveGistState({
+      players: [{ id: 'p1' }],
+      gameSessions: EMPTY,
+      expectedRevision: 'version:rev-A',
+      getToken,
+      fetchImpl,
+    }).catch((caught) => caught);
+
+    expect(error.code).toBe(GIST_REVISION_CONFLICT);
+    expect(error.message).toBe(GIST_REVISION_CONFLICT_MESSAGE);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][0]).toBe(`https://api.github.com/gists/${GIST_ID}`);
+    expect(fetchImpl.mock.calls[0][1].method).toBeUndefined();
+    expect(getToken).not.toHaveBeenCalled();
+  });
+
   it('documento inválido não faz GET nem PATCH', async () => {
     const fetchImpl = mockFetchQueue([jsonResponse(gistBody({ version: 'rev-A' }))]);
     await expect(

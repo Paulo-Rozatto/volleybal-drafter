@@ -1,4 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
+import {
+  formatFileSize,
+  GAME_SESSIONS_SIZE_WARNING_BYTES,
+  gameSessionsPatchUtf8Size,
+} from './persistence/fileSize.js';
+import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
 
 export default function GistSyncPanel({
   password,
@@ -15,14 +21,33 @@ export default function GistSyncPanel({
   onKeepLocalChanges,
   onUseRemoteData,
   onCancelLoad,
+  gameSessions,
 }) {
+  const loadButtonRef = useRef(null);
+  const cancelButtonRef = useRef(null);
+  const wasConflictOpenRef = useRef(false);
+  const sizeBytes = gameSessionsPatchUtf8Size(
+    gameSessions ?? createEmptyGameSessionsDocument()
+  );
+  const showSizeWarning = sizeBytes >= GAME_SESSIONS_SIZE_WARNING_BYTES;
+
   useEffect(() => {
-    if (!showLoadConflict) return undefined;
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') onCancelLoad?.();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    if (showLoadConflict) {
+      wasConflictOpenRef.current = true;
+      cancelButtonRef.current?.focus();
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') onCancelLoad?.();
+      };
+      window.addEventListener('keydown', onKeyDown);
+      return () => window.removeEventListener('keydown', onKeyDown);
+    }
+
+    if (wasConflictOpenRef.current) {
+      wasConflictOpenRef.current = false;
+      loadButtonRef.current?.focus();
+    }
+
+    return undefined;
   }, [showLoadConflict, onCancelLoad]);
 
   return (
@@ -43,6 +68,7 @@ export default function GistSyncPanel({
 
       <div className="flex gap-2 text-xs">
         <button
+          ref={loadButtonRef}
           type="button"
           onClick={onLoad}
           disabled={isSyncing}
@@ -62,6 +88,16 @@ export default function GistSyncPanel({
           💾 Salvar no Gist
         </button>
       </div>
+
+      <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+        Encontros: {formatFileSize(sizeBytes)}
+      </p>
+
+      {showSizeWarning && (
+        <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
+          O arquivo de encontros está grande. Considere arquivar encontros antigos.
+        </p>
+      )}
 
       {localCacheError && (
         <p className="text-xs font-semibold text-red-500">
@@ -134,6 +170,7 @@ export default function GistSyncPanel({
             </p>
 
             <button
+              ref={cancelButtonRef}
               type="button"
               onClick={onCancelLoad}
               className="w-full font-bold py-3 rounded-xl border cursor-pointer"

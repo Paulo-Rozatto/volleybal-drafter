@@ -1,58 +1,90 @@
-# 🏐 Cortada — Setup & Configuração
+# Cortada
 
-## 🚀 Instalação Rápida
+SPA React para sortear times de vôlei, registrar encontros e sincronizar elenco e placares entre dispositivos.
+
+## Instalação e execução
 
 ```bash
-git clone https://github.com/seu-usuario/cortada.git
-cd cortada
 npm install
-npm start
-
+npm run dev
 ```
 
----
+Abra:
 
-## 🔑 Configuração do Token Criptografado
-
-Para usar a sincronização com o GitHub Gist em qualquer dispositivo sem expor seu token publicamente, siga estes 3 passos:
-
-### 1. Gerar o Token no GitHub
-
-1. Vá em **GitHub** > **Settings** > **Developer Settings** > **Personal Access Tokens (Classic)**.
-2. Clique em **Generate new token (classic)**.
-3. Marque apenas a permissão **`gist`** e gere o token (ex: `ghp_abc123...`).
-
-### 2. Criptografar o Token no Navegador
-
-Com o projeto rodando localmente, abra o **Console do Navegador** (`F12` > *Console*) e execute:
-
-```javascript
-import('./src/cryptoUtils.js').then(m => 
-  m.encryptToken('SEU_GITHUB_PAT_AQUI', 'SUA_SENHA_OU_PIN_AQUI')
-).then(console.log);
-
+```text
+http://localhost:5173/volleybal-drafter/
 ```
 
-Copie a string Base64 gerada (ex: `"e3B4S2d3YUZ2...=="`).
+O caminho `/volleybal-drafter/` é obrigatório (mesmo `base` usado no GitHub Pages). Sem ele a página fica em branco.
 
-> ⚠️ Guarde a **senha/PIN** usada aqui. Ela será digitada na interface do app para desbloquear o salvamento.
+## Comandos
 
-### 3. Inserir a String em `src/App.jsx`
-
-Abra o arquivo `src/App.jsx` e cole o ID do Gist e o token criptografado:
-
-```javascript
-// src/App.jsx
-
-const GIST_ID = 'a5b372891eacaf9da30f5f0fc9166bd2';
-const ENCRYPTED_GITHUB_TOKEN = 'STRING_GERADA_NO_PASSO_2';
-
+```bash
+npm test
+npm run lint
+npm run build
 ```
 
----
+## Encontros
 
-## 💻 Uso no App
+O Cortada registra peladas além do Sorteio Rápido.
 
-1. Clique em **Carregar do Gist** para puxar o elenco salvo.
-2. Faça as alterações no elenco ou faça os sorteios.
-3. Para salvar, digite a sua **Senha/PIN** na caixa de texto e clique em **💾 Salvar no Gist**.
+- Formatos de **2x2** a **6x6**, com quantidade de times definida na criação.
+- Encontro pode ser criado **manualmente** (data, formato, nome) ou a partir de um **sorteio automático** de times.
+- Times podem ficar **incompletos** ou vazios; o formato só define a capacidade, não exige preenchimento total.
+- As rodadas são **todos contra todos**. Time ímpar fica de bye na rodada.
+- Cada partida tem **escalação** própria. Dá para emprestar jogador de outro time sem alterar o time-base; o empréstimo aparece na escalação.
+- Placar é opcional até a partida ser preenchida. A **finalização** só fica disponível quando as regras do encontro permitem encerrar.
+
+### Schema V2 (resumo)
+
+O documento de encontros usa `schemaVersion: 2`:
+
+- `sessions[]` com `format.teamSize` / `format.teamCount`
+- `teams[]` com `members`
+- `rounds[]` com `matches[]`
+- partidas com `teamAId` / `teamBId`, `lineupA` / `lineupB`, `scoreA` / `scoreB` e `byeTeamId` na rodada
+
+Um Gist ainda em V1 (duplas / `pairs`) é **migrado automaticamente para V2 na leitura**. O App passa a trabalhar só com V2; a gravação no Gist continua manual.
+
+## Cache local
+
+Elenco, histórico de sorteios e encontros ficam no `localStorage` deste navegador. Encontros inválidos no cache não são sobrescritos em silêncio: a edição pede confirmação antes de descartar o cache corrompido.
+
+## Sincronização com Gist
+
+O App lê e grava dois arquivos no Gist:
+
+- `players.json` — elenco
+- `game-sessions.json` — encontros V2
+
+O salvamento é **manual**. Não há PATCH automático. O painel mostra quando há **alterações não salvas no Gist**.
+
+### Fluxo recomendado
+
+1. Carregar o Gist.
+2. Realizar as alterações.
+3. Salvar.
+4. Se outro dispositivo tiver gravado no meio do caminho, resolver o conflito **antes** de sobrescrever.
+
+O salvamento compara a revisão remota com a última lida neste dispositivo. Se o Gist mudou, o App bloqueia o PATCH e pede para recarregar. Você escolhe manter os dados locais (e salvar depois) ou substituí-los pelos dados do Gist.
+
+### Truncamento da API
+
+A API do GitHub pode devolver arquivo grande assim:
+
+- `truncated: true`
+- `content` parcial
+- `raw_url` para o texto completo
+
+O App **nunca interpreta** `content` quando `truncated === true`. Nesse caso ele baixa o arquivo por `raw_url`, só em HTTPS e só em `gist.githubusercontent.com`. A revisão usada no controle de concorrência continua vindo do GET principal do Gist; o download raw não altera a revisão esperada.
+
+Arquivos muito grandes devem, no futuro, ser **arquivados** (encontros antigos fora do documento ativo). O painel mostra o tamanho serializado atual de `game-sessions.json` e avisa a partir de 750 KiB, sem bloquear o salvamento.
+
+### Privacidade
+
+Gist público ou secret **não é armazenamento privado**. Qualquer pessoa com o link pode ler nomes, elenco e placares.
+
+## Sorteio Rápido
+
+Cole a lista de confirmados, identifique o elenco, escolha o formato e sorteie times equilibrados. Esse fluxo não grava encontros até você registrar um encontro à parte.
