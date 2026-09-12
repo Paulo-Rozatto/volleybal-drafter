@@ -1,3 +1,7 @@
+import {
+  automaticDrawCountBounds,
+  computeTeamSizeDistribution,
+} from './domain/balancedTeams.js';
 import { validateFormat } from './domain/teamSession.js';
 import {
   GENERATE_ROUNDS_EMPTY_TEAM_MESSAGE,
@@ -77,9 +81,31 @@ export function generateRoundsBlockedReason(session) {
 }
 
 export function automaticDrawAvailable(teamSize) {
-  return teamSize === 2;
+  return Number.isInteger(teamSize) && teamSize >= 2 && teamSize <= 6;
 }
 
-export function automaticDrawRequiredPlayers(teamCount) {
-  return teamCount * 2;
+export function automaticDrawPlayerBounds(format) {
+  const result = automaticDrawCountBounds(format);
+  if (!result.ok) return null;
+  return { min: result.min, max: result.max };
+}
+
+export function formatTeamSizeDistribution(sizes) {
+  if (!Array.isArray(sizes) || sizes.length === 0) return null;
+  return sizes.join(' / ');
+}
+
+export function plannedTeamSizeLabel(selectedCount, format) {
+  const result = computeTeamSizeDistribution(selectedCount, format);
+  if (!result.ok) return null;
+  return formatTeamSizeDistribution(result.sizes);
+}
+
+export function rosterFitsAutomaticDrawCapacity(rosterCount, format) {
+  const bounds = automaticDrawPlayerBounds(format);
+  return Boolean(bounds) && Number.isInteger(rosterCount) && rosterCount <= bounds.max;
+}
+
+export function automaticDrawOverCapacityMessage(maxPlayers) {
+  return `Este formato comporta até ${maxPlayers} jogadores. Escolha quem participará.`;
 }

@@ -8,8 +8,6 @@ export const SESSION_FORMAT_OPTIONS = [
 
 export const EMPTY_TEAM_CONFIRMATION_MESSAGE = 'Criar este time sem jogadores?';
 export const EMPTY_TEAM_CONFIRM_LABEL = 'Criar time vazio';
-export const AUTOMATIC_DRAW_UNAVAILABLE_MESSAGE =
-  'O sorteio automático para este formato será habilitado na próxima atualização. Você já pode montar os times manualmente.';
 export const GENERATE_ROUNDS_MISSING_TEAMS_MESSAGE =
   'Crie todos os times do encontro antes de gerar os jogos.';
 export const GENERATE_ROUNDS_EMPTY_TEAM_MESSAGE =

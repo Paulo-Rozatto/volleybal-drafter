@@ -113,11 +113,8 @@ export function filterPlayersByName(players, query) {
 
 
 /**
- * Sorteio automático futuro (não implementado nesta etapa).
- *
- * `generateBalancedTeams` deverá distribuir todos os jogadores selecionados, sem banco, com:
- * `teamCount <= selectedPlayers.length <= teamSize * teamCount`.
- * Os tamanhos dos times devem diferir no máximo em um, quando possível.
+ * O sorteio automático (`generateBalancedTeams`) distribui todos os selecionados, sem banco.
+ * 2x2 exige `teamCount * 2`; 3x3–6x6 aceita `teamCount` até `teamSize * teamCount`.
  */
 
 function fail(errors) {
@@ -406,8 +403,7 @@ export function removeSessionTeam(document, sessionId, teamId, options = {}) {
 }
 
 /**
- * Substitui o conjunto de times-base. Destinado também ao sorteio automático futuro,
- * que deverá respeitar `teamCount <= selectedPlayers.length <= teamSize * teamCount`.
+ * Substitui o conjunto de times-base. Usado pelo sorteio automático e pela montagem manual.
  */
 export function replaceSessionTeams(document, sessionId, teams, options = {}) {
   const { roster, now, replaceConfirmed = false } = options;

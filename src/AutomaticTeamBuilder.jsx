@@ -1,16 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { generateBalancedPairs } from './domain/balancedPairs.js';
+import { generateBalancedTeams } from './domain/balancedTeams.js';
 import {
-  automaticDrawAvailable,
-  automaticDrawRequiredPlayers,
+  automaticDrawOverCapacityMessage,
+  automaticDrawPlayerBounds,
+  plannedTeamSizeLabel,
+  rosterFitsAutomaticDrawCapacity,
 } from './teamFormationUi.js';
 import {
-  AUTOMATIC_DRAW_UNAVAILABLE_MESSAGE,
   drawTeamsLabel,
   replaceTeamsConfirmationMessage,
   resolveTeamSize,
   teamUnitNoun,
-  teamUnitSingular,
 } from './teamPresentation.js';
 import {
   canEditSessionTeams,
@@ -29,14 +29,16 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
   const [pendingTeams, setPendingTeams] = useState(null);
 
   const teamSize = resolveTeamSize(session);
-  const doubles = automaticDrawAvailable(teamSize);
-  const unit = teamUnitSingular(teamSize);
   const units = teamUnitNoun(teamSize, 2);
   const editable = canEditSessionTeams(session);
   const teamCount = session?.format?.teamCount ?? 2;
-  const requiredCount = automaticDrawRequiredPlayers(teamCount);
+  const format = { teamSize, teamCount };
+  const bounds = automaticDrawPlayerBounds(format);
   const selectedCount = selectedIds.length;
-  const exactSelection = selectedCount === requiredCount;
+  const plannedLabel = plannedTeamSizeLabel(selectedCount, format);
+  const rosterExceedsCapacity = Boolean(bounds) && roster.length > bounds.max;
+  const canSelectAll =
+    rosterFitsAutomaticDrawCapacity(roster.length, format) && roster.length > 0;
 
   const visiblePlayers = filterPlayersByName(roster, query).sort((left, right) =>
     String(left.name ?? '').localeCompare(String(right.name ?? ''), 'pt-BR', { sensitivity: 'base' })
@@ -67,7 +69,7 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
       return result;
     }
     if (!result?.ok) {
-      setError(result?.errors?.[0]?.message || `Não foi possível sortear as ${units}.`);
+      setError(result?.errors?.[0]?.message || `Não foi possível sortear os ${units}.`);
       return result;
     }
     setPendingTeams(null);
@@ -76,7 +78,7 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
   };
 
   const handleDraw = () => {
-    if (!editable || !doubles) return;
+    if (!editable) return;
 
     const selectedPlayers = selectedIds
       .map((id) => roster.find((player) => player?.id === id))
@@ -87,22 +89,16 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
       return;
     }
 
-    if (selectedPlayers.length !== requiredCount) {
-      setError(
-        `Selecione exatamente ${requiredCount} jogadores para formar ${teamCount} ${
-          teamCount === 1 ? unit : units
-        }.`
-      );
-      return;
-    }
-
-    const generated = generateBalancedPairs(selectedPlayers, { balanceGender, balanceHeight });
+    const generated = generateBalancedTeams(selectedPlayers, format, {
+      balanceGender,
+      balanceHeight,
+    });
     if (!generated.ok) {
-      setError(generated.errors[0]?.message || `Não foi possível sortear as ${units}.`);
+      setError(generated.errors[0]?.message || `Não foi possível sortear os ${units}.`);
       return;
     }
 
-    applyGeneratedTeams(generated.pairs, false);
+    applyGeneratedTeams(generated.teams, false);
   };
 
   const confirmReplace = () => {
@@ -111,20 +107,6 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
   };
 
   if (!editable) return null;
-
-  if (!doubles) {
-    return (
-      <div
-        className="p-4 rounded-xl border space-y-2"
-        style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-      >
-        <h3 className="font-bold text-sm">{drawTeamsLabel(teamSize)}</h3>
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          {AUTOMATIC_DRAW_UNAVAILABLE_MESSAGE}
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div
@@ -135,10 +117,20 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
         O balanceamento por nível está sempre ativo.
       </p>
+      {bounds && (
+        <p className="text-sm font-semibold">
+          Mínimo: {bounds.min} · Capacidade máxima: {bounds.max}
+        </p>
+      )}
       <p className="text-sm font-semibold">
-        Selecione exatamente {requiredCount} jogadores ({teamCount} {teamCount === 1 ? unit : units}
-        ).
+        {selectedCount} {selectedCount === 1 ? 'selecionado' : 'selecionados'}
+        {plannedLabel ? ` · Distribuição prevista: ${plannedLabel}` : ''}
       </p>
+      {rosterExceedsCapacity ? (
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          {automaticDrawOverCapacityMessage(bounds.max)}
+        </p>
+      ) : null}
 
       <input
         type="search"
@@ -153,32 +145,24 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
         }}
       />
 
-      <p className="text-sm font-semibold">
-        {selectedCount} {selectedCount === 1 ? 'selecionado' : 'selecionados'}
-        {exactSelection
-          ? ` · ${teamCount} ${teamCount === 1 ? `${unit} prevista` : `${units} previstas`}`
-          : ` · faltam ${Math.max(0, requiredCount - selectedCount)} ou sobram ${Math.max(
-              0,
-              selectedCount - requiredCount
-            )}`}
-      </p>
-
       <div className="flex flex-col sm:flex-row gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setError(null);
-            setSelectedIds(roster.map((player) => player.id).filter(Boolean));
-          }}
-          className="flex-1 font-bold py-2 rounded-xl border text-sm cursor-pointer"
-          style={{
-            backgroundColor: 'var(--bg-subtle)',
-            borderColor: 'var(--border-color)',
-            color: 'var(--text-main)',
-          }}
-        >
-          Selecionar todos
-        </button>
+        {canSelectAll ? (
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setSelectedIds(roster.map((player) => player.id).filter(Boolean));
+            }}
+            className="flex-1 font-bold py-2 rounded-xl border text-sm cursor-pointer"
+            style={{
+              backgroundColor: 'var(--bg-subtle)',
+              borderColor: 'var(--border-color)',
+              color: 'var(--text-main)',
+            }}
+          >
+            Selecionar todos
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => {

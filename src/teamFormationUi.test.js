@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   automaticDrawAvailable,
-  automaticDrawRequiredPlayers,
+  automaticDrawOverCapacityMessage,
+  automaticDrawPlayerBounds,
   canSelectAnotherMember,
   canSubmitManualTeam,
+  formatTeamSizeDistribution,
   generateRoundsBlockedReason,
   manualTeamSubmitError,
   needsEmptyTeamConfirmation,
   parseRequiredInteger,
   parseSessionFormatInput,
+  plannedTeamSizeLabel,
   requiresExactPair,
+  rosterFitsAutomaticDrawCapacity,
   toggleSelectedPlayer,
 } from './teamFormationUi.js';
 import {
@@ -116,9 +120,35 @@ describe('bloqueio da geração de rodadas', () => {
     ).toBeNull();
   });
 
-  it('mantém o sorteio automático só no 2x2', () => {
-    expect(automaticDrawAvailable(2)).toBe(true);
-    expect(automaticDrawAvailable(3)).toBe(false);
-    expect(automaticDrawRequiredPlayers(4)).toBe(8);
+  it('libera o sorteio automático em todos os formatos 2–6', () => {
+    for (const teamSize of [2, 3, 4, 5, 6]) {
+      expect(automaticDrawAvailable(teamSize)).toBe(true);
+    }
+    expect(automaticDrawAvailable(1)).toBe(false);
+    expect(automaticDrawPlayerBounds({ teamSize: 2, teamCount: 4 })).toEqual({ min: 8, max: 8 });
+    expect(automaticDrawPlayerBounds({ teamSize: 6, teamCount: 3 })).toEqual({ min: 3, max: 18 });
+  });
+});
+
+describe('distribuição prevista do sorteio automático', () => {
+  it('formata os tamanhos-alvo usados pela UI', () => {
+    expect(formatTeamSizeDistribution([6, 5, 5])).toBe('6 / 5 / 5');
+    expect(plannedTeamSizeLabel(16, { teamSize: 6, teamCount: 3 })).toBe('6 / 5 / 5');
+    expect(plannedTeamSizeLabel(15, { teamSize: 6, teamCount: 3 })).toBe('5 / 5 / 5');
+    expect(plannedTeamSizeLabel(13, { teamSize: 6, teamCount: 3 })).toBe('5 / 4 / 4');
+    expect(plannedTeamSizeLabel(10, { teamSize: 4, teamCount: 3 })).toBe('4 / 3 / 3');
+    expect(plannedTeamSizeLabel(8, { teamSize: 2, teamCount: 4 })).toBe('2 / 2 / 2 / 2');
+    expect(plannedTeamSizeLabel(2, { teamSize: 6, teamCount: 3 })).toBeNull();
+    expect(plannedTeamSizeLabel(19, { teamSize: 6, teamCount: 3 })).toBeNull();
+  });
+
+  it('esconde selecionar todos quando o elenco ultrapassa a capacidade', () => {
+    const format = { teamSize: 6, teamCount: 3 };
+    expect(rosterFitsAutomaticDrawCapacity(16, format)).toBe(true);
+    expect(rosterFitsAutomaticDrawCapacity(18, format)).toBe(true);
+    expect(rosterFitsAutomaticDrawCapacity(19, format)).toBe(false);
+    expect(automaticDrawOverCapacityMessage(18)).toBe(
+      'Este formato comporta até 18 jogadores. Escolha quem participará.'
+    );
   });
 });
