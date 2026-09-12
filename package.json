@@ -8,7 +8,9 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -22,6 +24,7 @@
     "gh-pages": "^6.3.0",
     "oxlint": "^1.79.0",
     "tailwindcss": "^4.3.3",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }
