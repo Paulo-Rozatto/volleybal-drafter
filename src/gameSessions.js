@@ -1,5 +1,11 @@
 import { generateRoundRobin } from './domain/roundRobin.js';
-import { countSessionMatches, validateDate, validatePair, validateSessionPairs } from './domain/sessionValidation.js';
+import {
+  countSessionMatches,
+  validateDate,
+  validatePair,
+  validateScore,
+  validateSessionPairs,
+} from './domain/sessionValidation.js';
 import { GAME_SESSIONS_SCHEMA_VERSION } from './persistence/constants.js';
 import { nextGameSessionsDocument } from './persistence/syncHelpers.js';
 
@@ -332,7 +338,13 @@ export function sessionRoundSummary(session) {
     matchCount: matches.total,
     completedCount: matches.completed,
     pendingCount: matches.pending,
+    invalidCount: matches.invalid,
   };
+}
+
+export function sessionIsReadyToFinalize(session) {
+  const { total, completed, invalid } = countSessionMatches(session);
+  return total > 0 && completed === total && invalid === 0;
 }
 
 export function canGenerateSessionRounds(session, roster) {
@@ -465,4 +477,105 @@ export function resetSessionToDraftForPairEditing(document, sessionId, options =
     document: replaceSession(document, session.id, updatedSession),
     session: updatedSession,
   });
+}
+
+export const CLEAR_SCORE_CONFIRMATION_MESSAGE =
+  'Remover o placar desta partida e marcá-la novamente como pendente?';
+
+function locateInProgressMatch(document, sessionId, roundId, matchId) {
+  const session = findSession(document, sessionId);
+  if (!session) {
+    return fail([{ code: 'SESSION_NOT_FOUND', message: 'Encontro não encontrado.' }]);
+  }
+
+  if (session.status === 'finished') {
+    return fail([
+      {
+        code: 'SESSION_FINISHED',
+        message: 'Não é possível alterar placares de um encontro finalizado.',
+      },
+    ]);
+  }
+
+  if (session.status !== 'in_progress') {
+    return fail([
+      {
+        code: 'SESSION_NOT_IN_PROGRESS',
+        message: 'Só é possível alterar placares em um encontro em andamento.',
+      },
+    ]);
+  }
+
+  const round = (session.rounds ?? []).find((item) => item?.id === roundId);
+  if (!round) {
+    return fail([{ code: 'ROUND_NOT_FOUND', message: 'Rodada não encontrada.' }]);
+  }
+
+  const match = (round.matches ?? []).find((item) => item?.id === matchId);
+  if (!match) {
+    return fail([{ code: 'MATCH_NOT_FOUND', message: 'Partida não encontrada.' }]);
+  }
+
+  return { ok: true, errors: [], session, round, match };
+}
+
+function withUpdatedMatchScore(session, roundId, matchId, scoreA, scoreB, now) {
+  const clock = now ?? (() => new Date());
+  return {
+    ...session,
+    rounds: (session.rounds ?? []).map((round) => {
+      if (round.id !== roundId) return round;
+      return {
+        ...round,
+        matches: (round.matches ?? []).map((match) =>
+          match.id === matchId ? { ...match, scoreA, scoreB } : match
+        ),
+      };
+    }),
+    updatedAt: clock().toISOString(),
+  };
+}
+
+function commitMatchScore(document, session, roundId, matchId, scoreA, scoreB, now) {
+  const updatedSession = withUpdatedMatchScore(session, roundId, matchId, scoreA, scoreB, now);
+  return succeed({
+    document: replaceSession(document, session.id, updatedSession),
+    session: updatedSession,
+  });
+}
+
+export function setSessionMatchScore(document, sessionId, roundId, matchId, scoreA, scoreB, options = {}) {
+  const located = locateInProgressMatch(document, sessionId, roundId, matchId);
+  if (!located.ok) return located;
+
+  if (scoreA === null && scoreB === null) {
+    return fail([
+      {
+        code: 'SCORE_PARTIAL',
+        message: 'O placar deve preencher os dois lados ou ficar vazio.',
+      },
+    ]);
+  }
+
+  const validation = validateScore(scoreA, scoreB);
+  if (!validation.ok) return fail(validation.errors);
+
+  return commitMatchScore(document, located.session, roundId, matchId, scoreA, scoreB, options.now);
+}
+
+export function clearSessionMatchScore(document, sessionId, roundId, matchId, options = {}) {
+  const { now, clearConfirmed = false } = options;
+  const located = locateInProgressMatch(document, sessionId, roundId, matchId);
+  if (!located.ok) return located;
+
+  if (!clearConfirmed) {
+    return fail([
+      {
+        code: 'CLEAR_SCORE_CONFIRMATION_REQUIRED',
+        message: CLEAR_SCORE_CONFIRMATION_MESSAGE,
+      },
+    ]);
+  }
+
+  return commitMatchScore(document, located.session, roundId, matchId, null, null, now);
 }

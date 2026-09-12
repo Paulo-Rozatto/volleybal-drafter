@@ -1,3 +1,5 @@
+import { isMatchCompleted, isMatchPending } from './domain/sessionValidation.js';
+
 export const MISSING_PAIR_LABEL = 'Dupla não encontrada';
 
 export function formatPairLabel(pair) {
@@ -27,4 +29,17 @@ export function roundsInOrder(rounds) {
   return [...(Array.isArray(rounds) ? rounds : [])].sort(
     (left, right) => (left?.number ?? 0) - (right?.number ?? 0)
   );
+}
+
+export function formatMatchScore(match) {
+  if (isMatchPending(match)) return '— × —';
+  if (typeof match?.scoreA === 'number' && typeof match?.scoreB === 'number') {
+    return `${match.scoreA} × ${match.scoreB}`;
+  }
+  return '— × —';
+}
+
+export function matchWinningSide(match) {
+  if (!isMatchCompleted(match)) return null;
+  return match.scoreA > match.scoreB ? 'A' : 'B';
 }

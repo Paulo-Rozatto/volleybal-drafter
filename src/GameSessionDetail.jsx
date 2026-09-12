@@ -6,6 +6,7 @@ import {
   addSessionPair,
   canEditSessionPairs,
   canGenerateSessionRounds,
+  clearSessionMatchScore,
   formatSessionDate,
   GENERATE_ROUNDS_CONFIRMATION_MESSAGE,
   removeSessionPair,
@@ -13,8 +14,10 @@ import {
   RESET_TO_DRAFT_CONFIRMATION_MESSAGE,
   resetSessionToDraftForPairEditing,
   sessionDisplayName,
+  sessionIsReadyToFinalize,
   sessionListStats,
   sessionRoundSummary,
+  setSessionMatchScore,
   startSessionRoundRobin,
   translateSessionStatus,
   updateSessionPair,
@@ -96,12 +99,13 @@ export default function GameSessionDetail({
   const [actionError, setActionError] = useState(null);
 
   const { pairCount } = sessionListStats(session);
-  const { roundCount, matchCount, completedCount, pendingCount } = sessionRoundSummary(session);
+  const { roundCount, matchCount, completedCount, pendingCount, invalidCount } = sessionRoundSummary(session);
   const editable = canEditSessionPairs(session);
   const mode = editable ? pairMode : 'manual';
   const canGenerate = canGenerateSessionRounds(session, players);
   const tooFewPairs = (session?.pairs?.length ?? 0) < 2;
   const inProgress = session?.status === 'in_progress';
+  const readyToFinalize = sessionIsReadyToFinalize(session);
 
   const persistIfOk = (result) => {
     if (result?.ok) {
@@ -195,8 +199,22 @@ export default function GameSessionDetail({
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
           {pluralize(completedCount, 'partida concluída', 'partidas concluídas')} ·{' '}
           {pluralize(pendingCount, 'partida pendente', 'partidas pendentes')}
+          {invalidCount > 0
+            ? ` · ${pluralize(invalidCount, 'partida inválida', 'partidas inválidas')}`
+            : ''}
         </p>
       </div>
+
+      {readyToFinalize && (
+        <div
+          className="p-4 rounded-xl border"
+          style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--primary)' }}
+        >
+          <p className="text-sm font-bold">
+            Todos os jogos foram concluídos. O encontro já pode ser finalizado.
+          </p>
+        </div>
+      )}
 
       {editable && (
         <div className="flex rounded-lg p-1 gap-1" style={{ backgroundColor: 'var(--bg-subtle)' }}>
@@ -278,7 +296,20 @@ export default function GameSessionDetail({
         </div>
       )}
 
-      <RoundBoard session={session} />
+      <RoundBoard
+        session={session}
+        canEditScores={inProgress}
+        onSaveScore={(roundId, matchId, scoreA, scoreB) =>
+          persistIfOk(
+            setSessionMatchScore(sessionsDocument, session.id, roundId, matchId, scoreA, scoreB)
+          )
+        }
+        onClearScore={(roundId, matchId, { clearConfirmed } = {}) =>
+          persistIfOk(
+            clearSessionMatchScore(sessionsDocument, session.id, roundId, matchId, { clearConfirmed })
+          )
+        }
+      />
 
       {inProgress && (
         <div className="space-y-2">

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatPairLabel,
+  formatMatchScore,
+  matchWinningSide,
   MISSING_PAIR_LABEL,
   resolveByeLabel,
   resolvePairLabel,
@@ -67,5 +69,18 @@ describe('roundsInOrder', () => {
     const snapshot = [...rounds];
     expect(roundsInOrder(rounds).map((round) => round.id)).toEqual(['r1', 'r2']);
     expect(rounds).toEqual(snapshot);
+  });
+});
+
+describe('formatMatchScore e matchWinningSide', () => {
+  it('mostra placar pendente e concluído sem gravar vencedor', () => {
+    const pending = { scoreA: null, scoreB: null };
+    const completed = { scoreA: 21, scoreB: 18 };
+    expect(formatMatchScore(pending)).toBe('— × —');
+    expect(formatMatchScore(completed)).toBe('21 × 18');
+    expect(matchWinningSide(pending)).toBeNull();
+    expect(matchWinningSide(completed)).toBe('A');
+    expect(matchWinningSide({ scoreA: 10, scoreB: 21 })).toBe('B');
+    expect(completed).not.toHaveProperty('winner');
   });
 });
