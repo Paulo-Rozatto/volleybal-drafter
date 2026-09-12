@@ -89,13 +89,17 @@ export default function App() {
     setHasPendingGistChanges(true);
   };
 
-  const handleCreateGameSession = (input) => {
-    const { document } = appendDraftGameSession(gameSessions, input);
-    const persistResult = persistLocalGameSessions(document);
-    setGameSessions(document);
+  const applySessionsDocument = (nextDocument) => {
+    const persistResult = persistLocalGameSessions(nextDocument);
+    setGameSessions(nextDocument);
     markPendingGistChanges();
     setHasPendingGistChanges(true);
     setLocalWriteError(persistResult.ok ? null : persistResult.error);
+  };
+
+  const handleCreateGameSession = (input) => {
+    const { document: nextDocument } = appendDraftGameSession(gameSessions, input);
+    applySessionsDocument(nextDocument);
   };
 
   const loadGistWithStrategy = async (strategy) => {
@@ -642,7 +646,10 @@ export default function App() {
           {currentView === 'sessions' && (
             <GameSessionsView
               sessions={gameSessions.sessions}
+              sessionsDocument={gameSessions}
+              players={players}
               onCreateSession={handleCreateGameSession}
+              onApplyDocument={applySessionsDocument}
               syncPanel={gistSyncPanel}
             />
           )}

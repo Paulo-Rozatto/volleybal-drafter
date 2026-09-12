@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import GameSessionDetail from './GameSessionDetail.jsx';
 import { validateDate } from './domain/sessionValidation.js';
 import {
   formatSessionDate,
@@ -15,12 +16,53 @@ function emptyForm() {
   };
 }
 
-export default function GameSessionsView({ sessions = [], onCreateSession, syncPanel }) {
+export default function GameSessionsView({
+  sessions = [],
+  sessionsDocument,
+  players = [],
+  onCreateSession,
+  onApplyDocument,
+  syncPanel,
+}) {
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [dateError, setDateError] = useState(null);
+  const [openSessionId, setOpenSessionId] = useState(null);
 
   const visibleSessions = sessionsForDisplay(sessions);
+  const openSession = sessions.find((item) => item.id === openSessionId) ?? null;
+
+  if (openSessionId) {
+    if (!openSession) {
+      return (
+        <div className="space-y-4">
+          <button
+            type="button"
+            onClick={() => setOpenSessionId(null)}
+            className="font-bold text-sm py-2 cursor-pointer"
+            style={{ color: 'var(--primary)' }}
+          >
+            ← Voltar para encontros
+          </button>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            Encontro não encontrado.
+          </p>
+          {syncPanel}
+        </div>
+      );
+    }
+
+    return (
+      <GameSessionDetail
+        session={openSession}
+        sessionsDocument={sessionsDocument}
+        players={players}
+        syncPanel={syncPanel}
+        onBack={() => setOpenSessionId(null)}
+        onApplyDocument={onApplyDocument}
+      />
+    );
+  }
 
   const openForm = () => {
     setForm(emptyForm());
@@ -174,6 +216,18 @@ export default function GameSessionsView({ sessions = [], onCreateSession, syncP
                   {pairCount} {pairCount === 1 ? 'dupla' : 'duplas'} · {matchCount}{' '}
                   {matchCount === 1 ? 'jogo' : 'jogos'}
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setOpenSessionId(session.id)}
+                  className="w-full font-bold py-2 rounded-xl border text-sm cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--bg-subtle)',
+                    borderColor: 'var(--border-color)',
+                    color: 'var(--text-main)',
+                  }}
+                >
+                  Abrir encontro
+                </button>
               </article>
             );
           })}

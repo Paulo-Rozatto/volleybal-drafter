@@ -1,4 +1,4 @@
-import { validateDate, countSessionMatches } from './domain/sessionValidation.js';
+import { countSessionMatches, validateDate, validatePair, validateSessionPairs } from './domain/sessionValidation.js';
 import { GAME_SESSIONS_SCHEMA_VERSION } from './persistence/constants.js';
 import { nextGameSessionsDocument } from './persistence/syncHelpers.js';
 
@@ -85,4 +85,195 @@ export function sessionListStats(session) {
   const pairCount = Array.isArray(session?.pairs) ? session.pairs.length : 0;
   const { total } = countSessionMatches(session);
   return { pairCount, matchCount: total };
+}
+
+export function sessionDisplayName(session) {
+  return session?.name || 'Encontro sem nome';
+}
+
+export function canEditSessionPairs(session) {
+  return session?.status === 'draft' && (!Array.isArray(session?.rounds) || session.rounds.length === 0);
+}
+
+export function takenPlayerIds(pairs, exceptPairId) {
+  const ids = new Set();
+  for (const pair of pairs ?? []) {
+    if (exceptPairId && pair?.id === exceptPairId) continue;
+    for (const member of pair?.members ?? []) {
+      if (typeof member?.playerId === 'string' && member.playerId.trim()) {
+        ids.add(member.playerId);
+      }
+    }
+  }
+  return ids;
+}
+
+export function availableRosterPlayers(roster, pairs, exceptPairId) {
+  const taken = takenPlayerIds(pairs, exceptPairId);
+  return (roster ?? []).filter((player) => player?.id && !taken.has(player.id));
+}
+
+function normalizeSearch(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+export function filterPlayersByName(players, query) {
+  const needle = normalizeSearch(query);
+  const list = Array.isArray(players) ? players : [];
+  if (!needle) return [...list];
+  return list.filter((player) => normalizeSearch(player?.name).includes(needle));
+}
+
+function fail(errors) {
+  return { ok: false, errors, document: null, session: null, pair: null };
+}
+
+function succeed({ document, session, pair = null }) {
+  return { ok: true, errors: [], document, session, pair };
+}
+
+function findSession(document, sessionId) {
+  return (document?.sessions ?? []).find((item) => item?.id === sessionId) ?? null;
+}
+
+function snapshotMember(player) {
+  return {
+    playerId: player?.id,
+    playerName: typeof player?.name === 'string' ? player.name.trim() : '',
+  };
+}
+
+function replaceSession(document, sessionId, nextSession) {
+  const sessions = Array.isArray(document?.sessions) ? document.sessions : [];
+  return nextGameSessionsDocument(document, {
+    schemaVersion: document?.schemaVersion ?? GAME_SESSIONS_SCHEMA_VERSION,
+    sessions: sessions.map((item) => (item?.id === sessionId ? nextSession : item)),
+  });
+}
+
+function withUpdatedPairs(session, pairs, now) {
+  const clock = now ?? (() => new Date());
+  return {
+    ...session,
+    pairs: [...pairs],
+    rounds: Array.isArray(session.rounds) ? [...session.rounds] : [],
+    updatedAt: clock().toISOString(),
+  };
+}
+
+function lockedResult(session) {
+  if (!session) {
+    return fail([{ code: 'SESSION_NOT_FOUND', message: 'Encontro não encontrado.' }]);
+  }
+  if (!canEditSessionPairs(session)) {
+    return fail([
+      {
+        code: 'PAIRS_LOCKED',
+        message: 'Só é possível alterar duplas em um encontro em rascunho sem rodadas.',
+      },
+    ]);
+  }
+  return null;
+}
+
+function selectionResult(playerA, playerB) {
+  if (!playerA || !playerB) {
+    return fail([
+      {
+        code: 'PAIR_SELECTION_INCOMPLETE',
+        message: 'Selecione dois jogadores para formar a dupla.',
+      },
+    ]);
+  }
+  return null;
+}
+
+function commitPairs(document, session, nextPairs, roster, now, pair) {
+  const setResult = validateSessionPairs(nextPairs, roster);
+  if (!setResult.ok) return fail(setResult.errors);
+
+  const updatedSession = withUpdatedPairs(session, nextPairs, now);
+  return succeed({
+    document: replaceSession(document, session.id, updatedSession),
+    session: updatedSession,
+    pair,
+  });
+}
+
+export function addSessionPair(document, sessionId, { playerA, playerB } = {}, roster, { idGenerator, now } = {}) {
+  const session = findSession(document, sessionId);
+  const locked = lockedResult(session);
+  if (locked) return locked;
+
+  const selected = selectionResult(playerA, playerB);
+  if (selected) return selected;
+
+  const createId = idGenerator ?? (() => crypto.randomUUID());
+  const pair = {
+    id: createId(),
+    members: [snapshotMember(playerA), snapshotMember(playerB)],
+  };
+
+  const pairResult = validatePair(pair, roster, session.pairs ?? []);
+  if (!pairResult.ok) return fail(pairResult.errors);
+
+  return commitPairs(document, session, [...(session.pairs ?? []), pair], roster, now, pair);
+}
+
+export function updateSessionPair(
+  document,
+  sessionId,
+  pairId,
+  { playerA, playerB } = {},
+  roster,
+  { now } = {}
+) {
+  const session = findSession(document, sessionId);
+  const locked = lockedResult(session);
+  if (locked) return locked;
+
+  const selected = selectionResult(playerA, playerB);
+  if (selected) return selected;
+
+  const currentPairs = session.pairs ?? [];
+  const pairIndex = currentPairs.findIndex((item) => item?.id === pairId);
+  if (pairIndex < 0) {
+    return fail([{ code: 'PAIR_NOT_FOUND', message: 'Dupla não encontrada.' }]);
+  }
+
+  const pair = {
+    id: pairId,
+    members: [snapshotMember(playerA), snapshotMember(playerB)],
+  };
+  const otherPairs = currentPairs.filter((item) => item.id !== pairId);
+  const pairResult = validatePair(pair, roster, otherPairs);
+  if (!pairResult.ok) return fail(pairResult.errors);
+
+  const nextPairs = currentPairs.map((item, index) => (index === pairIndex ? pair : item));
+  return commitPairs(document, session, nextPairs, roster, now, pair);
+}
+
+export function removeSessionPair(document, sessionId, pairId, roster, { now } = {}) {
+  const session = findSession(document, sessionId);
+  const locked = lockedResult(session);
+  if (locked) return locked;
+
+  const currentPairs = session.pairs ?? [];
+  if (!currentPairs.some((item) => item?.id === pairId)) {
+    return fail([{ code: 'PAIR_NOT_FOUND', message: 'Dupla não encontrada.' }]);
+  }
+
+  const nextPairs = currentPairs.filter((item) => item.id !== pairId);
+  return commitPairs(document, session, nextPairs, roster, now, null);
+}
+
+export function pairMembersForEdit(pair, roster) {
+  return (pair?.members ?? []).map((member) => {
+    const current = (roster ?? []).find((player) => player?.id === member?.playerId);
+    return current ? { ...current } : { id: member?.playerId, name: member?.playerName };
+  });
 }
