@@ -1,7 +1,7 @@
 import { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constants.js';
 import {
   createEmptyGameSessionsDocument,
-  parseGameSessionsJson,
+  interpretGameSessionsJson,
   validateGameSessionsDocument,
 } from './persistence/gameSessionsDocument.js';
 
@@ -48,7 +48,11 @@ function parsePlayersContent(content) {
 
 function parseGameSessionsContent(content) {
   if (isBlankContent(content)) {
-    return createEmptyGameSessionsDocument();
+    return {
+      document: createEmptyGameSessionsDocument(),
+      migrated: false,
+      sourceVersion: null,
+    };
   }
 
   try {
@@ -58,7 +62,7 @@ function parseGameSessionsContent(content) {
   }
 
   try {
-    return parseGameSessionsJson(content);
+    return interpretGameSessionsJson(content);
   } catch (error) {
     throw new Error(`Arquivo game-sessions.json inválido: ${error.message}`);
   }
@@ -77,10 +81,13 @@ async function fetchGistFiles(fetchImpl) {
 
 export async function loadGistState({ fetchImpl } = {}) {
   const files = await fetchGistFiles(fetchImpl);
+  const sessions = parseGameSessionsContent(files[GAME_SESSIONS_FILENAME]?.content);
 
   return {
     players: parsePlayersContent(files[PLAYERS_FILENAME]?.content),
-    gameSessions: parseGameSessionsContent(files[GAME_SESSIONS_FILENAME]?.content),
+    gameSessions: sessions.document,
+    migrated: sessions.migrated,
+    sourceVersion: sessions.sourceVersion,
   };
 }
 
@@ -121,12 +128,12 @@ export async function saveGistState({ players, gameSessions, token, fetchImpl } 
   if (!Array.isArray(players)) {
     throw new Error('players precisa ser um array.');
   }
-  validateGameSessionsDocument(gameSessions);
+  const validSessions = validateGameSessionsDocument(gameSessions);
 
   return patchGistFiles(
     {
       [PLAYERS_FILENAME]: players,
-      [GAME_SESSIONS_FILENAME]: gameSessions,
+      [GAME_SESSIONS_FILENAME]: validSessions,
     },
     token,
     { fetchImpl }

@@ -1,6 +1,9 @@
 import { GAME_SESSIONS_SCHEMA_VERSION, GIST_PENDING_CHANGES_STORAGE_KEY } from './constants.js';
-import { createEmptyGameSessionsDocument } from './gameSessionsDocument.js';
-import { loadGameSessionsDocument, saveGameSessionsDocument } from './gameSessionsStorage.js';
+import {
+  collectLegacyPairFields,
+  createEmptyGameSessionsDocument,
+} from './gameSessionsDocument.js';
+import { loadGameSessionsRecord, saveGameSessionsDocument } from './gameSessionsStorage.js';
 
 export const GIST_LOAD_STRATEGY = {
   FRESH: 'fresh',
@@ -8,6 +11,9 @@ export const GIST_LOAD_STRATEGY = {
   USE_REMOTE: 'use_remote',
   CANCEL: 'cancel',
 };
+
+export const GIST_SESSIONS_MIGRATED_MESSAGE =
+  'Os encontros foram migrados para o novo formato. Salve no Gist para concluir a atualização.';
 
 function resolveStorage(storage) {
   if (storage) return storage;
@@ -18,15 +24,46 @@ function resolveStorage(storage) {
 }
 
 export function readLocalGameSessions(storage) {
+  let store;
   try {
+    store = resolveStorage(storage);
+  } catch (error) {
     return {
-      document: loadGameSessionsDocument(storage),
+      document: createEmptyGameSessionsDocument(),
+      error: error.message || 'Cache local de encontros inválido.',
+      migrated: false,
+      sourceVersion: null,
+      writeError: null,
+    };
+  }
+
+  try {
+    const loaded = loadGameSessionsRecord(store);
+    let writeError = null;
+
+    if (loaded.migrated) {
+      try {
+        saveGameSessionsDocument(loaded.document, store);
+      } catch (error) {
+        writeError = error.message || 'Não foi possível salvar o cache local de encontros.';
+      }
+      markPendingGistChanges(store);
+    }
+
+    return {
+      document: loaded.document,
       error: null,
+      migrated: loaded.migrated,
+      sourceVersion: loaded.sourceVersion,
+      writeError,
     };
   } catch (error) {
     return {
       document: createEmptyGameSessionsDocument(),
       error: error.message || 'Cache local de encontros inválido.',
+      migrated: false,
+      sourceVersion: null,
+      writeError: null,
     };
   }
 }
@@ -49,6 +86,13 @@ export function nextGameSessionsDocument(current, next) {
 
   if (!Array.isArray(incoming.sessions)) {
     throw new Error('O documento de encontros precisa ter uma lista de sessões.');
+  }
+
+  const legacy = collectLegacyPairFields(incoming);
+  if (legacy.size > 0) {
+    throw new Error(
+      `Documento de encontros híbrido ou V1 não pode ser salvo (${[...legacy].join(', ')}).`
+    );
   }
 
   return {
@@ -118,6 +162,7 @@ export function applySuccessfulGistLoad({
   localGameSessions,
   remotePlayers,
   remoteGameSessions,
+  remoteMigrated = false,
 }) {
   if (strategy === GIST_LOAD_STRATEGY.KEEP_LOCAL) {
     return {
@@ -130,16 +175,20 @@ export function applySuccessfulGistLoad({
     };
   }
 
+  const pendingBecauseMigrated = Boolean(remoteMigrated);
+  const migratedMessage = GIST_SESSIONS_MIGRATED_MESSAGE;
+  const replacedMessage =
+    strategy === GIST_LOAD_STRATEGY.USE_REMOTE
+      ? 'Dados locais substituídos pelos dados do Gist.'
+      : 'Carregado do Gist com sucesso!';
+
   return {
     players: remotePlayers,
     gameSessions: remoteGameSessions,
     replaceLocal: true,
     gistLoaded: true,
-    hasPendingGistChanges: false,
-    syncStatus:
-      strategy === GIST_LOAD_STRATEGY.USE_REMOTE
-        ? 'Dados locais substituídos pelos dados do Gist.'
-        : 'Carregado do Gist com sucesso!',
+    hasPendingGistChanges: pendingBecauseMigrated,
+    syncStatus: pendingBecauseMigrated ? migratedMessage : replacedMessage,
   };
 }
 

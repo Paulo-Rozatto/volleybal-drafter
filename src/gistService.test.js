@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 describe('loadGistState', () => {
-  it('faz um único GET e lê os dois arquivos pelo nome', async () => {
+  it('GET V1 migra para V2 e informa migrated: true', async () => {
     const players = [{ id: 'p1', name: 'Erik' }];
     const gameSessions = {
       schemaVersion: 1,
@@ -74,10 +74,39 @@ describe('loadGistState', () => {
       headers: { Accept: 'application/vnd.github.v3+json' },
     });
     expect(fetchImpl.mock.calls[0][1].method).toBeUndefined();
-    expect(state).toEqual({ players, gameSessions });
+    expect(state.players).toEqual(players);
+    expect(state.migrated).toBe(true);
+    expect(state.sourceVersion).toBe(1);
+    expect(state.gameSessions.schemaVersion).toBe(2);
+    expect(state.gameSessions.sessions[0]).toMatchObject({
+      id: 's1',
+      format: { teamSize: 2, teamCount: 2 },
+      teams: [],
+      rounds: [],
+    });
+    expect(state.gameSessions.sessions[0]).not.toHaveProperty('pairs');
   });
 
-  it('retorna array vazio quando players.json está ausente', async () => {
+  it('GET V2 valida sem migrar', async () => {
+    const players = [{ id: 'p1', name: 'Erik' }];
+    const gameSessions = { schemaVersion: 2, sessions: [] };
+    const fetchImpl = mockFetch(
+      jsonResponse(
+        gistPayload({
+          [PLAYERS_FILENAME]: { content: JSON.stringify(players) },
+          [GAME_SESSIONS_FILENAME]: { content: JSON.stringify(gameSessions) },
+        })
+      )
+    );
+
+    const state = await loadGistState({ fetchImpl });
+    expect(state.players).toEqual(players);
+    expect(state.migrated).toBe(false);
+    expect(state.sourceVersion).toBe(2);
+    expect(state.gameSessions).toEqual(createEmptyGameSessionsDocument());
+  });
+
+  it('retorna array vazio quando players.json está ausente e ainda migra encontros V1', async () => {
     const fetchImpl = mockFetch(
       jsonResponse(
         gistPayload({
@@ -90,7 +119,9 @@ describe('loadGistState', () => {
 
     const state = await loadGistState({ fetchImpl });
     expect(state.players).toEqual([]);
-    expect(state.gameSessions.sessions).toEqual([{ id: 's1' }]);
+    expect(state.migrated).toBe(true);
+    expect(state.gameSessions.sessions[0].id).toBe('s1');
+    expect(state.gameSessions.schemaVersion).toBe(2);
   });
 
   it('retorna documento vazio quando game-sessions.json está ausente', async () => {
@@ -105,6 +136,8 @@ describe('loadGistState', () => {
     const state = await loadGistState({ fetchImpl });
     expect(state.players).toEqual([{ id: 'p1' }]);
     expect(state.gameSessions).toEqual(createEmptyGameSessionsDocument());
+    expect(state.migrated).toBe(false);
+    expect(state.sourceVersion).toBeNull();
   });
 
   it('não usa o primeiro arquivo disponível como players.json', async () => {
@@ -260,6 +293,21 @@ describe('patchGistFiles e saveGistState', () => {
     );
     expect(JSON.parse(body.files[PLAYERS_FILENAME].content)).toEqual(players);
     expect(JSON.parse(body.files[GAME_SESSIONS_FILENAME].content)).toEqual(gameSessions);
+  });
+
+  it('rejeita PATCH de documento V1 antes do fetch e deixa players.json intacto', async () => {
+    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
+
+    await expect(
+      saveGistState({
+        players: [{ id: 'p1', name: 'Erik' }],
+        gameSessions: { schemaVersion: 1, sessions: [] },
+        token: TOKEN,
+        fetchImpl,
+      })
+    ).rejects.toThrow('Versão de schema de encontros não suportada: 1.');
+
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('permite PATCH com somente um arquivo e omite os demais', async () => {

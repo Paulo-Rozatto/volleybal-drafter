@@ -1,28 +1,28 @@
 import { isMatchCompleted, isMatchPending } from './domain/sessionValidation.js';
 
-export const MISSING_PAIR_LABEL = 'Dupla não encontrada';
+export const MISSING_TEAM_LABEL = 'Dupla não encontrada';
 
-export function formatPairLabel(pair) {
-  const names = (pair?.members ?? [])
+export function formatTeamLabel(team) {
+  const names = (team?.members ?? [])
     .map((member) => (typeof member?.playerName === 'string' ? member.playerName.trim() : ''))
     .filter((name) => name.length > 0);
 
-  if (names.length === 0) return MISSING_PAIR_LABEL;
+  if (names.length === 0) return MISSING_TEAM_LABEL;
   return names.join(' + ');
 }
 
-export function resolvePairLabel(pairs, pairId) {
-  if (typeof pairId !== 'string' || pairId.trim().length === 0) {
-    return MISSING_PAIR_LABEL;
+export function resolveTeamLabel(teams, teamId) {
+  if (typeof teamId !== 'string' || teamId.trim().length === 0) {
+    return MISSING_TEAM_LABEL;
   }
 
-  const pair = (pairs ?? []).find((item) => item?.id === pairId);
-  return pair ? formatPairLabel(pair) : MISSING_PAIR_LABEL;
+  const team = (teams ?? []).find((item) => item?.id === teamId);
+  return team ? formatTeamLabel(team) : MISSING_TEAM_LABEL;
 }
 
-export function resolveByeLabel(pairs, byePairId) {
-  if (byePairId == null) return null;
-  return resolvePairLabel(pairs, byePairId);
+export function resolveByeLabel(teams, byeTeamId) {
+  if (byeTeamId == null) return null;
+  return resolveTeamLabel(teams, byeTeamId);
 }
 
 export function roundsInOrder(rounds) {

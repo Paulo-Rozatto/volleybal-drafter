@@ -4,7 +4,7 @@ import { resolveByeLabel, roundsInOrder } from './roundDisplay.js';
 
 export default function RoundBoard({ session, canEditScores = false, onSaveScore, onClearScore }) {
   const rounds = roundsInOrder(session?.rounds);
-  const pairs = session?.pairs ?? [];
+  const teams = session?.teams ?? [];
 
   if (rounds.length === 0) return null;
 
@@ -12,7 +12,7 @@ export default function RoundBoard({ session, canEditScores = false, onSaveScore
     <div className="space-y-3">
       <h3 className="font-bold text-sm">Rodadas</h3>
       {rounds.map((round) => {
-        const byeLabel = resolveByeLabel(pairs, round.byePairId);
+        const byeLabel = resolveByeLabel(teams, round.byeTeamId);
         return (
           <section
             key={round.id}
@@ -24,7 +24,7 @@ export default function RoundBoard({ session, canEditScores = false, onSaveScore
               <MatchScoreEditor
                 key={match.id}
                 match={match}
-                pairs={pairs}
+                teams={teams}
                 canEdit={canEditScores}
                 onSave={(scoreA, scoreB) => onSaveScore?.(round.id, match.id, scoreA, scoreB)}
                 onClear={(options) => onClearScore?.(round.id, match.id, options)}

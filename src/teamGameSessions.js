@@ -1,5 +1,5 @@
 import { generateRoundRobinSchedule } from './domain/roundRobin.js';
-import { validateDate } from './domain/sessionValidation.js';
+import { countSessionMatches, validateDate, validateScore } from './domain/sessionValidation.js';
 import {
   TEAM_SESSION_SCHEMA_VERSION,
   cloneV2Team,
@@ -22,6 +22,94 @@ export const GENERATE_TEAM_ROUNDS_CONFIRMATION_MESSAGE =
 
 export const RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE =
   'Alterar os times apagará todas as rodadas e placares deste encontro. Deseja continuar?';
+
+export const CLEAR_SCORE_CONFIRMATION_MESSAGE =
+  'Remover o placar desta partida e marcá-la novamente como pendente?';
+
+const STATUS_LABELS = {
+  draft: 'Rascunho',
+  in_progress: 'Em andamento',
+  finished: 'Finalizado',
+};
+
+export function localDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function formatSessionDate(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date ?? '';
+  }
+
+  const [year, month, day] = date.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('pt-BR', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+export function translateSessionStatus(status) {
+  return STATUS_LABELS[status] ?? status;
+}
+
+export function sessionsForDisplay(sessions) {
+  return [...(Array.isArray(sessions) ? sessions : [])].sort((left, right) => {
+    const byDate = String(right?.date ?? '').localeCompare(String(left?.date ?? ''));
+    if (byDate !== 0) return byDate;
+    return String(right?.createdAt ?? '').localeCompare(String(left?.createdAt ?? ''));
+  });
+}
+
+export function sessionDisplayName(session) {
+  return session?.name || 'Encontro sem nome';
+}
+
+export function sessionListStats(session) {
+  const teamCount = Array.isArray(session?.teams) ? session.teams.length : 0;
+  const { total } = countSessionMatches(session);
+  return { teamCount, matchCount: total };
+}
+
+export function teamSessionRoundSummary(session) {
+  const roundCount = Array.isArray(session?.rounds) ? session.rounds.length : 0;
+  const matches = countSessionMatches(session);
+  return {
+    roundCount,
+    matchCount: matches.total,
+    completedCount: matches.completed,
+    pendingCount: matches.pending,
+    invalidCount: matches.invalid,
+  };
+}
+
+export function teamSessionIsReadyToFinalize(session) {
+  const { total, completed, invalid } = countSessionMatches(session);
+  return total > 0 && completed === total && invalid === 0;
+}
+
+function normalizeSearch(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+export function filterPlayersByName(players, query) {
+  const needle = normalizeSearch(query);
+  const list = Array.isArray(players) ? players : [];
+  if (!needle) return [...list];
+  return list.filter((player) => normalizeSearch(player?.name).includes(needle));
+}
+
+export function usesDoublesLabels(session) {
+  return session?.format?.teamSize === 2;
+}
 
 /**
  * Sorteio automático futuro (não implementado nesta etapa).
@@ -239,6 +327,23 @@ export function teamMemberIdsInRoster(team, roster) {
     }
   }
   return ids;
+}
+
+export function sessionTeamMemberIdsInRoster(teams, roster) {
+  const ids = [];
+  for (const team of teams ?? []) {
+    for (const playerId of teamMemberIdsInRoster(team, roster)) {
+      if (!ids.includes(playerId)) ids.push(playerId);
+    }
+  }
+  return ids;
+}
+
+export function teamMembersForEdit(team, roster) {
+  return (team?.members ?? []).map((member) => {
+    const current = (roster ?? []).find((player) => player?.id === member?.playerId);
+    return current ? { ...current } : { id: member?.playerId, name: member?.playerName };
+  });
 }
 
 export function addSessionTeam(document, sessionId, memberIds = [], options = {}) {
@@ -480,4 +585,101 @@ export function resetTeamSessionToDraftForTeamEditing(document, sessionId, optio
     document: replaceSession(document, session.id, updatedSession),
     session: updatedSession,
   });
+}
+
+function locateInProgressMatch(document, sessionId, roundId, matchId) {
+  const session = findSession(document, sessionId);
+  if (!session) {
+    return fail([error('SESSION_NOT_FOUND', 'Encontro não encontrado.')]);
+  }
+
+  if (session.status === 'finished') {
+    return fail([
+      error('SESSION_FINISHED', 'Não é possível alterar placares de um encontro finalizado.'),
+    ]);
+  }
+
+  if (session.status !== 'in_progress') {
+    return fail([
+      error('SESSION_NOT_IN_PROGRESS', 'Só é possível alterar placares em um encontro em andamento.'),
+    ]);
+  }
+
+  const round = (session.rounds ?? []).find((item) => item?.id === roundId);
+  if (!round) {
+    return fail([error('ROUND_NOT_FOUND', 'Rodada não encontrada.')]);
+  }
+
+  const match = (round.matches ?? []).find((item) => item?.id === matchId);
+  if (!match) {
+    return fail([error('MATCH_NOT_FOUND', 'Partida não encontrada.')]);
+  }
+
+  return { ok: true, errors: [], session, round, match };
+}
+
+function withUpdatedMatchScore(session, roundId, matchId, scoreA, scoreB, now) {
+  const clock = now ?? (() => new Date());
+  return {
+    ...session,
+    format: {
+      teamSize: session.format.teamSize,
+      teamCount: session.format.teamCount,
+    },
+    teams: cloneTeams(session.teams),
+    rounds: (session.rounds ?? []).map((round) => {
+      if (round.id !== roundId) return round;
+      return {
+        ...round,
+        matches: (round.matches ?? []).map((match) =>
+          match.id === matchId ? { ...match, scoreA, scoreB } : match
+        ),
+      };
+    }),
+    updatedAt: clock().toISOString(),
+  };
+}
+
+function commitMatchScore(document, session, roundId, matchId, scoreA, scoreB, now) {
+  const updatedSession = withUpdatedMatchScore(session, roundId, matchId, scoreA, scoreB, now);
+  return succeed({
+    document: replaceSession(document, session.id, updatedSession),
+    session: updatedSession,
+  });
+}
+
+export function setTeamSessionMatchScore(
+  document,
+  sessionId,
+  roundId,
+  matchId,
+  scoreA,
+  scoreB,
+  options = {}
+) {
+  const located = locateInProgressMatch(document, sessionId, roundId, matchId);
+  if (!located.ok) return located;
+
+  if (scoreA === null && scoreB === null) {
+    return fail([
+      error('SCORE_PARTIAL', 'O placar deve preencher os dois lados ou ficar vazio.'),
+    ]);
+  }
+
+  const validation = validateScore(scoreA, scoreB);
+  if (!validation.ok) return fail(validation.errors);
+
+  return commitMatchScore(document, located.session, roundId, matchId, scoreA, scoreB, options.now);
+}
+
+export function clearTeamSessionMatchScore(document, sessionId, roundId, matchId, options = {}) {
+  const { now, clearConfirmed = false } = options;
+  const located = locateInProgressMatch(document, sessionId, roundId, matchId);
+  if (!located.ok) return located;
+
+  if (!clearConfirmed) {
+    return fail([error('CLEAR_SCORE_CONFIRMATION_REQUIRED', CLEAR_SCORE_CONFIRMATION_MESSAGE)]);
+  }
+
+  return commitMatchScore(document, located.session, roundId, matchId, null, null, now);
 }

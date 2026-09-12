@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { isMatchPending } from './domain/sessionValidation.js';
-import { CLEAR_SCORE_CONFIRMATION_MESSAGE } from './gameSessions.js';
-import { formatMatchScore, matchWinningSide, resolvePairLabel } from './roundDisplay.js';
+import { formatMatchScore, matchWinningSide, resolveTeamLabel } from './roundDisplay.js';
 import { messageForScoreErrors, scoreFieldsToValues } from './scoreInput.js';
+import { CLEAR_SCORE_CONFIRMATION_MESSAGE } from './teamGameSessions.js';
 
 function scoreDraftValue(value) {
   return typeof value === 'number' ? String(value) : '';
 }
 
-function PairName({ label, winner }) {
+function TeamName({ label, winner }) {
   return (
     <p
       className="text-sm font-semibold"
@@ -21,7 +21,7 @@ function PairName({ label, winner }) {
 
 export default function MatchScoreEditor({
   match,
-  pairs = [],
+  teams = [],
   canEdit = false,
   onSave,
   onClear,
@@ -34,8 +34,8 @@ export default function MatchScoreEditor({
 
   const pending = isMatchPending(match);
   const winner = matchWinningSide(match);
-  const labelA = resolvePairLabel(pairs, match?.pairAId);
-  const labelB = resolvePairLabel(pairs, match?.pairBId);
+  const labelA = resolveTeamLabel(teams, match?.teamAId);
+  const labelB = resolveTeamLabel(teams, match?.teamBId);
 
   useEffect(() => {
     if (!confirmClear) return undefined;
@@ -95,7 +95,7 @@ export default function MatchScoreEditor({
       className="rounded-xl border p-3 space-y-2"
       style={{ backgroundColor: 'var(--bg-app)', borderColor: 'var(--border-color)' }}
     >
-      <PairName label={labelA} winner={winner === 'A'} />
+      <TeamName label={labelA} winner={winner === 'A'} />
 
       {editing ? (
         <div className="space-y-2">
@@ -198,7 +198,7 @@ export default function MatchScoreEditor({
         </>
       )}
 
-      <PairName label={labelB} winner={winner === 'B'} />
+      <TeamName label={labelB} winner={winner === 'B'} />
 
       {confirmClear && (
         <div

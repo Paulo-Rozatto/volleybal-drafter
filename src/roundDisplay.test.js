@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
-  formatPairLabel,
+  formatTeamLabel,
   formatMatchScore,
   matchWinningSide,
-  MISSING_PAIR_LABEL,
+  MISSING_TEAM_LABEL,
   resolveByeLabel,
-  resolvePairLabel,
+  resolveTeamLabel,
   roundsInOrder,
 } from './roundDisplay.js';
 
-const pairs = [
+const teams = [
   {
     id: 'pair-1',
     members: [
@@ -26,37 +26,37 @@ const pairs = [
   },
 ];
 
-describe('formatPairLabel', () => {
-  it('usa os nomes históricos da dupla', () => {
-    expect(formatPairLabel(pairs[0])).toBe('Gabi + Wellington');
+describe('formatTeamLabel', () => {
+  it('usa os nomes históricos do time', () => {
+    expect(formatTeamLabel(teams[0])).toBe('Gabi + Wellington');
   });
 
-  it('indica dupla ausente sem quebrar', () => {
-    expect(formatPairLabel(null)).toBe(MISSING_PAIR_LABEL);
-    expect(formatPairLabel({ members: [] })).toBe(MISSING_PAIR_LABEL);
+  it('indica time ausente sem quebrar', () => {
+    expect(formatTeamLabel(null)).toBe(MISSING_TEAM_LABEL);
+    expect(formatTeamLabel({ members: [] })).toBe(MISSING_TEAM_LABEL);
   });
 });
 
-describe('resolvePairLabel', () => {
-  it('resolve a dupla pelo ID armazenado no encontro', () => {
-    expect(resolvePairLabel(pairs, 'pair-2')).toBe('Luiza + Arthur');
+describe('resolveTeamLabel', () => {
+  it('resolve o time pelo ID armazenado no encontro', () => {
+    expect(resolveTeamLabel(teams, 'pair-2')).toBe('Luiza + Arthur');
   });
 
   it('não consulta o elenco atual e trata referência inválida', () => {
-    expect(resolvePairLabel(pairs, 'missing')).toBe(MISSING_PAIR_LABEL);
-    expect(resolvePairLabel(pairs, '')).toBe(MISSING_PAIR_LABEL);
-    expect(resolvePairLabel(pairs, null)).toBe(MISSING_PAIR_LABEL);
+    expect(resolveTeamLabel(teams, 'missing')).toBe(MISSING_TEAM_LABEL);
+    expect(resolveTeamLabel(teams, '')).toBe(MISSING_TEAM_LABEL);
+    expect(resolveTeamLabel(teams, null)).toBe(MISSING_TEAM_LABEL);
   });
 });
 
 describe('resolveByeLabel', () => {
-  it('omite folga quando byePairId é nulo', () => {
-    expect(resolveByeLabel(pairs, null)).toBeNull();
+  it('omite folga quando byeTeamId é nulo', () => {
+    expect(resolveByeLabel(teams, null)).toBeNull();
   });
 
-  it('mostra a dupla de folga ou uma indicação segura', () => {
-    expect(resolveByeLabel(pairs, 'pair-1')).toBe('Gabi + Wellington');
-    expect(resolveByeLabel(pairs, 'gone')).toBe(MISSING_PAIR_LABEL);
+  it('mostra o time de folga ou uma indicação segura', () => {
+    expect(resolveByeLabel(teams, 'pair-1')).toBe('Gabi + Wellington');
+    expect(resolveByeLabel(teams, 'gone')).toBe(MISSING_TEAM_LABEL);
   });
 });
 

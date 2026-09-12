@@ -4,7 +4,7 @@ import GameSessionsView from './GameSessionsView';
 import GistSyncPanel from './GistSyncPanel';
 import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
-import { appendDraftGameSession } from './gameSessions.js';
+import { appendDraftTeamSession } from './teamGameSessions.js';
 import { calcTeamBalancePenalty, prepareTeamDraftPool } from './domain/teamBalance.js';
 import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
 import {
@@ -58,14 +58,16 @@ export default function App() {
     () => localSessions.document ?? createEmptyGameSessionsDocument()
   );
   const [localCacheError, setLocalCacheError] = useState(() => localSessions.error);
-  const [localWriteError, setLocalWriteError] = useState(null);
+  const [localWriteError, setLocalWriteError] = useState(() => localSessions.writeError ?? null);
 
   // --- GitHub Gist Sync States ---
   const [appPassword, setAppPassword] = useState(() => sessionStorage.getItem('app_password') || '');
   const [syncStatus, setSyncStatus] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [gistLoaded, setGistLoaded] = useState(false);
-  const [hasPendingGistChanges, setHasPendingGistChanges] = useState(() => readPendingGistChanges());
+  const [hasPendingGistChanges, setHasPendingGistChanges] = useState(
+    () => Boolean(localSessions.migrated) || readPendingGistChanges()
+  );
   const [showLoadConflict, setShowLoadConflict] = useState(false);
 
   const gistGateMessage = getGistGateMessage({ gistLoaded, hasPendingGistChanges });
@@ -99,7 +101,14 @@ export default function App() {
   };
 
   const handleCreateGameSession = (input) => {
-    const { document: nextDocument } = appendDraftGameSession(gameSessions, input);
+    const { document: nextDocument } = appendDraftTeamSession(gameSessions, {
+      date: input.date,
+      name: input.name,
+      format: {
+        teamSize: 2,
+        teamCount: input.teamCount,
+      },
+    });
     applySessionsDocument(nextDocument);
   };
 
@@ -121,6 +130,7 @@ export default function App() {
         localGameSessions: gameSessions,
         remotePlayers: remote.players,
         remoteGameSessions: remoteSessions,
+        remoteMigrated: remote.migrated,
       });
 
       if (result.replaceLocal) {
@@ -129,9 +139,12 @@ export default function App() {
         setGameSessions(result.gameSessions);
         setLocalCacheError(null);
         setLocalWriteError(persistResult.ok ? null : persistResult.error);
-        clearPendingGistChanges();
-      } else {
+      }
+
+      if (result.hasPendingGistChanges) {
         markPendingGistChanges();
+      } else {
+        clearPendingGistChanges();
       }
 
       setHasPendingGistChanges(result.hasPendingGistChanges);

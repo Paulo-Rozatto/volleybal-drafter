@@ -14,7 +14,10 @@ import {
   startTeamSessionRoundRobin,
   takenTeamPlayerIds,
   teamMemberIdsInRoster,
+  teamSessionIsReadyToFinalize,
   updateSessionTeam,
+  setTeamSessionMatchScore,
+  clearTeamSessionMatchScore,
 } from './teamGameSessions.js';
 
 const NOW = () => new Date('2026-09-12T19:00:00.000Z');
@@ -631,5 +634,62 @@ describe('16 jogadores em três times 6x6', () => {
     );
     expect(sixVsFive).toBeTruthy();
     expect(result.session.teams[1].members).toHaveLength(5);
+  });
+});
+
+describe('placares V2', () => {
+  const twoTeams = [
+    team('team-1', [member('p1', 'Erik'), member('p2', 'André')]),
+    team('team-2', [member('p3', 'Gabi'), member('p4', 'Luiza')]),
+  ];
+
+  function inProgressDocument() {
+    return startTeamSessionRoundRobin(
+      documentWith(draftSession({ teams: twoTeams })),
+      'session-1',
+      { roster, idGenerator: sequentialIds(), now: NOW, generateConfirmed: true }
+    ).document;
+  }
+
+  it('grava, edita e limpa placar sem finalizar o encontro', () => {
+    const original = inProgressDocument();
+    const snapshot = JSON.parse(JSON.stringify(original));
+    const round = original.sessions[0].rounds[0];
+    const match = round.matches[0];
+    const first = setTeamSessionMatchScore(original, 'session-1', round.id, match.id, 21, 18, {
+      now: LATER,
+    });
+
+    expect(first.ok).toBe(true);
+    expect(first.session.status).toBe('in_progress');
+    expect(first.session.rounds[0].matches[0]).toMatchObject({
+      teamAId: expect.any(String),
+      teamBId: expect.any(String),
+      scoreA: 21,
+      scoreB: 18,
+    });
+    expect(first.session.updatedAt).toBe('2026-09-12T20:00:00.000Z');
+    expect(original).toEqual(snapshot);
+    expect(teamSessionIsReadyToFinalize(first.session)).toBe(true);
+
+    const cleared = clearTeamSessionMatchScore(first.document, 'session-1', round.id, match.id, {
+      now: LATER,
+      clearConfirmed: true,
+    });
+    expect(cleared.session.rounds[0].matches[0].scoreA).toBeNull();
+    expect(cleared.session.rounds[0].matches[0].scoreB).toBeNull();
+    expect(cleared.session.status).toBe('in_progress');
+    expect(teamSessionIsReadyToFinalize(cleared.session)).toBe(false);
+  });
+
+  it('reutiliza validateScore e não muta a entrada', () => {
+    const original = inProgressDocument();
+    const snapshot = JSON.parse(JSON.stringify(original));
+    const round = original.sessions[0].rounds[0];
+    const match = round.matches[0];
+    expect(
+      setTeamSessionMatchScore(original, 'session-1', round.id, match.id, 21, 21).errors[0].code
+    ).toBe('SCORE_TIE');
+    expect(original).toEqual(snapshot);
   });
 });

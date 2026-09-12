@@ -38,8 +38,8 @@ function v1Document(sessions) {
 }
 
 describe('compatibilidade da versão ativa', () => {
-  it('mantém o schema ativo do App em 1', () => {
-    expect(GAME_SESSIONS_SCHEMA_VERSION).toBe(1);
+  it('mantém o schema ativo do App em 2', () => {
+    expect(GAME_SESSIONS_SCHEMA_VERSION).toBe(2);
     expect(TEAM_SESSION_SCHEMA_VERSION).toBe(2);
   });
 });

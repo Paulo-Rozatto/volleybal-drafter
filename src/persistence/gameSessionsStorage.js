@@ -1,6 +1,7 @@
 import { GAME_SESSIONS_STORAGE_KEY } from './constants.js';
 import {
   createEmptyGameSessionsDocument,
+  interpretGameSessionsJson,
   parseGameSessionsJson,
   serializeGameSessionsDocument,
 } from './gameSessionsDocument.js';
@@ -13,13 +14,21 @@ function resolveStorage(storage) {
   return globalThis.localStorage;
 }
 
-export function loadGameSessionsDocument(storage) {
+export function loadGameSessionsRecord(storage) {
   const store = resolveStorage(storage);
   const raw = store.getItem(GAME_SESSIONS_STORAGE_KEY);
   if (raw == null) {
-    return createEmptyGameSessionsDocument();
+    return {
+      document: createEmptyGameSessionsDocument(),
+      migrated: false,
+      sourceVersion: null,
+    };
   }
-  return parseGameSessionsJson(raw);
+  return interpretGameSessionsJson(raw);
+}
+
+export function loadGameSessionsDocument(storage) {
+  return loadGameSessionsRecord(storage).document;
 }
 
 export function saveGameSessionsDocument(document, storage) {

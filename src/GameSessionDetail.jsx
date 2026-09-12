@@ -1,27 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import AutomaticPairBuilder from './AutomaticPairBuilder.jsx';
-import PairBuilder from './PairBuilder.jsx';
+import AutomaticTeamBuilder from './AutomaticTeamBuilder.jsx';
+import TeamBuilder from './TeamBuilder.jsx';
 import RoundBoard from './RoundBoard.jsx';
 import {
-  addSessionPair,
-  canEditSessionPairs,
-  canGenerateSessionRounds,
-  clearSessionMatchScore,
+  addSessionTeam,
+  canEditSessionTeams,
+  canGenerateTeamSessionRounds,
+  clearTeamSessionMatchScore,
   formatSessionDate,
-  GENERATE_ROUNDS_CONFIRMATION_MESSAGE,
-  removeSessionPair,
-  replaceSessionPairs,
-  RESET_TO_DRAFT_CONFIRMATION_MESSAGE,
-  resetSessionToDraftForPairEditing,
+  GENERATE_TEAM_ROUNDS_CONFIRMATION_MESSAGE,
+  removeSessionTeam,
+  replaceSessionTeams,
+  RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE,
+  resetTeamSessionToDraftForTeamEditing,
   sessionDisplayName,
-  sessionIsReadyToFinalize,
   sessionListStats,
-  sessionRoundSummary,
-  setSessionMatchScore,
-  startSessionRoundRobin,
+  setTeamSessionMatchScore,
+  startTeamSessionRoundRobin,
+  teamSessionIsReadyToFinalize,
+  teamSessionRoundSummary,
   translateSessionStatus,
-  updateSessionPair,
-} from './gameSessions.js';
+  updateSessionTeam,
+  usesDoublesLabels,
+} from './teamGameSessions.js';
 
 function ConfirmDialog({ titleId, title, message, confirmLabel, onConfirm, onCancel }) {
   useEffect(() => {
@@ -93,19 +94,24 @@ export default function GameSessionDetail({
   onBack,
   onApplyDocument,
 }) {
-  const [pairMode, setPairMode] = useState('manual');
+  const [teamMode, setTeamMode] = useState('manual');
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [actionError, setActionError] = useState(null);
 
-  const { pairCount } = sessionListStats(session);
-  const { roundCount, matchCount, completedCount, pendingCount, invalidCount } = sessionRoundSummary(session);
-  const editable = canEditSessionPairs(session);
-  const mode = editable ? pairMode : 'manual';
-  const canGenerate = canGenerateSessionRounds(session, players);
-  const tooFewPairs = (session?.pairs?.length ?? 0) < 2;
+  const doubles = usesDoublesLabels(session);
+  const unit = doubles ? 'dupla' : 'time';
+  const units = doubles ? 'duplas' : 'times';
+  const { teamCount } = sessionListStats(session);
+  const expectedTeamCount = session?.format?.teamCount ?? 2;
+  const { roundCount, matchCount, completedCount, pendingCount, invalidCount } =
+    teamSessionRoundSummary(session);
+  const editable = canEditSessionTeams(session);
+  const mode = editable ? teamMode : 'manual';
+  const canGenerate = canGenerateTeamSessionRounds(session, players);
+  const incompleteRoster = teamCount !== expectedTeamCount;
   const inProgress = session?.status === 'in_progress';
-  const readyToFinalize = sessionIsReadyToFinalize(session);
+  const readyToFinalize = teamSessionIsReadyToFinalize(session);
 
   const persistIfOk = (result) => {
     if (result?.ok) {
@@ -117,7 +123,7 @@ export default function GameSessionDetail({
     return result;
   };
 
-  const applyPairChange = (result) => persistIfOk(result);
+  const applyTeamChange = (result) => persistIfOk(result);
 
   const applyRoundAction = (result) => {
     if (result?.ok) return persistIfOk(result);
@@ -126,7 +132,7 @@ export default function GameSessionDetail({
   };
 
   const requestGenerateRounds = () => {
-    const result = startSessionRoundRobin(sessionsDocument, session.id, {
+    const result = startTeamSessionRoundRobin(sessionsDocument, session.id, {
       roster: players,
       generateConfirmed: false,
     });
@@ -140,7 +146,7 @@ export default function GameSessionDetail({
 
   const confirmGenerateRounds = () => {
     applyRoundAction(
-      startSessionRoundRobin(sessionsDocument, session.id, {
+      startTeamSessionRoundRobin(sessionsDocument, session.id, {
         roster: players,
         generateConfirmed: true,
       })
@@ -148,7 +154,7 @@ export default function GameSessionDetail({
   };
 
   const requestResetToDraft = () => {
-    const result = resetSessionToDraftForPairEditing(sessionsDocument, session.id, {
+    const result = resetTeamSessionToDraftForTeamEditing(sessionsDocument, session.id, {
       resetConfirmed: false,
     });
     if (result?.errors?.[0]?.code === 'RESET_TO_DRAFT_CONFIRMATION_REQUIRED') {
@@ -161,7 +167,7 @@ export default function GameSessionDetail({
 
   const confirmResetToDraft = () => {
     applyRoundAction(
-      resetSessionToDraftForPairEditing(sessionsDocument, session.id, {
+      resetTeamSessionToDraftForTeamEditing(sessionsDocument, session.id, {
         resetConfirmed: true,
       })
     );
@@ -191,7 +197,10 @@ export default function GameSessionDetail({
         </p>
         <p className="text-sm font-semibold">{translateSessionStatus(session.status)}</p>
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-          {pluralize(pairCount, 'dupla', 'duplas')}
+          Formato {session?.format?.teamSize ?? 2}x{session?.format?.teamSize ?? 2}
+        </p>
+        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+          {pluralize(teamCount, unit, units)}
         </p>
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
           {pluralize(roundCount, 'rodada', 'rodadas')} · {pluralize(matchCount, 'partida', 'partidas')}
@@ -220,7 +229,7 @@ export default function GameSessionDetail({
         <div className="flex rounded-lg p-1 gap-1" style={{ backgroundColor: 'var(--bg-subtle)' }}>
           <button
             type="button"
-            onClick={() => setPairMode('manual')}
+            onClick={() => setTeamMode('manual')}
             className="flex-1 py-2 text-sm font-bold rounded-md transition cursor-pointer"
             style={{
               backgroundColor: mode === 'manual' ? 'var(--primary)' : 'transparent',
@@ -231,54 +240,65 @@ export default function GameSessionDetail({
           </button>
           <button
             type="button"
-            onClick={() => setPairMode('auto')}
+            onClick={() => setTeamMode('auto')}
             className="flex-1 py-2 text-sm font-bold rounded-md transition cursor-pointer"
             style={{
               backgroundColor: mode === 'auto' ? 'var(--primary)' : 'transparent',
               color: mode === 'auto' ? 'var(--text-inverse)' : 'var(--text-muted)',
             }}
           >
-            Sortear duplas
+            Sortear {units}
           </button>
         </div>
       )}
 
       {mode === 'auto' && (
-        <AutomaticPairBuilder
+        <AutomaticTeamBuilder
           key={session.updatedAt}
           session={session}
           roster={players}
-          onReplacePairs={(pairs, { replaceConfirmed } = {}) =>
-            applyPairChange(
-              replaceSessionPairs(sessionsDocument, session.id, pairs, players, { replaceConfirmed })
+          onReplaceTeams={(teams, { replaceConfirmed } = {}) =>
+            applyTeamChange(
+              replaceSessionTeams(sessionsDocument, session.id, teams, {
+                roster: players,
+                replaceConfirmed,
+              })
             )
           }
         />
       )}
 
-      <PairBuilder
+      <TeamBuilder
         session={session}
         roster={players}
         showForm={mode === 'manual'}
-        onRequestEdit={() => setPairMode('manual')}
-        onAddPair={(playerA, playerB) =>
-          applyPairChange(addSessionPair(sessionsDocument, session.id, { playerA, playerB }, players))
-        }
-        onUpdatePair={(pairId, playerA, playerB) =>
-          applyPairChange(
-            updateSessionPair(sessionsDocument, session.id, pairId, { playerA, playerB }, players)
+        onRequestEdit={() => setTeamMode('manual')}
+        onAddTeam={(playerA, playerB) =>
+          applyTeamChange(
+            addSessionTeam(sessionsDocument, session.id, [playerA?.id, playerB?.id], {
+              roster: players,
+            })
           )
         }
-        onRemovePair={(pairId) =>
-          applyPairChange(removeSessionPair(sessionsDocument, session.id, pairId, players))
+        onUpdateTeam={(teamId, playerA, playerB) =>
+          applyTeamChange(
+            updateSessionTeam(sessionsDocument, session.id, teamId, [playerA?.id, playerB?.id], {
+              roster: players,
+            })
+          )
+        }
+        onRemoveTeam={(teamId) =>
+          applyTeamChange(
+            removeSessionTeam(sessionsDocument, session.id, teamId, { roster: players })
+          )
         }
       />
 
       {editable && (
         <div className="space-y-2">
-          {tooFewPairs && (
+          {incompleteRoster && (
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Forme pelo menos duas duplas para gerar os jogos.
+              Forme todas as {units} para gerar os jogos.
             </p>
           )}
           {actionError && !confirmGenerate && (
@@ -301,12 +321,14 @@ export default function GameSessionDetail({
         canEditScores={inProgress}
         onSaveScore={(roundId, matchId, scoreA, scoreB) =>
           persistIfOk(
-            setSessionMatchScore(sessionsDocument, session.id, roundId, matchId, scoreA, scoreB)
+            setTeamSessionMatchScore(sessionsDocument, session.id, roundId, matchId, scoreA, scoreB)
           )
         }
         onClearScore={(roundId, matchId, { clearConfirmed } = {}) =>
           persistIfOk(
-            clearSessionMatchScore(sessionsDocument, session.id, roundId, matchId, { clearConfirmed })
+            clearTeamSessionMatchScore(sessionsDocument, session.id, roundId, matchId, {
+              clearConfirmed,
+            })
           )
         }
       />
@@ -326,7 +348,7 @@ export default function GameSessionDetail({
               color: 'var(--text-main)',
             }}
           >
-            Alterar duplas
+            Alterar {units}
           </button>
         </div>
       )}
@@ -335,7 +357,7 @@ export default function GameSessionDetail({
         <ConfirmDialog
           titleId="generate-rounds-title"
           title="Gerar rodadas"
-          message={GENERATE_ROUNDS_CONFIRMATION_MESSAGE}
+          message={GENERATE_TEAM_ROUNDS_CONFIRMATION_MESSAGE}
           confirmLabel="Gerar rodadas"
           onConfirm={confirmGenerateRounds}
           onCancel={() => setConfirmGenerate(false)}
@@ -345,9 +367,9 @@ export default function GameSessionDetail({
       {confirmReset && (
         <ConfirmDialog
           titleId="reset-draft-title"
-          title="Alterar duplas"
-          message={RESET_TO_DRAFT_CONFIRMATION_MESSAGE}
-          confirmLabel="Apagar rodadas e alterar duplas"
+          title={`Alterar ${units}`}
+          message={RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE}
+          confirmLabel={`Apagar rodadas e alterar ${units}`}
           onConfirm={confirmResetToDraft}
           onCancel={() => setConfirmReset(false)}
         />

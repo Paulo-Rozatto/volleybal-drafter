@@ -9,6 +9,7 @@ import {
   getGistGateMessage,
   gistLoadNeedsFetch,
   GIST_LOAD_STRATEGY,
+  GIST_SESSIONS_MIGRATED_MESSAGE,
   markPendingGistChanges,
   nextGameSessionsDocument,
   persistLocalGameSessions,
@@ -31,11 +32,14 @@ function createMemoryStorage(initial = {}) {
   };
 }
 
+const emptyV2 = createEmptyGameSessionsDocument();
+
 describe('readLocalGameSessions', () => {
   it('usa documento vazio quando a chave não existe', () => {
     const result = readLocalGameSessions(createMemoryStorage());
     expect(result.error).toBeNull();
-    expect(result.document).toEqual(createEmptyGameSessionsDocument());
+    expect(result.document).toEqual(emptyV2);
+    expect(result.migrated).toBe(false);
   });
 
   it('não quebra e não apaga cache corrompido', () => {
@@ -47,20 +51,20 @@ describe('readLocalGameSessions', () => {
     const result = readLocalGameSessions(storage);
 
     expect(result.error).toBe('JSON inválido no documento de encontros.');
-    expect(result.document).toEqual(createEmptyGameSessionsDocument());
+    expect(result.document).toEqual(emptyV2);
     expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe('{broken');
     expect(storage.getItem('volleyPlayers')).toBe('[{"id":"p1"}]');
   });
 });
 
 describe('nextGameSessionsDocument', () => {
-  it('aplica uma atualização válida e força o schema atual', () => {
-    const current = { schemaVersion: 1, sessions: [{ id: 'a' }] };
-    const next = { schemaVersion: 1, sessions: [{ id: 'b' }] };
+  it('aplica uma atualização válida e força o schema 2', () => {
+    const current = { schemaVersion: 2, sessions: [{ id: 'a' }] };
+    const next = { schemaVersion: 2, sessions: [{ id: 'b' }] };
     const result = nextGameSessionsDocument(current, next);
 
     expect(result).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       sessions: [{ id: 'b' }],
     });
     expect(result).not.toBe(current);
@@ -69,45 +73,54 @@ describe('nextGameSessionsDocument', () => {
   });
 
   it('aceita uma função atualizadora válida', () => {
-    const current = { schemaVersion: 1, sessions: [{ id: 'a' }] };
+    const current = { schemaVersion: 2, sessions: [{ id: 'a' }] };
     const result = nextGameSessionsDocument(current, (prev) => ({
-      schemaVersion: 1,
+      schemaVersion: 2,
       sessions: [...prev.sessions, { id: 'c' }],
     }));
 
     expect(result).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       sessions: [{ id: 'a' }, { id: 'c' }],
     });
     expect(result).not.toBe(current);
   });
 
-  it('rejeita schemaVersion 2', () => {
+  it('rejeita schemaVersion 1', () => {
     expect(() =>
       nextGameSessionsDocument(
-        { schemaVersion: 1, sessions: [] },
-        { schemaVersion: 2, sessions: [] }
+        { schemaVersion: 2, sessions: [] },
+        { schemaVersion: 1, sessions: [] }
       )
-    ).toThrow('Versão de schema de encontros não suportada: 2.');
+    ).toThrow('Versão de schema de encontros não suportada: 1.');
+  });
+
+  it('rejeita documento híbrido', () => {
+    expect(() =>
+      nextGameSessionsDocument(
+        { schemaVersion: 2, sessions: [] },
+        { schemaVersion: 2, sessions: [{ id: 's1', pairs: [] }] }
+      )
+    ).toThrow('Documento de encontros híbrido ou V1 não pode ser salvo');
   });
 
   it('rejeita sessions ausente', () => {
     expect(() =>
-      nextGameSessionsDocument({ schemaVersion: 1, sessions: [] }, { schemaVersion: 1 })
+      nextGameSessionsDocument({ schemaVersion: 2, sessions: [] }, { schemaVersion: 2 })
     ).toThrow('O documento de encontros precisa ter uma lista de sessões.');
   });
 
   it('rejeita sessions que não seja array', () => {
     expect(() =>
       nextGameSessionsDocument(
-        { schemaVersion: 1, sessions: [] },
-        { schemaVersion: 1, sessions: { id: 'a' } }
+        { schemaVersion: 2, sessions: [] },
+        { schemaVersion: 2, sessions: { id: 'a' } }
       )
     ).toThrow('O documento de encontros precisa ter uma lista de sessões.');
   });
 
   it('rejeita entrada null ou undefined', () => {
-    const current = { schemaVersion: 1, sessions: [{ id: 'a' }] };
+    const current = { schemaVersion: 2, sessions: [{ id: 'a' }] };
     expect(() => nextGameSessionsDocument(current, null)).toThrow(
       'A atualização do documento de encontros precisa ser um objeto.'
     );
@@ -118,16 +131,13 @@ describe('nextGameSessionsDocument', () => {
 });
 
 describe('persistLocalGameSessions', () => {
-  it('salva com sucesso', () => {
+  it('salva com sucesso um documento V2', () => {
     const storage = createMemoryStorage({ volleyPlayers: '[]' });
-    const result = persistLocalGameSessions(
-      { schemaVersion: 1, sessions: [{ id: 's1' }] },
-      storage
-    );
+    const result = persistLocalGameSessions(emptyV2, storage);
 
     expect(result).toEqual({ ok: true, error: null });
     expect(storage.getItem('volleyPlayers')).toBe('[]');
-    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toContain('s1');
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toContain('"schemaVersion": 2');
   });
 
   it('retorna erro quando setItem lança e não altera outras chaves', () => {
@@ -142,10 +152,7 @@ describe('persistLocalGameSessions', () => {
       removeItem() {},
     };
 
-    const result = persistLocalGameSessions(
-      { schemaVersion: 1, sessions: [] },
-      storage
-    );
+    const result = persistLocalGameSessions(emptyV2, storage);
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('quota exceeded');
@@ -221,7 +228,7 @@ describe('indicador persistido de alterações pendentes', () => {
     const storage = {
       getItem(key) {
         if (key === 'volleyPlayers') return '[{"id":"p1"}]';
-        if (key === GAME_SESSIONS_STORAGE_KEY) return '{"schemaVersion":1,"sessions":[]}';
+        if (key === GAME_SESSIONS_STORAGE_KEY) return '{"schemaVersion":2,"sessions":[]}';
         return null;
       },
       setItem() {
@@ -235,23 +242,24 @@ describe('indicador persistido de alterações pendentes', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe('quota exceeded');
     expect(storage.getItem('volleyPlayers')).toBe('[{"id":"p1"}]');
-    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe('{"schemaVersion":1,"sessions":[]}');
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe('{"schemaVersion":2,"sessions":[]}');
   });
 });
 
 describe('estratégias de carregamento do Gist', () => {
   const localPlayers = [{ id: 'local' }];
   const remotePlayers = [{ id: 'remote' }];
-  const localGameSessions = { schemaVersion: 1, sessions: [{ id: 'local-session' }] };
-  const remoteGameSessions = { schemaVersion: 1, sessions: [{ id: 'remote-session' }] };
+  const localGameSessions = { schemaVersion: 2, sessions: [{ id: 'local-session' }] };
+  const remoteGameSessions = { schemaVersion: 2, sessions: [{ id: 'remote-session' }] };
 
-  it('Manter alterações locais preserva jogadores e encontros', () => {
+  it('Manter alterações locais preserva jogadores e encontros e a pendência', () => {
     const result = applySuccessfulGistLoad({
       strategy: GIST_LOAD_STRATEGY.KEEP_LOCAL,
       localPlayers,
       localGameSessions,
       remotePlayers,
       remoteGameSessions,
+      remoteMigrated: true,
     });
 
     expect(result.replaceLocal).toBe(false);
@@ -264,13 +272,14 @@ describe('estratégias de carregamento do Gist', () => {
     );
   });
 
-  it('Usar dados do Gist escolhe os dados remotos', () => {
+  it('Usar dados do Gist V2 limpa a pendência', () => {
     const result = applySuccessfulGistLoad({
       strategy: GIST_LOAD_STRATEGY.USE_REMOTE,
       localPlayers,
       localGameSessions,
       remotePlayers,
       remoteGameSessions,
+      remoteMigrated: false,
     });
 
     expect(result.replaceLocal).toBe(true);
@@ -279,6 +288,51 @@ describe('estratégias de carregamento do Gist', () => {
     expect(result.gistLoaded).toBe(true);
     expect(result.hasPendingGistChanges).toBe(false);
     expect(result.syncStatus).toBe('Dados locais substituídos pelos dados do Gist.');
+  });
+
+  it('Usar dados do Gist V1 migrado mantém a pendência', () => {
+    const result = applySuccessfulGistLoad({
+      strategy: GIST_LOAD_STRATEGY.USE_REMOTE,
+      localPlayers,
+      localGameSessions,
+      remotePlayers,
+      remoteGameSessions,
+      remoteMigrated: true,
+    });
+
+    expect(result.replaceLocal).toBe(true);
+    expect(result.hasPendingGistChanges).toBe(true);
+    expect(result.syncStatus).toBe(GIST_SESSIONS_MIGRATED_MESSAGE);
+  });
+
+  it('GET V1 fresco marca pendência e não dispara PATCH', () => {
+    const result = applySuccessfulGistLoad({
+      strategy: GIST_LOAD_STRATEGY.FRESH,
+      localPlayers,
+      localGameSessions,
+      remotePlayers,
+      remoteGameSessions,
+      remoteMigrated: true,
+    });
+
+    expect(result.replaceLocal).toBe(true);
+    expect(result.gistLoaded).toBe(true);
+    expect(result.hasPendingGistChanges).toBe(true);
+    expect(result.syncStatus).toBe(GIST_SESSIONS_MIGRATED_MESSAGE);
+  });
+
+  it('GET V2 fresco não marca pendência', () => {
+    const result = applySuccessfulGistLoad({
+      strategy: GIST_LOAD_STRATEGY.FRESH,
+      localPlayers,
+      localGameSessions,
+      remotePlayers,
+      remoteGameSessions,
+      remoteMigrated: false,
+    });
+
+    expect(result.hasPendingGistChanges).toBe(false);
+    expect(result.syncStatus).toBe('Carregado do Gist com sucesso!');
   });
 
   it('cancelar não realiza carregamento', () => {

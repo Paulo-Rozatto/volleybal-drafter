@@ -1,39 +1,44 @@
 import React, { useEffect, useState } from 'react';
 import { generateBalancedPairs } from './domain/balancedPairs.js';
 import {
-  canEditSessionPairs,
+  canEditSessionTeams,
   filterPlayersByName,
-  pairMemberIdsInRoster,
-  REPLACE_PAIRS_CONFIRMATION_MESSAGE,
-} from './gameSessions.js';
+  REPLACE_TEAMS_CONFIRMATION_MESSAGE,
+  sessionTeamMemberIdsInRoster,
+  usesDoublesLabels,
+} from './teamGameSessions.js';
 
-const ODD_COUNT_MESSAGE = 'Selecione uma quantidade par de jogadores. Adicione ou remova uma pessoa.';
-
-export default function AutomaticPairBuilder({ session, roster = [], onReplacePairs }) {
+export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTeams }) {
   const [query, setQuery] = useState('');
-  const [selectedIds, setSelectedIds] = useState(() => pairMemberIdsInRoster(session?.pairs, roster));
+  const [selectedIds, setSelectedIds] = useState(() =>
+    sessionTeamMemberIdsInRoster(session?.teams, roster)
+  );
   const [balanceGender, setBalanceGender] = useState(true);
   const [balanceHeight, setBalanceHeight] = useState(true);
   const [error, setError] = useState(null);
-  const [pendingPairs, setPendingPairs] = useState(null);
+  const [pendingTeams, setPendingTeams] = useState(null);
 
-  const editable = canEditSessionPairs(session);
+  const doubles = usesDoublesLabels(session);
+  const unit = doubles ? 'dupla' : 'time';
+  const units = doubles ? 'duplas' : 'times';
+  const editable = canEditSessionTeams(session);
+  const teamCount = session?.format?.teamCount ?? 2;
+  const requiredCount = teamCount * 2;
   const selectedCount = selectedIds.length;
-  const evenSelection = selectedCount % 2 === 0;
-  const pairPreview = evenSelection ? selectedCount / 2 : 0;
+  const exactSelection = selectedCount === requiredCount;
 
   const visiblePlayers = filterPlayersByName(roster, query).sort((left, right) =>
     String(left.name ?? '').localeCompare(String(right.name ?? ''), 'pt-BR', { sensitivity: 'base' })
   );
 
   useEffect(() => {
-    if (!pendingPairs) return undefined;
+    if (!pendingTeams) return undefined;
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') setPendingPairs(null);
+      if (event.key === 'Escape') setPendingTeams(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [pendingPairs]);
+  }, [pendingTeams]);
 
   const togglePlayer = (player) => {
     if (!editable || !player?.id) return;
@@ -43,18 +48,18 @@ export default function AutomaticPairBuilder({ session, roster = [], onReplacePa
     );
   };
 
-  const applyGeneratedPairs = (pairs, replaceConfirmed) => {
-    const result = onReplacePairs?.(pairs, { replaceConfirmed });
+  const applyGeneratedTeams = (teams, replaceConfirmed) => {
+    const result = onReplaceTeams?.(teams, { replaceConfirmed });
     if (result?.errors?.[0]?.code === 'REPLACE_CONFIRMATION_REQUIRED') {
-      setPendingPairs(pairs);
+      setPendingTeams(teams);
       setError(null);
       return result;
     }
     if (!result?.ok) {
-      setError(result?.errors?.[0]?.message || 'Não foi possível sortear as duplas.');
+      setError(result?.errors?.[0]?.message || `Não foi possível sortear as ${units}.`);
       return result;
     }
-    setPendingPairs(null);
+    setPendingTeams(null);
     setError(null);
     return result;
   };
@@ -71,23 +76,27 @@ export default function AutomaticPairBuilder({ session, roster = [], onReplacePa
       return;
     }
 
-    if (selectedPlayers.length % 2 === 1) {
-      setError(ODD_COUNT_MESSAGE);
+    if (selectedPlayers.length !== requiredCount) {
+      setError(
+        `Selecione exatamente ${requiredCount} jogadores para formar ${teamCount} ${
+          teamCount === 1 ? unit : units
+        }.`
+      );
       return;
     }
 
     const generated = generateBalancedPairs(selectedPlayers, { balanceGender, balanceHeight });
     if (!generated.ok) {
-      setError(generated.errors[0]?.message || 'Não foi possível sortear as duplas.');
+      setError(generated.errors[0]?.message || `Não foi possível sortear as ${units}.`);
       return;
     }
 
-    applyGeneratedPairs(generated.pairs, false);
+    applyGeneratedTeams(generated.pairs, false);
   };
 
   const confirmReplace = () => {
-    if (!pendingPairs) return;
-    applyGeneratedPairs(pendingPairs, true);
+    if (!pendingTeams) return;
+    applyGeneratedTeams(pendingTeams, true);
   };
 
   if (!editable) return null;
@@ -97,9 +106,13 @@ export default function AutomaticPairBuilder({ session, roster = [], onReplacePa
       className="p-4 rounded-xl border space-y-3"
       style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
     >
-      <h3 className="font-bold text-sm">Sortear duplas</h3>
+      <h3 className="font-bold text-sm">Sortear {units}</h3>
       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
         O balanceamento por nível está sempre ativo.
+      </p>
+      <p className="text-sm font-semibold">
+        Selecione exatamente {requiredCount} jogadores ({teamCount} {teamCount === 1 ? unit : units}
+        ).
       </p>
 
       <input
@@ -117,11 +130,12 @@ export default function AutomaticPairBuilder({ session, roster = [], onReplacePa
 
       <p className="text-sm font-semibold">
         {selectedCount} {selectedCount === 1 ? 'selecionado' : 'selecionados'}
-        {!evenSelection
-          ? ` · ${ODD_COUNT_MESSAGE}`
-          : selectedCount < 4
-            ? ' · Selecione pelo menos quatro jogadores para sortear duplas.'
-            : ` · ${pairPreview} ${pairPreview === 1 ? 'dupla prevista' : 'duplas previstas'}`}
+        {exactSelection
+          ? ` · ${teamCount} ${teamCount === 1 ? `${unit} prevista` : `${units} previstas`}`
+          : ` · faltam ${Math.max(0, requiredCount - selectedCount)} ou sobram ${Math.max(
+              0,
+              selectedCount - requiredCount
+            )}`}
       </p>
 
       <div className="flex flex-col sm:flex-row gap-2">
@@ -221,22 +235,22 @@ export default function AutomaticPairBuilder({ session, roster = [], onReplacePa
       <button
         type="button"
         onClick={handleDraw}
-        className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer"
+        className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
         style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
       >
-        Sortear duplas
+        Sortear {units}
       </button>
 
-      {pendingPairs && (
+      {pendingTeams && (
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
           style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)' }}
-          onClick={() => setPendingPairs(null)}
+          onClick={() => setPendingTeams(null)}
         >
           <div
             role="dialog"
             aria-modal="true"
-            aria-labelledby="replace-pairs-title"
+            aria-labelledby="replace-teams-title"
             className="w-full max-w-md rounded-xl border p-4 space-y-3 shadow-2xl"
             style={{
               backgroundColor: 'var(--bg-surface)',
@@ -245,11 +259,11 @@ export default function AutomaticPairBuilder({ session, roster = [], onReplacePa
             }}
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 id="replace-pairs-title" className="font-bold text-base">
-              Substituir duplas
+            <h3 id="replace-teams-title" className="font-bold text-base">
+              Substituir {units}
             </h3>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              {REPLACE_PAIRS_CONFIRMATION_MESSAGE}
+              {REPLACE_TEAMS_CONFIRMATION_MESSAGE}
             </p>
             <button
               type="button"
@@ -257,11 +271,11 @@ export default function AutomaticPairBuilder({ session, roster = [], onReplacePa
               className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer"
               style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
             >
-              Substituir duplas
+              Substituir {units}
             </button>
             <button
               type="button"
-              onClick={() => setPendingPairs(null)}
+              onClick={() => setPendingTeams(null)}
               className="w-full font-bold py-3 rounded-xl border cursor-pointer"
               style={{
                 backgroundColor: 'var(--bg-subtle)',

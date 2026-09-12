@@ -6,8 +6,8 @@ import {
   validateScore,
   validateSessionPairs,
 } from './domain/sessionValidation.js';
-import { GAME_SESSIONS_SCHEMA_VERSION } from './persistence/constants.js';
-import { nextGameSessionsDocument } from './persistence/syncHelpers.js';
+
+const LEGACY_V1_SCHEMA_VERSION = 1;
 
 const STATUS_LABELS = {
   draft: 'Rascunho',
@@ -49,13 +49,30 @@ export function createDraftGameSession(input = {}, { idGenerator, now } = {}) {
   };
 }
 
+function nextLegacyV1Document(current, next) {
+  const incoming = typeof next === 'function' ? next(current) : next;
+
+  if (incoming == null || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    throw new Error('A atualização do documento de encontros precisa ser um objeto.');
+  }
+
+  if (!Array.isArray(incoming.sessions)) {
+    throw new Error('O documento de encontros precisa ter uma lista de sessões.');
+  }
+
+  return {
+    schemaVersion: LEGACY_V1_SCHEMA_VERSION,
+    sessions: [...incoming.sessions],
+  };
+}
+
 export function appendDraftGameSession(document, input, options) {
   const session = createDraftGameSession(input, options);
   const currentSessions = Array.isArray(document?.sessions) ? document.sessions : [];
 
   return {
-    document: nextGameSessionsDocument(document, {
-      schemaVersion: document?.schemaVersion ?? GAME_SESSIONS_SCHEMA_VERSION,
+    document: nextLegacyV1Document(document, {
+      schemaVersion: LEGACY_V1_SCHEMA_VERSION,
       sessions: [...currentSessions, session],
     }),
     session,
@@ -156,8 +173,8 @@ function snapshotMember(player) {
 
 function replaceSession(document, sessionId, nextSession) {
   const sessions = Array.isArray(document?.sessions) ? document.sessions : [];
-  return nextGameSessionsDocument(document, {
-    schemaVersion: document?.schemaVersion ?? GAME_SESSIONS_SCHEMA_VERSION,
+  return nextLegacyV1Document(document, {
+    schemaVersion: LEGACY_V1_SCHEMA_VERSION,
     sessions: sessions.map((item) => (item?.id === sessionId ? nextSession : item)),
   });
 }

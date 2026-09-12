@@ -1,18 +1,21 @@
 import React, { useState } from 'react';
 import GameSessionDetail from './GameSessionDetail.jsx';
 import { validateDate } from './domain/sessionValidation.js';
+import { validateFormat } from './domain/teamSession.js';
 import {
   formatSessionDate,
   localDateString,
   sessionListStats,
   sessionsForDisplay,
   translateSessionStatus,
-} from './gameSessions.js';
+  usesDoublesLabels,
+} from './teamGameSessions.js';
 
 function emptyForm() {
   return {
     date: localDateString(),
     name: '',
+    teamCount: 2,
   };
 }
 
@@ -27,6 +30,7 @@ export default function GameSessionsView({
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [dateError, setDateError] = useState(null);
+  const [teamCountError, setTeamCountError] = useState(null);
   const [openSessionId, setOpenSessionId] = useState(null);
 
   const visibleSessions = sessionsForDisplay(sessions);
@@ -67,12 +71,14 @@ export default function GameSessionsView({
   const openForm = () => {
     setForm(emptyForm());
     setDateError(null);
+    setTeamCountError(null);
     setIsCreating(true);
   };
 
   const closeForm = () => {
     setForm(emptyForm());
     setDateError(null);
+    setTeamCountError(null);
     setIsCreating(false);
   };
 
@@ -84,7 +90,16 @@ export default function GameSessionsView({
       return;
     }
 
-    onCreateSession?.({ date: form.date, name: form.name });
+    const teamCount = Number(form.teamCount);
+    const formatResult = validateFormat({ teamSize: 2, teamCount });
+    if (!Number.isInteger(teamCount) || !formatResult.ok) {
+      setTeamCountError(
+        formatResult.errors?.[0]?.message || 'Informe uma quantidade de times inteira de no mínimo 2.'
+      );
+      return;
+    }
+
+    onCreateSession?.({ date: form.date, name: form.name, teamCount });
     closeForm();
   };
 
@@ -133,6 +148,35 @@ export default function GameSessionsView({
 
           {dateError && (
             <p className="text-xs font-semibold text-red-500">{dateError}</p>
+          )}
+
+          <p className="text-sm font-bold" style={{ color: 'var(--text-main)' }}>
+            Formato 2x2
+          </p>
+
+          <label className="block text-sm font-bold" style={{ color: 'var(--text-main)' }}>
+            Quantidade de times
+            <input
+              type="number"
+              required
+              min="2"
+              step="1"
+              value={form.teamCount}
+              onChange={(event) => {
+                setForm((current) => ({ ...current, teamCount: event.target.value }));
+                setTeamCountError(null);
+              }}
+              className="mt-1 w-full border rounded-lg p-2 text-sm outline-none"
+              style={{
+                backgroundColor: 'var(--bg-app)',
+                color: 'var(--text-main)',
+                borderColor: 'var(--border-color)',
+              }}
+            />
+          </label>
+
+          {teamCountError && (
+            <p className="text-xs font-semibold text-red-500">{teamCountError}</p>
           )}
 
           <label className="block text-sm font-bold" style={{ color: 'var(--text-main)' }}>
@@ -189,7 +233,8 @@ export default function GameSessionsView({
       ) : (
         <div className="space-y-3">
           {visibleSessions.map((session) => {
-            const { pairCount, matchCount } = sessionListStats(session);
+            const { teamCount, matchCount } = sessionListStats(session);
+            const doubles = usesDoublesLabels(session);
             return (
               <article
                 key={session.id}
@@ -213,7 +258,7 @@ export default function GameSessionsView({
                   </span>
                 </div>
                 <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-                  {pairCount} {pairCount === 1 ? 'dupla' : 'duplas'} · {matchCount}{' '}
+                  {teamCount} {teamCount === 1 ? (doubles ? 'dupla' : 'time') : doubles ? 'duplas' : 'times'} · {matchCount}{' '}
                   {matchCount === 1 ? 'jogo' : 'jogos'}
                 </p>
                 <button

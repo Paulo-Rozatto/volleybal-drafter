@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { GAME_SESSIONS_SCHEMA_VERSION } from './persistence/constants.js';
 import {
   appendDraftGameSession,
   createDraftGameSession,
@@ -120,7 +119,7 @@ describe('appendDraftGameSession', () => {
       rounds: [{ id: 'round-1', matches: [] }],
     };
     const original = {
-      schemaVersion: GAME_SESSIONS_SCHEMA_VERSION,
+      schemaVersion: 1,
       sessions: [previous],
     };
 
@@ -130,7 +129,7 @@ describe('appendDraftGameSession', () => {
       { idGenerator: () => 'session-2', now: NOW }
     );
 
-    expect(document.schemaVersion).toBe(GAME_SESSIONS_SCHEMA_VERSION);
+    expect(document.schemaVersion).toBe(1);
     expect(document.sessions).toEqual([previous, session]);
     expect(document.sessions[0]).toBe(previous);
     expect(session.id).toBe('session-2');
@@ -138,7 +137,7 @@ describe('appendDraftGameSession', () => {
 
   it('não muta o documento original', () => {
     const original = {
-      schemaVersion: GAME_SESSIONS_SCHEMA_VERSION,
+      schemaVersion: 1,
       sessions: [{ id: 'old-1' }],
     };
     const originalSessions = original.sessions;
@@ -155,7 +154,7 @@ describe('appendDraftGameSession', () => {
 
   it('rejeita data inválida sem alterar o documento', () => {
     const original = {
-      schemaVersion: GAME_SESSIONS_SCHEMA_VERSION,
+      schemaVersion: 1,
       sessions: [{ id: 'old-1' }],
     };
 

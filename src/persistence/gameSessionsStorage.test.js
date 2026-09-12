@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GAME_SESSIONS_SCHEMA_VERSION, GAME_SESSIONS_STORAGE_KEY } from './constants.js';
 import {
   createEmptyGameSessionsDocument,
+  interpretGameSessionsJson,
   parseGameSessionsJson,
   serializeGameSessionsDocument,
   validateGameSessionsDocument,
@@ -9,8 +10,10 @@ import {
 import {
   clearGameSessionsDocument,
   loadGameSessionsDocument,
+  loadGameSessionsRecord,
   saveGameSessionsDocument,
 } from './gameSessionsStorage.js';
+import { persistLocalGameSessions, readLocalGameSessions, readPendingGistChanges } from './syncHelpers.js';
 
 function createMemoryStorage(initial = {}) {
   const data = { ...initial };
@@ -30,15 +33,54 @@ function createMemoryStorage(initial = {}) {
   };
 }
 
+const emptyV2 = {
+  schemaVersion: 2,
+  sessions: [],
+};
+
+const v1Empty = {
+  schemaVersion: 1,
+  sessions: [],
+};
+
+const v1BrokenRef = {
+  schemaVersion: 1,
+  sessions: [
+    {
+      id: 'session-1',
+      date: '2026-09-12',
+      name: 'Arena',
+      status: 'in_progress',
+      createdAt: '2026-09-12T18:00:00.000Z',
+      updatedAt: '2026-09-12T19:00:00.000Z',
+      pairs: [
+        {
+          id: 'pair-1',
+          members: [
+            { playerId: 'p1', playerName: 'Erik' },
+            { playerId: 'p2', playerName: 'André' },
+          ],
+        },
+      ],
+      rounds: [
+        {
+          id: 'round-1',
+          number: 1,
+          byePairId: null,
+          matches: [{ id: 'match-1', pairAId: 'pair-1', pairBId: 'missing', scoreA: null, scoreB: null }],
+        },
+      ],
+    },
+  ],
+};
+
 describe('gameSessionsDocument', () => {
-  it('cria um documento vazio novo a cada chamada', () => {
+  it('cria um documento vazio V2 a cada chamada', () => {
     const first = createEmptyGameSessionsDocument();
     const second = createEmptyGameSessionsDocument();
 
-    expect(first).toEqual({
-      schemaVersion: GAME_SESSIONS_SCHEMA_VERSION,
-      sessions: [],
-    });
+    expect(GAME_SESSIONS_SCHEMA_VERSION).toBe(2);
+    expect(first).toEqual(emptyV2);
     expect(first).not.toBe(second);
     expect(first.sessions).not.toBe(second.sessions);
 
@@ -55,34 +97,89 @@ describe('gameSessionsDocument', () => {
     );
   });
 
-  it('rejeita schema desconhecido sem converter', () => {
+  it('rejeita schema V1 e desconhecido na escrita', () => {
+    expect(() => validateGameSessionsDocument(v1Empty)).toThrow(
+      'Versão de schema de encontros não suportada: 1.'
+    );
     expect(() =>
-      validateGameSessionsDocument({ schemaVersion: 2, sessions: [] })
-    ).toThrow('Versão de schema de encontros não suportada: 2.');
+      validateGameSessionsDocument({ schemaVersion: 99, sessions: [] })
+    ).toThrow('Versão de schema de encontros não suportada: 99.');
   });
 
-  it('interpreta JSON válido e rejeita JSON inválido', () => {
-    const parsed = parseGameSessionsJson(
-      '{"schemaVersion":1,"sessions":[{"id":"s1"}]}'
-    );
-    expect(parsed.sessions).toHaveLength(1);
+  it('rejeita documento híbrido na escrita', () => {
+    expect(() =>
+      validateGameSessionsDocument({
+        schemaVersion: 2,
+        sessions: [
+          {
+            format: { teamSize: 2, teamCount: 2 },
+            teams: [],
+            rounds: [],
+            pairs: [],
+          },
+        ],
+      })
+    ).toThrow('Documento de encontros híbrido ou V1 não pode ser salvo');
+  });
 
+  it('interpreta V1 migrando e V2 sem migrar', () => {
+    const fromV1 = interpretGameSessionsJson(JSON.stringify(v1Empty));
+    expect(fromV1).toEqual({
+      document: emptyV2,
+      migrated: true,
+      sourceVersion: 1,
+    });
+
+    const fromV2 = interpretGameSessionsJson(JSON.stringify(emptyV2));
+    expect(fromV2.migrated).toBe(false);
+    expect(fromV2.sourceVersion).toBe(2);
+    expect(fromV2.document).toEqual(emptyV2);
+    expect(fromV2.document).not.toBe(emptyV2);
+
+    expect(parseGameSessionsJson('{"schemaVersion":1,"sessions":[]}')).toEqual(emptyV2);
+  });
+
+  it('trata conteúdo vazio como documento V2 vazio', () => {
+    expect(interpretGameSessionsJson('')).toEqual({
+      document: emptyV2,
+      migrated: false,
+      sourceVersion: null,
+    });
+    expect(interpretGameSessionsJson('   ')).toMatchObject({
+      migrated: false,
+      sourceVersion: null,
+    });
+  });
+
+  it('rejeita JSON inválido, schema desconhecido e migração inválida', () => {
     expect(() => parseGameSessionsJson('{not-json')).toThrow(
       'JSON inválido no documento de encontros.'
     );
+    expect(() => parseGameSessionsJson(JSON.stringify({ schemaVersion: 9, sessions: [] }))).toThrow(
+      'Versão de schema de encontros não suportada: 9.'
+    );
+    expect(() => parseGameSessionsJson(JSON.stringify(v1BrokenRef))).toThrow(
+      'Não é possível migrar uma referência a uma dupla inexistente.'
+    );
   });
 
-  it('serializa somente a estrutura superior do documento', () => {
+  it('serializa somente V2 canônico e rejeita V1', () => {
     const json = serializeGameSessionsDocument({
-      schemaVersion: 1,
-      sessions: [{ id: 's1' }],
+      schemaVersion: 2,
+      sessions: [],
       extra: true,
     });
-    const parsed = JSON.parse(json);
-    expect(parsed).toEqual({
-      schemaVersion: 1,
-      sessions: [{ id: 's1' }],
-    });
+    expect(JSON.parse(json)).toEqual(emptyV2);
+
+    expect(() => serializeGameSessionsDocument(v1Empty)).toThrow(
+      'Versão de schema de encontros não suportada: 1.'
+    );
+    expect(() =>
+      serializeGameSessionsDocument({
+        schemaVersion: 2,
+        sessions: [{ id: 's1', pairs: [], format: { teamSize: 2, teamCount: 2 }, teams: [], rounds: [] }],
+      })
+    ).toThrow('Documento de encontros híbrido ou V1 não pode ser salvo');
   });
 });
 
@@ -92,9 +189,13 @@ describe('gameSessionsStorage', () => {
       volleyPlayers: '[]',
       volleyDrafts: '[]',
     });
-    const loaded = loadGameSessionsDocument(storage);
+    const loaded = loadGameSessionsRecord(storage);
 
-    expect(loaded).toEqual(createEmptyGameSessionsDocument());
+    expect(loaded).toEqual({
+      document: createEmptyGameSessionsDocument(),
+      migrated: false,
+      sourceVersion: null,
+    });
     expect(storage.snapshot().volleyPlayers).toBe('[]');
     expect(storage.snapshot().volleyDrafts).toBe('[]');
     expect(storage.snapshot()[GAME_SESSIONS_STORAGE_KEY]).toBeUndefined();
@@ -107,24 +208,27 @@ describe('gameSessionsStorage', () => {
     expect(first).not.toBe(second);
   });
 
-  it('salva e carrega o documento', () => {
+  it('salva e carrega um documento V2', () => {
     const storage = createMemoryStorage();
-    const document = {
-      schemaVersion: 1,
-      sessions: [{ id: 'session-1', name: 'Sábado' }],
-    };
+    const document = { schemaVersion: 2, sessions: [] };
 
     const saved = saveGameSessionsDocument(document, storage);
     document.sessions.push({ id: 'session-2' });
 
-    expect(saved.sessions).toHaveLength(1);
-    expect(loadGameSessionsDocument(storage)).toEqual({
-      schemaVersion: 1,
-      sessions: [{ id: 'session-1', name: 'Sábado' }],
-    });
+    expect(saved.sessions).toHaveLength(0);
+    expect(loadGameSessionsDocument(storage)).toEqual(emptyV2);
   });
 
-  it('lança erro claro para JSON corrompido', () => {
+  it('rejeita salvar V1 sem gravar', () => {
+    const storage = createMemoryStorage({ volleyPlayers: '[]' });
+    expect(() => saveGameSessionsDocument(v1Empty, storage)).toThrow(
+      'Versão de schema de encontros não suportada: 1.'
+    );
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBeNull();
+    expect(storage.getItem('volleyPlayers')).toBe('[]');
+  });
+
+  it('lança erro claro para JSON corrompido e preserva a chave', () => {
     const storage = createMemoryStorage({
       [GAME_SESSIONS_STORAGE_KEY]: '{broken',
       volleyPlayers: '[{"id":"p1"}]',
@@ -133,6 +237,7 @@ describe('gameSessionsStorage', () => {
     expect(() => loadGameSessionsDocument(storage)).toThrow(
       'JSON inválido no documento de encontros.'
     );
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe('{broken');
     expect(storage.getItem('volleyPlayers')).toBe('[{"id":"p1"}]');
   });
 
@@ -153,10 +258,7 @@ describe('gameSessionsStorage', () => {
     const storage = createMemoryStorage({
       volleyPlayers: '[{"id":"p1"}]',
       volleyDrafts: '[{"id":"d1"}]',
-      [GAME_SESSIONS_STORAGE_KEY]: serializeGameSessionsDocument({
-        schemaVersion: 1,
-        sessions: [{ id: 's1' }],
-      }),
+      [GAME_SESSIONS_STORAGE_KEY]: serializeGameSessionsDocument(emptyV2),
     });
 
     clearGameSessionsDocument(storage);
@@ -164,5 +266,112 @@ describe('gameSessionsStorage', () => {
     expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBeNull();
     expect(storage.getItem('volleyPlayers')).toBe('[{"id":"p1"}]');
     expect(storage.getItem('volleyDrafts')).toBe('[{"id":"d1"}]');
+  });
+});
+
+describe('migração do cache local', () => {
+  it('migra cache V1, grava V2 na mesma chave e marca pendência', () => {
+    const storage = createMemoryStorage({
+      [GAME_SESSIONS_STORAGE_KEY]: JSON.stringify(v1Empty),
+      volleyPlayers: '[]',
+    });
+
+    const result = readLocalGameSessions(storage);
+
+    expect(result.error).toBeNull();
+    expect(result.writeError).toBeNull();
+    expect(result.migrated).toBe(true);
+    expect(result.sourceVersion).toBe(1);
+    expect(result.document).toEqual(emptyV2);
+    expect(JSON.parse(storage.getItem(GAME_SESSIONS_STORAGE_KEY))).toEqual(emptyV2);
+    expect(readPendingGistChanges(storage)).toBe(true);
+    expect(storage.getItem('volleyPlayers')).toBe('[]');
+  });
+
+  it('carrega cache V2 sem migrar e sem marcar pendência', () => {
+    const storage = createMemoryStorage({
+      [GAME_SESSIONS_STORAGE_KEY]: JSON.stringify(emptyV2),
+    });
+
+    const result = readLocalGameSessions(storage);
+    expect(result.migrated).toBe(false);
+    expect(result.sourceVersion).toBe(2);
+    expect(result.document).toEqual(emptyV2);
+    expect(readPendingGistChanges(storage)).toBe(false);
+  });
+
+  it('cache ausente devolve V2 vazio sem gravar', () => {
+    const storage = createMemoryStorage();
+    const result = readLocalGameSessions(storage);
+    expect(result).toMatchObject({
+      document: emptyV2,
+      error: null,
+      migrated: false,
+      sourceVersion: null,
+      writeError: null,
+    });
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBeNull();
+  });
+
+  it('JSON inválido permanece intacto e não finge migração', () => {
+    const storage = createMemoryStorage({
+      [GAME_SESSIONS_STORAGE_KEY]: '{broken',
+      volleyPlayers: '[{"id":"p1"}]',
+    });
+
+    const result = readLocalGameSessions(storage);
+
+    expect(result.error).toBe('JSON inválido no documento de encontros.');
+    expect(result.migrated).toBe(false);
+    expect(result.document).toEqual(emptyV2);
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe('{broken');
+    expect(storage.getItem('volleyPlayers')).toBe('[{"id":"p1"}]');
+    expect(readPendingGistChanges(storage)).toBe(false);
+  });
+
+  it('falha de migração não chama setItem', () => {
+    const writes = [];
+    const storage = {
+      getItem() {
+        return JSON.stringify(v1BrokenRef);
+      },
+      setItem(key, value) {
+        writes.push([key, value]);
+      },
+      removeItem() {},
+    };
+
+    const result = readLocalGameSessions(storage);
+    expect(result.migrated).toBe(false);
+    expect(result.error).toContain('Não é possível migrar uma referência a uma dupla inexistente.');
+    expect(writes).toEqual([]);
+  });
+
+  it('falha de gravação mantém V2 em memória e o cache antigo', () => {
+    const original = JSON.stringify(v1Empty);
+    const storage = {
+      getItem(key) {
+        if (key === GAME_SESSIONS_STORAGE_KEY) return original;
+        return null;
+      },
+      setItem() {
+        throw new Error('quota exceeded');
+      },
+      removeItem() {},
+    };
+
+    const result = readLocalGameSessions(storage);
+    expect(result.migrated).toBe(true);
+    expect(result.document).toEqual(emptyV2);
+    expect(result.writeError).toBe('quota exceeded');
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe(original);
+  });
+
+  it('persistência local rejeita V1', () => {
+    const storage = createMemoryStorage();
+    const result = persistLocalGameSessions(v1Empty, storage);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Versão de schema de encontros não suportada: 1.');
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBeNull();
   });
 });

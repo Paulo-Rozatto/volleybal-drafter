@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { GAME_SESSIONS_SCHEMA_VERSION } from './persistence/constants.js';
 import { countSessionMatches, validateSessionPairs } from './domain/sessionValidation.js';
 import {
   addSessionPair,
@@ -59,7 +58,7 @@ function draftSession(overrides = {}) {
 
 function documentWith(session, extraSessions = []) {
   return {
-    schemaVersion: GAME_SESSIONS_SCHEMA_VERSION,
+    schemaVersion: 1,
     sessions: [session, ...extraSessions],
   };
 }
@@ -160,7 +159,7 @@ describe('startSessionRoundRobin', () => {
     expect(result.session.name).toBe('Arena');
     expect(result.session.createdAt).toBe(ISO_CREATED);
     expect(result.session.updatedAt).toBe(ISO_UPDATED);
-    expect(result.document.schemaVersion).toBe(GAME_SESSIONS_SCHEMA_VERSION);
+    expect(result.document.schemaVersion).toBe(1);
     expect(result.document.sessions[1]).toEqual(other);
     expect(canEditSessionPairs(result.session)).toBe(false);
     expect(validateSessionPairs(result.session.pairs, roster).ok).toBe(true);
@@ -349,7 +348,7 @@ describe('resetSessionToDraftForPairEditing', () => {
     expect(result.session.pairs).toEqual(originalPairs);
     expect(result.session.createdAt).toBe(ISO_CREATED);
     expect(result.session.updatedAt).toBe('2026-09-12T20:00:00.000Z');
-    expect(result.document.schemaVersion).toBe(GAME_SESSIONS_SCHEMA_VERSION);
+    expect(result.document.schemaVersion).toBe(1);
     expect(result.document.sessions[1]).toEqual(other);
     expect(canEditSessionPairs(result.session)).toBe(true);
     expect(countSessionMatches(result.session).total).toBe(0);

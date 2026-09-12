@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import {
-  availableRosterPlayers,
-  canEditSessionPairs,
+  availablePlayersForTeams,
+  canEditSessionTeams,
   filterPlayersByName,
-  pairMembersForEdit,
-} from './gameSessions.js';
+  teamMembersForEdit,
+  usesDoublesLabels,
+} from './teamGameSessions.js';
 
 function PlayerSlot({ label, player, onClear }) {
   return (
@@ -36,19 +37,19 @@ function PlayerSlot({ label, player, onClear }) {
   );
 }
 
-export default function PairBuilder({
+export default function TeamBuilder({
   session,
   roster = [],
   showForm = true,
   onRequestEdit,
-  onAddPair,
-  onUpdatePair,
-  onRemovePair,
+  onAddTeam,
+  onUpdateTeam,
+  onRemoveTeam,
 }) {
   const [query, setQuery] = useState('');
   const [slotA, setSlotA] = useState(null);
   const [slotB, setSlotB] = useState(null);
-  const [editingPairId, setEditingPairId] = useState(null);
+  const [editingTeamId, setEditingTeamId] = useState(null);
   const [error, setError] = useState(null);
   const [pendingRemovalId, setPendingRemovalId] = useState(null);
   const [formVisible, setFormVisible] = useState(showForm);
@@ -57,26 +58,32 @@ export default function PairBuilder({
     setFormVisible(false);
     setSlotA(null);
     setSlotB(null);
-    setEditingPairId(null);
+    setEditingTeamId(null);
     setError(null);
     setQuery('');
   } else if (showForm && !formVisible) {
     setFormVisible(true);
   }
 
-  const editable = canEditSessionPairs(session);
-  const pairs = session?.pairs ?? [];
-  const available = availableRosterPlayers(roster, pairs, editingPairId);
+  const doubles = usesDoublesLabels(session);
+  const unit = doubles ? 'dupla' : 'time';
+  const units = doubles ? 'duplas' : 'times';
+  const editable = canEditSessionTeams(session);
+  const teams = session?.teams ?? [];
+  const teamCount = session?.format?.teamCount ?? 2;
+  const canAddMore = teams.length < teamCount;
+  const available = availablePlayersForTeams(roster, teams, editingTeamId);
   const visiblePlayers = filterPlayersByName(available, query).sort((left, right) =>
     String(left.name ?? '').localeCompare(String(right.name ?? ''), 'pt-BR', { sensitivity: 'base' })
   );
+  const showEditor = showForm && (canAddMore || Boolean(editingTeamId));
 
   const selectedIds = new Set([slotA?.id, slotB?.id].filter(Boolean));
 
   const resetSelection = () => {
     setSlotA(null);
     setSlotB(null);
-    setEditingPairId(null);
+    setEditingTeamId(null);
     setError(null);
     setQuery('');
   };
@@ -102,7 +109,7 @@ export default function PairBuilder({
 
   const applyResult = (result, { resetOnSuccess } = { resetOnSuccess: true }) => {
     if (!result?.ok) {
-      setError(result?.errors?.[0]?.message || 'Não foi possível atualizar a dupla.');
+      setError(result?.errors?.[0]?.message || `Não foi possível atualizar a ${unit}.`);
       return false;
     }
     if (resetOnSuccess) resetSelection();
@@ -111,15 +118,19 @@ export default function PairBuilder({
   };
 
   const handleSubmit = () => {
-    const result = editingPairId
-      ? onUpdatePair?.(editingPairId, slotA, slotB)
-      : onAddPair?.(slotA, slotB);
+    if (!slotA || !slotB) {
+      setError(`Selecione dois jogadores para formar a ${unit}.`);
+      return;
+    }
+    const result = editingTeamId
+      ? onUpdateTeam?.(editingTeamId, slotA, slotB)
+      : onAddTeam?.(slotA, slotB);
     applyResult(result);
   };
 
-  const startEdit = (pair) => {
-    const [first, second] = pairMembersForEdit(pair, roster);
-    setEditingPairId(pair.id);
+  const startEdit = (team) => {
+    const [first, second] = teamMembersForEdit(team, roster);
+    setEditingTeamId(team.id);
     setSlotA(first ?? null);
     setSlotB(second ?? null);
     setError(null);
@@ -131,21 +142,21 @@ export default function PairBuilder({
     return (
       <div className="space-y-3">
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Este encontro não está em rascunho ou já possui rodadas. As duplas não podem ser alteradas.
+          Este encontro não está em rascunho ou já possui rodadas. As {units} não podem ser alteradas.
         </p>
-        {pairs.length === 0 ? (
+        {teams.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Nenhuma dupla formada neste encontro.
+            Nenhuma {unit} formada neste encontro.
           </p>
         ) : (
-          pairs.map((pair) => (
+          teams.map((team) => (
             <div
-              key={pair.id}
+              key={team.id}
               className="p-3 rounded-xl border"
               style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
             >
               <p className="text-sm font-semibold">
-                {(pair.members ?? []).map((member) => member.playerName).join(' + ')}
+                {(team.members ?? []).map((member) => member.playerName).join(' + ')}
               </p>
             </div>
           ))
@@ -156,13 +167,13 @@ export default function PairBuilder({
 
   return (
     <div className="space-y-4">
-      {showForm && (
+      {showEditor && (
       <div
         className="p-4 rounded-xl border space-y-3"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
       >
         <h3 className="font-bold text-sm">
-          {editingPairId ? 'Alterar dupla' : 'Montar dupla'}
+          {editingTeamId ? `Alterar ${unit}` : `Montar ${unit}`}
         </h3>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -189,7 +200,7 @@ export default function PairBuilder({
             style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}
           >
             {available.length === 0
-              ? 'Não há jogadores disponíveis para novas duplas.'
+              ? `Não há jogadores disponíveis para novas ${units}.`
               : 'Nenhum jogador encontrado com essa busca.'}
           </p>
         ) : (
@@ -224,9 +235,9 @@ export default function PairBuilder({
             className="flex-1 font-bold py-3 rounded-xl shadow-md cursor-pointer"
             style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
           >
-            {editingPairId ? 'Salvar alteração' : 'Adicionar dupla'}
+            {editingTeamId ? 'Salvar alteração' : `Adicionar ${unit}`}
           </button>
-          {editingPairId && (
+          {editingTeamId && (
             <button
               type="button"
               onClick={resetSelection}
@@ -244,28 +255,38 @@ export default function PairBuilder({
       </div>
       )}
 
+      {!canAddMore && showForm && !editingTeamId && (
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          Todas as {units} já foram formadas ({teams.length}/{teamCount}).
+        </p>
+      )}
+
       <div className="space-y-2">
-        <h3 className="font-bold text-sm">Duplas formadas ({pairs.length})</h3>
-        {pairs.length === 0 ? (
+        <h3 className="font-bold text-sm">
+          {doubles
+            ? `Duplas formadas (${teams.length}/${teamCount})`
+            : `Times formados (${teams.length}/${teamCount})`}
+        </h3>
+        {teams.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
             {showForm
-              ? 'Nenhuma dupla ainda. Selecione dois jogadores e toque em “Adicionar dupla”.'
-              : 'Nenhuma dupla ainda.'}
+              ? `Nenhuma ${unit} ainda. Selecione dois jogadores e toque em “Adicionar ${unit}”.`
+              : `Nenhuma ${unit} ainda.`}
           </p>
         ) : (
-          pairs.map((pair) => (
+          teams.map((team) => (
             <div
-              key={pair.id}
+              key={team.id}
               className="p-3 rounded-xl border space-y-2"
               style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
             >
               <p className="text-sm font-semibold">
-                {(pair.members ?? []).map((member) => member.playerName).join(' + ')}
+                {(team.members ?? []).map((member) => member.playerName).join(' + ')}
               </p>
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => startEdit(pair)}
+                  onClick={() => startEdit(team)}
                   className="flex-1 font-bold py-2 rounded-xl border text-sm cursor-pointer"
                   style={{
                     backgroundColor: 'var(--bg-subtle)',
@@ -278,7 +299,7 @@ export default function PairBuilder({
                 <button
                   type="button"
                   onClick={() => {
-                    setPendingRemovalId(pair.id);
+                    setPendingRemovalId(team.id);
                     setError(null);
                   }}
                   className="flex-1 font-bold py-2 rounded-xl border text-sm cursor-pointer text-red-500"
@@ -287,15 +308,15 @@ export default function PairBuilder({
                   Remover
                 </button>
               </div>
-              {pendingRemovalId === pair.id && (
+              {pendingRemovalId === team.id && (
                 <div className="space-y-2 pt-1">
                   <p className="text-xs font-semibold text-red-500">
-                    Remover esta dupla? Os jogadores voltam a ficar disponíveis.
+                    Remover esta {unit}? Os jogadores voltam a ficar disponíveis.
                   </p>
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => applyResult(onRemovePair?.(pair.id))}
+                      onClick={() => applyResult(onRemoveTeam?.(team.id))}
                       className="flex-1 font-bold py-2 rounded-xl text-sm cursor-pointer"
                       style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
                     >
