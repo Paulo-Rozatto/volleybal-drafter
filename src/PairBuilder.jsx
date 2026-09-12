@@ -36,13 +36,33 @@ function PlayerSlot({ label, player, onClear }) {
   );
 }
 
-export default function PairBuilder({ session, roster = [], onAddPair, onUpdatePair, onRemovePair }) {
+export default function PairBuilder({
+  session,
+  roster = [],
+  showForm = true,
+  onRequestEdit,
+  onAddPair,
+  onUpdatePair,
+  onRemovePair,
+}) {
   const [query, setQuery] = useState('');
   const [slotA, setSlotA] = useState(null);
   const [slotB, setSlotB] = useState(null);
   const [editingPairId, setEditingPairId] = useState(null);
   const [error, setError] = useState(null);
   const [pendingRemovalId, setPendingRemovalId] = useState(null);
+  const [formVisible, setFormVisible] = useState(showForm);
+
+  if (!showForm && formVisible) {
+    setFormVisible(false);
+    setSlotA(null);
+    setSlotB(null);
+    setEditingPairId(null);
+    setError(null);
+    setQuery('');
+  } else if (showForm && !formVisible) {
+    setFormVisible(true);
+  }
 
   const editable = canEditSessionPairs(session);
   const pairs = session?.pairs ?? [];
@@ -104,6 +124,7 @@ export default function PairBuilder({ session, roster = [], onAddPair, onUpdateP
     setSlotB(second ?? null);
     setError(null);
     setPendingRemovalId(null);
+    onRequestEdit?.();
   };
 
   if (!editable) {
@@ -135,6 +156,7 @@ export default function PairBuilder({ session, roster = [], onAddPair, onUpdateP
 
   return (
     <div className="space-y-4">
+      {showForm && (
       <div
         className="p-4 rounded-xl border space-y-3"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
@@ -220,12 +242,15 @@ export default function PairBuilder({ session, roster = [], onAddPair, onUpdateP
           )}
         </div>
       </div>
+      )}
 
       <div className="space-y-2">
         <h3 className="font-bold text-sm">Duplas formadas ({pairs.length})</h3>
         {pairs.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Nenhuma dupla ainda. Selecione dois jogadores e toque em “Adicionar dupla”.
+            {showForm
+              ? 'Nenhuma dupla ainda. Selecione dois jogadores e toque em “Adicionar dupla”.'
+              : 'Nenhuma dupla ainda.'}
           </p>
         ) : (
           pairs.map((pair) => (

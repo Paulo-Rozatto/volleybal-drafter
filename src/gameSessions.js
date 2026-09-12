@@ -160,7 +160,7 @@ function withUpdatedPairs(session, pairs, now) {
   return {
     ...session,
     pairs: [...pairs],
-    rounds: Array.isArray(session.rounds) ? [...session.rounds] : [],
+    rounds: [],
     updatedAt: clock().toISOString(),
   };
 }
@@ -269,6 +269,45 @@ export function removeSessionPair(document, sessionId, pairId, roster, { now } =
 
   const nextPairs = currentPairs.filter((item) => item.id !== pairId);
   return commitPairs(document, session, nextPairs, roster, now, null);
+}
+
+export const REPLACE_PAIRS_CONFIRMATION_MESSAGE =
+  'Este sorteio substituirá todas as duplas atuais. Deseja continuar?';
+
+export function pairMemberIdsInRoster(pairs, roster) {
+  const knownIds = new Set((roster ?? []).map((player) => player?.id).filter(Boolean));
+  const ids = [];
+  for (const pair of pairs ?? []) {
+    for (const member of pair?.members ?? []) {
+      const playerId = member?.playerId;
+      if (knownIds.has(playerId) && !ids.includes(playerId)) {
+        ids.push(playerId);
+      }
+    }
+  }
+  return ids;
+}
+
+export function replaceSessionPairs(document, sessionId, pairs, roster, { now, replaceConfirmed = false } = {}) {
+  const session = findSession(document, sessionId);
+  const locked = lockedResult(session);
+  if (locked) return locked;
+
+  if (!Array.isArray(pairs)) {
+    return fail([{ code: 'PAIRS_NOT_ARRAY', message: 'As duplas do encontro precisam ser uma lista.' }]);
+  }
+
+  const hasExisting = (session.pairs?.length ?? 0) > 0;
+  if (hasExisting && !replaceConfirmed) {
+    return fail([
+      {
+        code: 'REPLACE_CONFIRMATION_REQUIRED',
+        message: REPLACE_PAIRS_CONFIRMATION_MESSAGE,
+      },
+    ]);
+  }
+
+  return commitPairs(document, session, [...pairs], roster, now, null);
 }
 
 export function pairMembersForEdit(pair, roster) {

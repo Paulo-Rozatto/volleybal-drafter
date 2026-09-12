@@ -6,7 +6,9 @@ import {
   availableRosterPlayers,
   canEditSessionPairs,
   pairMembersForEdit,
+  pairMemberIdsInRoster,
   removeSessionPair,
+  replaceSessionPairs,
   takenPlayerIds,
   updateSessionPair,
 } from './gameSessions.js';
@@ -417,5 +419,163 @@ describe('disponibilidade de jogadores', () => {
     ]);
     expect(canEditSessionPairs(draftSession())).toBe(true);
     expect(canEditSessionPairs(draftSession({ status: 'finished' }))).toBe(false);
+    expect(
+      pairMemberIdsInRoster(
+        [
+          {
+            id: 'pair-1',
+            members: [
+              { playerId: 'p1', playerName: 'Erik' },
+              { playerId: 'gone', playerName: 'Saiu' },
+            ],
+          },
+        ],
+        roster
+      )
+    ).toEqual(['p1']);
+  });
+});
+
+describe('replaceSessionPairs', () => {
+  const existingPairs = [
+    {
+      id: 'pair-old',
+      members: [
+        { playerId: 'p1', playerName: 'Erik antigo' },
+        { playerId: 'p2', playerName: 'André antigo' },
+      ],
+    },
+  ];
+
+  const nextPairs = [
+    {
+      id: 'pair-new-1',
+      members: [
+        { playerId: 'p1', playerName: 'Erik' },
+        { playerId: 'p3', playerName: 'Gabi' },
+      ],
+    },
+    {
+      id: 'pair-new-2',
+      members: [
+        { playerId: 'p2', playerName: 'André' },
+        { playerId: 'p4', playerName: 'Luiza' },
+      ],
+    },
+  ];
+
+  it('substitui o conjunto completo de duplas preservando os outros campos', () => {
+    const other = draftSession({ id: 'session-2', name: 'Outro' });
+    const original = documentWith(
+      draftSession({
+        pairs: existingPairs,
+        name: 'Arena',
+      }),
+      [other]
+    );
+    const originalPairs = original.sessions[0].pairs;
+
+    const result = replaceSessionPairs(original, 'session-1', nextPairs, roster, {
+      now: NOW,
+      replaceConfirmed: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.session.id).toBe('session-1');
+    expect(result.session.date).toBe('2026-09-12');
+    expect(result.session.name).toBe('Arena');
+    expect(result.session.status).toBe('draft');
+    expect(result.session.createdAt).toBe(ISO_CREATED);
+    expect(result.session.updatedAt).toBe(ISO_UPDATED);
+    expect(result.session.rounds).toEqual([]);
+    expect(result.session.pairs).toEqual(nextPairs);
+    expect(result.document.schemaVersion).toBe(GAME_SESSIONS_SCHEMA_VERSION);
+    expect(result.document.sessions[1]).toEqual(other);
+    expect(original.sessions[0].pairs).toBe(originalPairs);
+    expect(original.sessions[0].updatedAt).toBe(ISO_CREATED);
+    expect(validateSessionPairs(result.session.pairs, roster).ok).toBe(true);
+  });
+
+  it('aplica sem confirmação quando ainda não há duplas', () => {
+    const original = documentWith(draftSession());
+    const result = replaceSessionPairs(original, 'session-1', nextPairs, roster, { now: NOW });
+    expect(result.ok).toBe(true);
+    expect(result.session.pairs).toHaveLength(2);
+    expect(original.sessions[0].pairs).toEqual([]);
+  });
+
+  it('cancela sem alteração quando a confirmação é exigida', () => {
+    const original = documentWith(draftSession({ pairs: existingPairs }));
+    const result = replaceSessionPairs(original, 'session-1', nextPairs, roster, {
+      now: NOW,
+      replaceConfirmed: false,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors[0].code).toBe('REPLACE_CONFIRMATION_REQUIRED');
+    expect(result.errors[0].message).toBe(
+      'Este sorteio substituirá todas as duplas atuais. Deseja continuar?'
+    );
+    expect(result.document).toBeNull();
+    expect(original.sessions[0].pairs).toEqual(existingPairs);
+    expect(original.sessions[0].updatedAt).toBe(ISO_CREATED);
+  });
+
+  it('impede aplicação fora de draft', () => {
+    const original = documentWith(draftSession({ status: 'in_progress', pairs: existingPairs }));
+    const result = replaceSessionPairs(original, 'session-1', nextPairs, roster, {
+      now: NOW,
+      replaceConfirmed: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors[0].code).toBe('PAIRS_LOCKED');
+    expect(original.sessions[0].pairs).toEqual(existingPairs);
+  });
+
+  it('impede aplicação com rodadas existentes', () => {
+    const original = documentWith(
+      draftSession({
+        pairs: existingPairs,
+        rounds: [{ id: 'round-1', number: 1, matches: [] }],
+      })
+    );
+    const result = replaceSessionPairs(original, 'session-1', nextPairs, roster, {
+      now: NOW,
+      replaceConfirmed: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors[0].code).toBe('PAIRS_LOCKED');
+    expect(original.sessions[0].pairs).toEqual(existingPairs);
+    expect(original.sessions[0].rounds).toHaveLength(1);
+  });
+
+  it('rejeita encontro inexistente', () => {
+    const original = documentWith(draftSession());
+    const result = replaceSessionPairs(original, 'missing', nextPairs, roster, { now: NOW });
+    expect(result.ok).toBe(false);
+    expect(result.errors[0].code).toBe('SESSION_NOT_FOUND');
+  });
+
+  it('rejeita duplas com elenco inválido', () => {
+    const original = documentWith(draftSession());
+    const result = replaceSessionPairs(
+      original,
+      'session-1',
+      [
+        {
+          id: 'pair-1',
+          members: [
+            { playerId: 'missing', playerName: 'Fantasma' },
+            { playerId: 'p1', playerName: 'Erik' },
+          ],
+        },
+      ],
+      roster,
+      { now: NOW }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errors[0].code).toBe('PAIR_PLAYER_NOT_FOUND');
+    expect(original.sessions[0].pairs).toEqual([]);
+    expect(original.sessions[0].updatedAt).toBe(ISO_CREATED);
   });
 });

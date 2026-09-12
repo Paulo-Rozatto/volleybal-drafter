@@ -5,6 +5,7 @@ import GistSyncPanel from './GistSyncPanel';
 import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
 import { appendDraftGameSession } from './gameSessions.js';
+import { calcTeamBalancePenalty, prepareTeamDraftPool } from './domain/teamBalance.js';
 import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
 import {
   applySuccessfulGistLoad,
@@ -255,37 +256,11 @@ export default function App() {
 
   // --- Monte Carlo Draft Generator ---
   const runMonteCarloDraft = () => {
-    const numTeams = Math.floor(sessionPlayers.length / teamSize);
+    const { numTeams, playersToDraft, bench } = prepareTeamDraftPool(sessionPlayers, teamSize);
     if (numTeams < 2) {
       alert(`Selecione pelo menos ${teamSize * 2} jogadores para formar dois times de ${teamSize}!`);
       return;
     }
-
-    const sortedPool = [...sessionPlayers].sort((a, b) => b.score - a.score);
-    const playersToDraft = sortedPool.slice(0, numTeams * teamSize);
-    const bench = sortedPool.slice(numTeams * teamSize);
-
-    const calcPenalty = (teams) => {
-      const variance = (arr) => {
-        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
-        return arr.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0);
-      };
-
-      const scores = teams.map((t) => t.reduce((sum, p) => sum + p.score, 0));
-      let penalty = variance(scores) * 4;
-
-      if (balanceGender) {
-        const females = teams.map((t) => t.filter((p) => p.gender === 'F').length);
-        penalty += variance(females) * 3;
-      }
-
-      if (balanceHeight) {
-        const talls = teams.map((t) => t.filter((p) => p.height === 'tall').length);
-        penalty += variance(talls) * 3;
-      }
-
-      return penalty;
-    };
 
     let bestTeams = null;
     let minPenalty = Infinity;
@@ -296,7 +271,7 @@ export default function App() {
         shuffled.slice(idx * teamSize, (idx + 1) * teamSize)
       );
 
-      const penalty = calcPenalty(candidateTeams);
+      const penalty = calcTeamBalancePenalty(candidateTeams, { balanceGender, balanceHeight });
       if (penalty < minPenalty) {
         minPenalty = penalty;
         bestTeams = candidateTeams;
