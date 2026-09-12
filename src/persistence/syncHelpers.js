@@ -156,6 +156,35 @@ export function gistLoadNeedsFetch(strategy) {
   return strategy !== GIST_LOAD_STRATEGY.CANCEL;
 }
 
+export function createSyncLock() {
+  let locked = false;
+  return {
+    tryAcquire() {
+      if (locked) return false;
+      locked = true;
+      return true;
+    },
+    release() {
+      locked = false;
+    },
+    isLocked() {
+      return locked;
+    },
+  };
+}
+
+export async function runExclusiveSync(lock, task) {
+  if (!lock.tryAcquire()) {
+    return { started: false, result: undefined };
+  }
+
+  try {
+    return { started: true, result: await task() };
+  } finally {
+    lock.release();
+  }
+}
+
 export function applySuccessfulGistLoad({
   strategy,
   localPlayers,

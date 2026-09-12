@@ -359,10 +359,7 @@ export function sessionRoundSummary(session) {
   };
 }
 
-export function sessionIsReadyToFinalize(session) {
-  const { total, completed, invalid } = countSessionMatches(session);
-  return total > 0 && completed === total && invalid === 0;
-}
+export { sessionIsReadyToFinalize } from './domain/sessionValidation.js';
 
 export function canGenerateSessionRounds(session, roster) {
   if (!session || session.status !== 'draft') return false;

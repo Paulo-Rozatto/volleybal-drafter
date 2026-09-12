@@ -24,10 +24,23 @@ function snapshotName(name) {
   return typeof name === 'string' ? name.trim() : '';
 }
 
+function readRandomUnit(random) {
+  const value = random();
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value >= 1) {
+    throw Object.assign(
+      new Error(
+        'O gerador aleatório precisa retornar um número finito maior ou igual a 0 e menor que 1.'
+      ),
+      { code: 'RANDOM_INVALID' }
+    );
+  }
+  return value;
+}
+
 function shuffleCopy(items, random) {
   const copy = [...items];
   for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swapWith = Math.floor(random() * (index + 1));
+    const swapWith = Math.floor(readRandomUnit(random) * (index + 1));
     const current = copy[index];
     copy[index] = copy[swapWith];
     copy[swapWith] = current;
@@ -223,15 +236,22 @@ export function generateBalancedTeams(players, format, options = {}) {
   let bestGroups = null;
   let minPenalty = Infinity;
 
-  for (let round = 0; round < iterations; round += 1) {
-    const shuffled = shuffleCopy(source, random);
-    const groups = splitBySizes(shuffled, sizes);
-    const penalty = calcTeamBalancePenalty(groups, { balanceGender, balanceHeight });
-    if (penalty < minPenalty) {
-      minPenalty = penalty;
-      bestGroups = groups;
-      if (minPenalty === 0) break;
+  try {
+    for (let round = 0; round < iterations; round += 1) {
+      const shuffled = shuffleCopy(source, random);
+      const groups = splitBySizes(shuffled, sizes);
+      const penalty = calcTeamBalancePenalty(groups, { balanceGender, balanceHeight });
+      if (penalty < minPenalty) {
+        minPenalty = penalty;
+        bestGroups = groups;
+        if (minPenalty === 0) break;
+      }
     }
+  } catch (caught) {
+    if (caught?.code === 'RANDOM_INVALID') {
+      return fail([error('RANDOM_INVALID', caught.message)]);
+    }
+    throw caught;
   }
 
   const usedIds = new Set();

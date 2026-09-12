@@ -1,7 +1,10 @@
+import { validateCanFinalize, validateDate, validateScore } from './sessionValidation.js';
+
 export const TEAM_SESSION_SCHEMA_VERSION = 2;
 export const MIN_TEAM_SIZE = 2;
 export const MAX_TEAM_SIZE = 6;
 export const MIN_TEAM_COUNT = 2;
+export const SESSION_STATUSES = Object.freeze(['draft', 'in_progress', 'finished']);
 
 function ok() {
   return { ok: true, errors: [] };
@@ -419,6 +422,319 @@ export function validateMatchLineups(match, format, teams = [], roster = null) {
   return errors.length > 0 ? fail(errors) : ok();
 }
 
+const SESSION_STATUS_SET = new Set(SESSION_STATUSES);
+const LEGACY_PAIR_KEYS = new Set(['pairs', 'pairAId', 'pairBId', 'byePairId']);
+
+function isIsoTimestamp(value) {
+  if (typeof value !== 'string' || value.trim().length === 0) return false;
+  return Number.isFinite(Date.parse(value));
+}
+
+function countSessionMatchEntries(session) {
+  if (!Array.isArray(session?.rounds)) return 0;
+  return session.rounds.reduce(
+    (total, round) => total + (Array.isArray(round?.matches) ? round.matches.length : 0),
+    0
+  );
+}
+
+function collectLegacyPairKeys(value, found = new Set()) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectLegacyPairKeys(item, found));
+    return found;
+  }
+
+  if (isPlainObject(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      if (LEGACY_PAIR_KEYS.has(key)) found.add(key);
+      collectLegacyPairKeys(child, found);
+    }
+  }
+
+  return found;
+}
+
+function collectSessionIntegrityErrors(session, { roster = null, sessionIndex = 0, seenSessionIds, requireExactTeamCount = false } = {}) {
+  const errors = [];
+  const sessionId = session?.id;
+  const context = { sessionIndex, sessionId };
+
+  const legacy = collectLegacyPairKeys(session);
+  if (legacy.size > 0) {
+    errors.push(
+      error(
+        'DOCUMENT_HYBRID',
+        `Documento de encontros híbrido ou V1 não pode ser salvo (${[...legacy].join(', ')}).`,
+        context
+      )
+    );
+  }
+
+  if (!isNonEmptyId(sessionId)) {
+    errors.push(error('SESSION_ID_INVALID', 'A sessão precisa de um ID válido.', { ...context, field: 'id' }));
+  } else if (seenSessionIds) {
+    if (seenSessionIds.has(sessionId)) {
+      errors.push(
+        error('SESSION_ID_DUPLICATE', 'Já existe uma sessão com este ID no documento.', {
+          ...context,
+          field: 'id',
+        })
+      );
+    } else {
+      seenSessionIds.add(sessionId);
+    }
+  }
+
+  const dateResult = validateDate(session?.date);
+  if (!dateResult.ok) {
+    errors.push(...dateResult.errors.map((item) => ({ ...item, ...context })));
+  }
+
+  if (session?.name != null && typeof session.name !== 'string') {
+    errors.push(
+      error('SESSION_NAME_INVALID', 'O nome do encontro precisa ser um texto ou vazio.', {
+        ...context,
+        field: 'name',
+      })
+    );
+  }
+
+  if (!SESSION_STATUS_SET.has(session?.status)) {
+    errors.push(
+      error(
+        'SESSION_STATUS_INVALID',
+        'O status do encontro precisa ser rascunho, em andamento ou finalizado.',
+        { ...context, field: 'status', status: session?.status }
+      )
+    );
+  }
+
+  if (!isIsoTimestamp(session?.createdAt)) {
+    errors.push(
+      error('CREATED_AT_INVALID', 'A data de criação do encontro é inválida.', {
+        ...context,
+        field: 'createdAt',
+      })
+    );
+  }
+
+  if (!isIsoTimestamp(session?.updatedAt)) {
+    errors.push(
+      error('UPDATED_AT_INVALID', 'A data de atualização do encontro é inválida.', {
+        ...context,
+        field: 'updatedAt',
+      })
+    );
+  }
+
+  const formatResult = validateFormat(session?.format);
+  if (!formatResult.ok) {
+    errors.push(...formatResult.errors.map((item) => ({ ...item, ...context })));
+  }
+
+  if (!Array.isArray(session?.teams)) {
+    errors.push(
+      error('TEAMS_NOT_ARRAY', 'Os times do encontro precisam ser uma lista.', context)
+    );
+  } else if (requireExactTeamCount) {
+    const teamsResult = validateSessionTeams(session.teams, session.format, roster);
+    if (!teamsResult.ok) {
+      errors.push(...teamsResult.errors.map((item) => ({ ...item, ...context })));
+    }
+  } else {
+    session.teams.forEach((team, index) => {
+      const otherTeams = session.teams.filter((_, otherIndex) => otherIndex !== index);
+      const result = validateTeam(team, session.format, roster, otherTeams);
+      if (!result.ok) {
+        errors.push(
+          ...result.errors.map((item) => ({
+            ...item,
+            ...context,
+            teamIndex: index,
+            teamId: team?.id,
+          }))
+        );
+      }
+    });
+  }
+
+  if (!Array.isArray(session?.rounds)) {
+    errors.push(error('ROUNDS_NOT_ARRAY', 'As rodadas do encontro precisam ser uma lista.', context));
+    return errors;
+  }
+
+  if (session.status === 'draft' && session.rounds.length > 0) {
+    errors.push(
+      error('DRAFT_HAS_ROUNDS', 'Um rascunho não pode ter rodadas.', context)
+    );
+  }
+
+  if (session.status === 'in_progress' && countSessionMatchEntries(session) < 1) {
+    errors.push(
+      error(
+        'IN_PROGRESS_NO_MATCHES',
+        'Um encontro em andamento precisa ter pelo menos uma partida.',
+        context
+      )
+    );
+  }
+
+  if (session.status === 'finished') {
+    const finalizeResult = validateCanFinalize(session);
+    if (!finalizeResult.ok) {
+      errors.push(...finalizeResult.errors.map((item) => ({ ...item, ...context })));
+    }
+  }
+
+  const seenRoundIds = new Set();
+  const seenMatchIds = new Set();
+  const seenRoundNumbers = new Set();
+
+  session.rounds.forEach((round, roundIndex) => {
+    if (!isPlainObject(round)) {
+      errors.push(
+        error('ROUND_INVALID', 'A rodada do encontro é inválida.', { ...context, roundIndex })
+      );
+      return;
+    }
+
+    if (!isNonEmptyId(round.id)) {
+      errors.push(
+        error('ROUND_ID_INVALID', 'A rodada precisa de um ID válido.', {
+          ...context,
+          roundIndex,
+          field: 'id',
+        })
+      );
+    } else if (seenRoundIds.has(round.id)) {
+      errors.push(
+        error('ROUND_ID_DUPLICATE', 'Já existe uma rodada com este ID neste encontro.', {
+          ...context,
+          roundIndex,
+          roundId: round.id,
+        })
+      );
+    } else {
+      seenRoundIds.add(round.id);
+    }
+
+    if (!Number.isInteger(round.number) || round.number < 1) {
+      errors.push(
+        error('ROUND_NUMBER_INVALID', 'O número da rodada precisa ser um inteiro positivo.', {
+          ...context,
+          roundIndex,
+          field: 'number',
+        })
+      );
+    } else if (seenRoundNumbers.has(round.number)) {
+      errors.push(
+        error('ROUND_NUMBER_DUPLICATE', 'Já existe uma rodada com este número neste encontro.', {
+          ...context,
+          roundIndex,
+          number: round.number,
+        })
+      );
+    } else {
+      seenRoundNumbers.add(round.number);
+    }
+
+    if (round.byeTeamId != null && !teamExists(session.teams, round.byeTeamId)) {
+      errors.push(
+        error('BYE_TEAM_NOT_FOUND', 'O time de folga referenciado não existe.', {
+          ...context,
+          roundIndex,
+          teamId: round.byeTeamId,
+        })
+      );
+    }
+
+    if (!Array.isArray(round.matches)) {
+      errors.push(
+        error('MATCHES_NOT_ARRAY', 'As partidas da rodada precisam ser uma lista.', {
+          ...context,
+          roundIndex,
+        })
+      );
+      return;
+    }
+
+    round.matches.forEach((match, matchIndex) => {
+      if (!isPlainObject(match)) {
+        errors.push(
+          error('MATCH_INVALID', 'A partida do encontro é inválida.', {
+            ...context,
+            roundIndex,
+            matchIndex,
+          })
+        );
+        return;
+      }
+
+      if (!isNonEmptyId(match.id)) {
+        errors.push(
+          error('MATCH_ID_INVALID', 'A partida precisa de um ID válido.', {
+            ...context,
+            roundIndex,
+            matchIndex,
+            field: 'id',
+          })
+        );
+      } else if (seenMatchIds.has(match.id)) {
+        errors.push(
+          error('MATCH_ID_DUPLICATE', 'Já existe uma partida com este ID neste encontro.', {
+            ...context,
+            roundIndex,
+            matchIndex,
+            matchId: match.id,
+          })
+        );
+      } else {
+        seenMatchIds.add(match.id);
+      }
+
+      const lineupResult = validateMatchLineups(match, session.format, session.teams ?? [], roster);
+      if (!lineupResult.ok) {
+        errors.push(
+          ...lineupResult.errors.map((item) => ({
+            ...item,
+            ...context,
+            roundIndex,
+            matchIndex,
+            matchId: match.id,
+          }))
+        );
+      }
+
+      const scoreResult = validateScore(match.scoreA, match.scoreB);
+      if (!scoreResult.ok) {
+        errors.push(
+          ...scoreResult.errors.map((item) => ({
+            ...item,
+            ...context,
+            roundIndex,
+            matchIndex,
+            matchId: match.id,
+          }))
+        );
+      }
+    });
+  });
+
+  for (const roundId of seenRoundIds) {
+    if (seenMatchIds.has(roundId)) {
+      errors.push(
+        error(
+          'ROUND_MATCH_ID_COLLISION',
+          'O ID da rodada não pode coincidir com o ID de uma partida.',
+          { ...context, id: roundId }
+        )
+      );
+    }
+  }
+
+  return errors;
+}
+
 /**
  * @param {unknown} session
  * @param {Array<{ id: string }>} [roster]
@@ -428,48 +744,11 @@ export function validateV2Session(session, roster = null) {
     return fail([error('SESSION_INVALID', 'A sessão do encontro é inválida.')]);
   }
 
-  const errors = [];
-  const formatResult = validateFormat(session.format);
-  if (!formatResult.ok) errors.push(...formatResult.errors);
-
-  const teamsResult = validateSessionTeams(session.teams, session.format, roster);
-  if (!teamsResult.ok) {
-    errors.push(
-      ...teamsResult.errors.filter(
-        (item) => !errors.some((existing) => existing.code === item.code && existing.field === item.field)
-      )
-    );
-  }
-
-  if (!Array.isArray(session.rounds)) {
-    errors.push(error('ROUNDS_NOT_ARRAY', 'As rodadas do encontro precisam ser uma lista.'));
-  } else {
-    session.rounds.forEach((round, roundIndex) => {
-      if (round?.byeTeamId != null && !teamExists(session.teams, round.byeTeamId)) {
-        errors.push(
-          error('BYE_TEAM_NOT_FOUND', 'O time de folga referenciado não existe.', {
-            roundIndex,
-            teamId: round.byeTeamId,
-          })
-        );
-      }
-
-      (round?.matches ?? []).forEach((match, matchIndex) => {
-        const result = validateMatchLineups(match, session.format, session.teams, roster);
-        if (!result.ok) {
-          errors.push(
-            ...result.errors.map((item) => ({
-              ...item,
-              roundIndex,
-              matchIndex,
-              matchId: match?.id,
-            }))
-          );
-        }
-      });
-    });
-  }
-
+  const errors = collectSessionIntegrityErrors(session, {
+    roster,
+    sessionIndex: 0,
+    requireExactTeamCount: true,
+  });
   return errors.length > 0 ? fail(errors) : ok();
 }
 
@@ -508,81 +787,21 @@ export function validateV2Document(document, roster = null) {
   }
 
   const errors = [];
+  const seenSessionIds = new Set();
   document.sessions.forEach((session, sessionIndex) => {
     if (!isPlainObject(session)) {
-      errors.push(
-        error('SESSION_INVALID', 'A sessão do encontro é inválida.', { sessionIndex })
-      );
+      errors.push(error('SESSION_INVALID', 'A sessão do encontro é inválida.', { sessionIndex }));
       return;
     }
 
-    const formatResult = validateFormat(session.format);
-    if (!formatResult.ok) {
-      errors.push(...formatResult.errors.map((item) => ({ ...item, sessionIndex, sessionId: session.id })));
-    }
-
-    if (!Array.isArray(session.teams)) {
-      errors.push(
-        error('TEAMS_NOT_ARRAY', 'Os times do encontro precisam ser uma lista.', {
-          sessionIndex,
-          sessionId: session.id,
-        })
-      );
-    } else {
-      session.teams.forEach((team, index) => {
-        const otherTeams = session.teams.filter((_, otherIndex) => otherIndex !== index);
-        const result = validateTeam(team, session.format, roster, otherTeams);
-        if (!result.ok) {
-          errors.push(
-            ...result.errors.map((item) => ({
-              ...item,
-              sessionIndex,
-              sessionId: session.id,
-              teamIndex: index,
-              teamId: team?.id,
-            }))
-          );
-        }
-      });
-    }
-
-    if (!Array.isArray(session.rounds)) {
-      errors.push(
-        error('ROUNDS_NOT_ARRAY', 'As rodadas do encontro precisam ser uma lista.', {
-          sessionIndex,
-          sessionId: session.id,
-        })
-      );
-      return;
-    }
-
-    session.rounds.forEach((round, roundIndex) => {
-      if (round?.byeTeamId != null && !teamExists(session.teams, round.byeTeamId)) {
-        errors.push(
-          error('BYE_TEAM_NOT_FOUND', 'O time de folga referenciado não existe.', {
-            sessionIndex,
-            roundIndex,
-            teamId: round.byeTeamId,
-          })
-        );
-      }
-
-      (round?.matches ?? []).forEach((match, matchIndex) => {
-        const result = validateMatchLineups(match, session.format, session.teams ?? [], roster);
-        if (!result.ok) {
-          errors.push(
-            ...result.errors.map((item) => ({
-              ...item,
-              sessionIndex,
-              sessionId: session.id,
-              roundIndex,
-              matchIndex,
-              matchId: match?.id,
-            }))
-          );
-        }
-      });
-    });
+    errors.push(
+      ...collectSessionIntegrityErrors(session, {
+        roster,
+        sessionIndex,
+        seenSessionIds,
+        requireExactTeamCount: false,
+      })
+    );
   });
 
   return errors.length > 0 ? fail(errors) : ok();

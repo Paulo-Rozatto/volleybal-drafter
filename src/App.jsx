@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import PlayerList from './PlayerList';
 import GameSessionsView from './GameSessionsView';
 import GistSyncPanel from './GistSyncPanel';
@@ -12,6 +12,7 @@ import {
   applyGistLoadFailure,
   canSaveToGist,
   clearPendingGistChanges,
+  createSyncLock,
   getGistGateMessage,
   gistLoadNeedsFetch,
   GIST_LOAD_STRATEGY,
@@ -20,7 +21,13 @@ import {
   persistLocalGameSessions,
   readLocalGameSessions,
   readPendingGistChanges,
+  runExclusiveSync,
 } from './persistence/syncHelpers.js';
+import {
+  applyGameSessionsOperation,
+  INVALID_CACHE_CONFIRMATION_MESSAGE,
+  INVALID_CACHE_CONFIRMATION_REQUIRED,
+} from './persistence/sessionOperations.js';
 
 
 const INITIAL_ROSTER = [];
@@ -59,6 +66,11 @@ export default function App() {
   );
   const [localCacheError, setLocalCacheError] = useState(() => localSessions.error);
   const [localWriteError, setLocalWriteError] = useState(() => localSessions.writeError ?? null);
+  const [showInvalidCacheConfirm, setShowInvalidCacheConfirm] = useState(false);
+  const sessionsRef = useRef(localSessions.document ?? createEmptyGameSessionsDocument());
+  const cacheInvalidRef = useRef(Boolean(localSessions.error));
+  const pendingGameSessionsOperationRef = useRef(null);
+  const syncLockRef = useRef(createSyncLock());
 
   // --- GitHub Gist Sync States ---
   const [appPassword, setAppPassword] = useState(() => sessionStorage.getItem('app_password') || '');
@@ -92,75 +104,127 @@ export default function App() {
     setHasPendingGistChanges(true);
   };
 
-  const applySessionsDocument = (nextDocument) => {
-    const persistResult = persistLocalGameSessions(nextDocument);
+  const commitSessionsDocument = (nextDocument) => {
+    sessionsRef.current = nextDocument;
     setGameSessions(nextDocument);
-    markPendingGistChanges();
-    setHasPendingGistChanges(true);
-    setLocalWriteError(persistResult.ok ? null : persistResult.error);
   };
 
-  const handleCreateGameSession = (input) => {
-    const { document: nextDocument } = appendDraftTeamSession(gameSessions, {
-      date: input.date,
-      name: input.name,
-      format: {
-        teamSize: input.teamSize,
-        teamCount: input.teamCount,
+  const requestGameSessionsOperation = (operation, { discardConfirmed = false } = {}) => {
+    const result = applyGameSessionsOperation({
+      getDocument: () => sessionsRef.current,
+      setDocument: commitSessionsDocument,
+      persistDocument: persistLocalGameSessions,
+      markPending: () => {
+        markPendingGistChanges();
+        setHasPendingGistChanges(true);
       },
+      operation,
+      cacheInvalid: cacheInvalidRef.current,
+      discardConfirmed,
     });
-    applySessionsDocument(nextDocument);
+
+    if (result?.errors?.[0]?.code === INVALID_CACHE_CONFIRMATION_REQUIRED) {
+      pendingGameSessionsOperationRef.current = operation;
+      setShowInvalidCacheConfirm(true);
+      return result;
+    }
+
+    if (result?.ok && result.persistOk) {
+      setLocalWriteError(null);
+      if (result.cacheCleared) {
+        cacheInvalidRef.current = false;
+        setLocalCacheError(null);
+      }
+    } else if (result?.persistOk === false) {
+      setLocalWriteError(result.persistError);
+    }
+
+    return result;
+  };
+
+  const handleCreateGameSession = (input) =>
+    requestGameSessionsOperation((document) => {
+      const created = appendDraftTeamSession(document, {
+        date: input.date,
+        name: input.name,
+        format: {
+          teamSize: input.teamSize,
+          teamCount: input.teamCount,
+        },
+      });
+      return {
+        ok: true,
+        errors: [],
+        document: created.document,
+        session: created.session,
+      };
+    });
+
+  const handleConfirmDiscardInvalidCache = () => {
+    const operation = pendingGameSessionsOperationRef.current;
+    pendingGameSessionsOperationRef.current = null;
+    setShowInvalidCacheConfirm(false);
+    if (!operation) return null;
+    return requestGameSessionsOperation(operation, { discardConfirmed: true });
+  };
+
+  const handleCancelDiscardInvalidCache = () => {
+    pendingGameSessionsOperationRef.current = null;
+    setShowInvalidCacheConfirm(false);
   };
 
   const loadGistWithStrategy = async (strategy) => {
     setShowLoadConflict(false);
-    if (!gistLoadNeedsFetch(strategy)) return;
+    if (!gistLoadNeedsFetch(strategy)) return { started: false };
 
-    try {
-      setIsSyncing(true);
-      setSyncStatus('Carregando do Gist...');
-      const remote = await loadGistState();
-      const remoteSessions = nextGameSessionsDocument(
-        createEmptyGameSessionsDocument(),
-        remote.gameSessions
-      );
-      const result = applySuccessfulGistLoad({
-        strategy,
-        localPlayers: players,
-        localGameSessions: gameSessions,
-        remotePlayers: remote.players,
-        remoteGameSessions: remoteSessions,
-        remoteMigrated: remote.migrated,
-      });
+    return runExclusiveSync(syncLockRef.current, async () => {
+      try {
+        setIsSyncing(true);
+        setSyncStatus('Carregando do Gist...');
+        const remote = await loadGistState();
+        const remoteSessions = nextGameSessionsDocument(
+          createEmptyGameSessionsDocument(),
+          remote.gameSessions
+        );
+        const result = applySuccessfulGistLoad({
+          strategy,
+          localPlayers: players,
+          localGameSessions: sessionsRef.current,
+          remotePlayers: remote.players,
+          remoteGameSessions: remoteSessions,
+          remoteMigrated: remote.migrated,
+        });
 
-      if (result.replaceLocal) {
-        const persistResult = persistLocalGameSessions(result.gameSessions);
-        setPlayers(result.players);
-        setGameSessions(result.gameSessions);
-        setLocalCacheError(null);
-        setLocalWriteError(persistResult.ok ? null : persistResult.error);
+        if (result.replaceLocal) {
+          const persistResult = persistLocalGameSessions(result.gameSessions);
+          setPlayers(result.players);
+          commitSessionsDocument(result.gameSessions);
+          cacheInvalidRef.current = false;
+          setLocalCacheError(null);
+          setLocalWriteError(persistResult.ok ? null : persistResult.error);
+        }
+
+        if (result.hasPendingGistChanges) {
+          markPendingGistChanges();
+        } else {
+          clearPendingGistChanges();
+        }
+
+        setHasPendingGistChanges(result.hasPendingGistChanges);
+        setGistLoaded(true);
+        setSyncStatus(result.syncStatus);
+      } catch (err) {
+        const failure = applyGistLoadFailure({
+          error: err,
+          hasPendingGistChanges,
+          localPlayers: players,
+          localGameSessions: sessionsRef.current,
+        });
+        setSyncStatus(failure.syncStatus);
+      } finally {
+        setIsSyncing(false);
       }
-
-      if (result.hasPendingGistChanges) {
-        markPendingGistChanges();
-      } else {
-        clearPendingGistChanges();
-      }
-
-      setHasPendingGistChanges(result.hasPendingGistChanges);
-      setGistLoaded(true);
-      setSyncStatus(result.syncStatus);
-    } catch (err) {
-      const failure = applyGistLoadFailure({
-        error: err,
-        hasPendingGistChanges,
-        localPlayers: players,
-        localGameSessions: gameSessions,
-      });
-      setSyncStatus(failure.syncStatus);
-    } finally {
-      setIsSyncing(false);
-    }
+    });
   };
 
   // --- Gist API Handlers ---
@@ -190,26 +254,28 @@ export default function App() {
       return;
     }
 
-    let decryptedPat;
-    try {
-      setIsSyncing(true);
-      setSyncStatus('Descriptografando token...');
-      decryptedPat = await decryptToken(ENCRYPTED_GITHUB_TOKEN, appPassword);
-      setSyncStatus('Salvando no Gist...');
-      await saveGistState({
-        players,
-        gameSessions,
-        token: decryptedPat,
-      });
-      clearPendingGistChanges();
-      setHasPendingGistChanges(false);
-      setSyncStatus('Salvo no Gist com sucesso!');
-    } catch (err) {
-      setSyncStatus(`Erro ao salvar: ${err.message}`);
-    } finally {
-      decryptedPat = undefined;
-      setIsSyncing(false);
-    }
+    return runExclusiveSync(syncLockRef.current, async () => {
+      let decryptedPat;
+      try {
+        setIsSyncing(true);
+        setSyncStatus('Descriptografando token...');
+        decryptedPat = await decryptToken(ENCRYPTED_GITHUB_TOKEN, appPassword);
+        setSyncStatus('Salvando no Gist...');
+        await saveGistState({
+          players,
+          gameSessions: sessionsRef.current,
+          token: decryptedPat,
+        });
+        clearPendingGistChanges();
+        setHasPendingGistChanges(false);
+        setSyncStatus('Salvo no Gist com sucesso!');
+      } catch (err) {
+        setSyncStatus(`Erro ao salvar: ${err.message}`);
+      } finally {
+        decryptedPat = undefined;
+        setIsSyncing(false);
+      }
+    });
   };
 
 
@@ -634,10 +700,11 @@ export default function App() {
           {currentView === 'sessions' && (
             <GameSessionsView
               sessions={gameSessions.sessions}
-              sessionsDocument={gameSessions}
               players={players}
+              cacheInvalid={Boolean(localCacheError)}
+              cacheError={localCacheError}
               onCreateSession={handleCreateGameSession}
-              onApplyDocument={applySessionsDocument}
+              onApplyOperation={requestGameSessionsOperation}
               syncPanel={gistSyncPanel}
             />
           )}
@@ -690,6 +757,59 @@ export default function App() {
 
         </main>
       </div>
+
+      {showInvalidCacheConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)' }}
+          onClick={handleCancelDiscardInvalidCache}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="invalid-cache-title"
+            aria-describedby="invalid-cache-description"
+            className="w-full max-w-md rounded-xl border p-4 space-y-3 shadow-2xl"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-color)',
+              color: 'var(--text-main)',
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="invalid-cache-title" className="font-bold text-base">
+              Cache local inválido
+            </h3>
+            <p
+              id="invalid-cache-description"
+              className="text-sm whitespace-pre-line"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              {INVALID_CACHE_CONFIRMATION_MESSAGE}
+            </p>
+            <button
+              type="button"
+              onClick={handleConfirmDiscardInvalidCache}
+              className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer"
+              style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+            >
+              Descartar cache inválido e continuar
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelDiscardInvalidCache}
+              className="w-full font-bold py-3 rounded-xl border cursor-pointer"
+              style={{
+                backgroundColor: 'var(--bg-subtle)',
+                borderColor: 'var(--border-color)',
+                color: 'var(--text-main)',
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

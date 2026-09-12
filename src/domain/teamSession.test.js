@@ -326,11 +326,409 @@ describe('validateV2Session', () => {
   });
 });
 
+const ISO = '2026-09-12T18:00:00.000Z';
+
+function memberPair(idA, nameA, idB, nameB) {
+  return [member(idA, nameA), member(idB, nameB)];
+}
+
+function draftSession(overrides = {}) {
+  return {
+    id: 'session-1',
+    date: '2026-09-12',
+    name: 'Arena',
+    status: 'draft',
+    createdAt: ISO,
+    updatedAt: ISO,
+    format: { teamSize: 2, teamCount: 2 },
+    teams: [],
+    rounds: [],
+    ...overrides,
+  };
+}
+
+function inProgressSession(overrides = {}) {
+  return draftSession({
+    status: 'in_progress',
+    teams: [
+      team('t1', memberPair('p1', 'Erik', 'p2', 'André')),
+      team('t2', memberPair('p3', 'Gabi', 'p4', 'Luiza')),
+    ],
+    rounds: [
+      {
+        id: 'round-1',
+        number: 1,
+        byeTeamId: null,
+        matches: [
+          {
+            id: 'match-1',
+            teamAId: 't1',
+            teamBId: 't2',
+            lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+            lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+            scoreA: null,
+            scoreB: null,
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  });
+}
+
+function finishedSession(overrides = {}) {
+  return inProgressSession({
+    status: 'finished',
+    rounds: [
+      {
+        id: 'round-1',
+        number: 1,
+        byeTeamId: null,
+        matches: [
+          {
+            id: 'match-1',
+            teamAId: 't1',
+            teamBId: 't2',
+            lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+            lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+            scoreA: 21,
+            scoreB: 18,
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  });
+}
+
+function documentOf(session) {
+  return { schemaVersion: TEAM_SESSION_SCHEMA_VERSION, sessions: [session] };
+}
+
+function errorCodes(result) {
+  return (result.errors ?? []).map((item) => item.code);
+}
+
 describe('validateV2Document', () => {
   it('aceita schema 2 e rejeita versão diferente', () => {
     expect(validateV2Document({ schemaVersion: TEAM_SESSION_SCHEMA_VERSION, sessions: [] }).ok).toBe(true);
     expect(validateV2Document({ schemaVersion: 1, sessions: [] }).errors[0].code).toBe(
       'SCHEMA_VERSION_UNSUPPORTED'
+    );
+  });
+
+  it('aceita documento válido em draft, in_progress e finished', () => {
+    expect(validateV2Document(documentOf(draftSession())).ok).toBe(true);
+    expect(validateV2Document(documentOf(inProgressSession())).ok).toBe(true);
+    expect(validateV2Document(documentOf(finishedSession())).ok).toBe(true);
+  });
+
+  it('rejeita status inválido', () => {
+    expect(errorCodes(validateV2Document(documentOf(draftSession({ status: 'archived' }))))).toContain(
+      'SESSION_STATUS_INVALID'
+    );
+  });
+
+  it('rejeita sessão duplicada', () => {
+    const result = validateV2Document({
+      schemaVersion: TEAM_SESSION_SCHEMA_VERSION,
+      sessions: [draftSession(), draftSession({ name: 'Outro' })],
+    });
+    expect(errorCodes(result)).toContain('SESSION_ID_DUPLICATE');
+  });
+
+  it('rejeita rodada duplicada', () => {
+    const session = inProgressSession({
+      rounds: [
+        {
+          id: 'round-1',
+          number: 1,
+          byeTeamId: null,
+          matches: [
+            {
+              id: 'match-1',
+              teamAId: 't1',
+              teamBId: 't2',
+              lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+              lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+              scoreA: null,
+              scoreB: null,
+            },
+          ],
+        },
+        {
+          id: 'round-1',
+          number: 2,
+          byeTeamId: null,
+          matches: [
+            {
+              id: 'match-2',
+              teamAId: 't1',
+              teamBId: 't2',
+              lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+              lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+              scoreA: null,
+              scoreB: null,
+            },
+          ],
+        },
+      ],
+    });
+    expect(errorCodes(validateV2Document(documentOf(session)))).toContain('ROUND_ID_DUPLICATE');
+  });
+
+  it('rejeita partida duplicada', () => {
+    const session = inProgressSession({
+      rounds: [
+        {
+          id: 'round-1',
+          number: 1,
+          byeTeamId: null,
+          matches: [
+            {
+              id: 'match-1',
+              teamAId: 't1',
+              teamBId: 't2',
+              lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+              lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+              scoreA: null,
+              scoreB: null,
+            },
+            {
+              id: 'match-1',
+              teamAId: 't2',
+              teamBId: 't1',
+              lineupA: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+              lineupB: memberPair('p1', 'Erik', 'p2', 'André'),
+              scoreA: null,
+              scoreB: null,
+            },
+          ],
+        },
+      ],
+    });
+    expect(errorCodes(validateV2Document(documentOf(session)))).toContain('MATCH_ID_DUPLICATE');
+  });
+
+  it('rejeita colisão entre ID de rodada e partida', () => {
+    const session = inProgressSession({
+      rounds: [
+        {
+          id: 'shared-id',
+          number: 1,
+          byeTeamId: null,
+          matches: [
+            {
+              id: 'shared-id',
+              teamAId: 't1',
+              teamBId: 't2',
+              lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+              lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+              scoreA: null,
+              scoreB: null,
+            },
+          ],
+        },
+      ],
+    });
+    expect(errorCodes(validateV2Document(documentOf(session)))).toContain('ROUND_MATCH_ID_COLLISION');
+  });
+
+  it('rejeita número de rodada inválido ou duplicado', () => {
+    expect(
+      errorCodes(
+        validateV2Document(
+          documentOf(
+            inProgressSession({
+              rounds: [
+                {
+                  id: 'round-1',
+                  number: 0,
+                  byeTeamId: null,
+                  matches: [
+                    {
+                      id: 'match-1',
+                      teamAId: 't1',
+                      teamBId: 't2',
+                      lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+                      lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+                      scoreA: null,
+                      scoreB: null,
+                    },
+                  ],
+                },
+              ],
+            })
+          )
+        )
+      )
+    ).toContain('ROUND_NUMBER_INVALID');
+
+    expect(
+      errorCodes(
+        validateV2Document(
+          documentOf(
+            inProgressSession({
+              rounds: [
+                {
+                  id: 'round-1',
+                  number: 1,
+                  byeTeamId: null,
+                  matches: [
+                    {
+                      id: 'match-1',
+                      teamAId: 't1',
+                      teamBId: 't2',
+                      lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+                      lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+                      scoreA: null,
+                      scoreB: null,
+                    },
+                  ],
+                },
+                {
+                  id: 'round-2',
+                  number: 1,
+                  byeTeamId: null,
+                  matches: [
+                    {
+                      id: 'match-2',
+                      teamAId: 't1',
+                      teamBId: 't2',
+                      lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+                      lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+                      scoreA: null,
+                      scoreB: null,
+                    },
+                  ],
+                },
+              ],
+            })
+          )
+        )
+      )
+    ).toContain('ROUND_NUMBER_DUPLICATE');
+  });
+
+  it('rejeita placares parciais, negativos, decimais ou empatados', () => {
+    const withScore = (scoreA, scoreB) =>
+      errorCodes(
+        validateV2Document(
+          documentOf(
+            inProgressSession({
+              rounds: [
+                {
+                  id: 'round-1',
+                  number: 1,
+                  byeTeamId: null,
+                  matches: [
+                    {
+                      id: 'match-1',
+                      teamAId: 't1',
+                      teamBId: 't2',
+                      lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+                      lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+                      scoreA,
+                      scoreB,
+                    },
+                  ],
+                },
+              ],
+            })
+          )
+        )
+      );
+
+    expect(withScore(21, null)).toContain('SCORE_PARTIAL');
+    expect(withScore(-1, 21)).toContain('SCORE_NEGATIVE');
+    expect(withScore(21.5, 18)).toContain('SCORE_NOT_INTEGER');
+    expect(withScore(21, 21)).toContain('SCORE_TIE');
+  });
+
+  it('rejeita draft com rodadas, in_progress sem partidas e finished incompleto', () => {
+    expect(errorCodes(validateV2Document(documentOf(inProgressSession({ status: 'draft' }))))).toContain(
+      'DRAFT_HAS_ROUNDS'
+    );
+    expect(
+      errorCodes(validateV2Document(documentOf(draftSession({ status: 'in_progress' }))))
+    ).toContain('IN_PROGRESS_NO_MATCHES');
+    expect(
+      errorCodes(validateV2Document(documentOf(inProgressSession({ status: 'finished' }))))
+    ).toContain('FINALIZE_INCOMPLETE');
+  });
+
+  it('rejeita documento híbrido V1/V2', () => {
+    expect(errorCodes(validateV2Document(documentOf(draftSession({ pairs: [] }))))).toContain(
+      'DOCUMENT_HYBRID'
+    );
+  });
+
+  it('rejeita teamAId igual a teamBId e referências inexistentes', () => {
+    expect(
+      errorCodes(
+        validateV2Document(
+          documentOf(
+            inProgressSession({
+              rounds: [
+                {
+                  id: 'round-1',
+                  number: 1,
+                  byeTeamId: null,
+                  matches: [
+                    {
+                      id: 'match-1',
+                      teamAId: 't1',
+                      teamBId: 't1',
+                      lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+                      lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+                      scoreA: null,
+                      scoreB: null,
+                    },
+                  ],
+                },
+              ],
+            })
+          )
+        )
+      )
+    ).toContain('MATCH_SAME_TEAM');
+
+    expect(
+      errorCodes(
+        validateV2Document(
+          documentOf(
+            inProgressSession({
+              rounds: [
+                {
+                  id: 'round-1',
+                  number: 1,
+                  byeTeamId: 'missing',
+                  matches: [
+                    {
+                      id: 'match-1',
+                      teamAId: 't1',
+                      teamBId: 'ghost',
+                      lineupA: memberPair('p1', 'Erik', 'p2', 'André'),
+                      lineupB: memberPair('p3', 'Gabi', 'p4', 'Luiza'),
+                      scoreA: null,
+                      scoreB: null,
+                    },
+                  ],
+                },
+              ],
+            })
+          )
+        )
+      )
+    ).toEqual(expect.arrayContaining(['BYE_TEAM_NOT_FOUND', 'MATCH_TEAM_NOT_FOUND']));
+  });
+
+  it('rejeita timestamps ausentes', () => {
+    expect(errorCodes(validateV2Document(documentOf(draftSession({ createdAt: '' }))))).toContain(
+      'CREATED_AT_INVALID'
+    );
+    expect(errorCodes(validateV2Document(documentOf(draftSession({ updatedAt: null }))))).toContain(
+      'UPDATED_AT_INVALID'
     );
   });
 });

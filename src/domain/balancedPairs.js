@@ -9,10 +9,27 @@ function snapshotName(name) {
   return typeof name === 'string' ? name.trim() : '';
 }
 
+function error(code, message) {
+  return { code, message };
+}
+
+function readRandomUnit(random) {
+  const value = random();
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value >= 1) {
+    throw Object.assign(
+      new Error(
+        'O gerador aleatório precisa retornar um número finito maior ou igual a 0 e menor que 1.'
+      ),
+      { code: 'RANDOM_INVALID' }
+    );
+  }
+  return value;
+}
+
 function shuffleCopy(items, random) {
   const copy = [...items];
   for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swapWith = Math.floor(random() * (index + 1));
+    const swapWith = Math.floor(readRandomUnit(random) * (index + 1));
     const current = copy[index];
     copy[index] = copy[swapWith];
     copy[swapWith] = current;
@@ -122,27 +139,32 @@ export function generateBalancedPairs(players, options = {}) {
   } = options;
 
   if (typeof idGenerator !== 'function') {
-    return fail([
-      {
-        code: 'ID_GENERATOR_INVALID',
-        message: 'O gerador de IDs precisa ser uma função.',
-      },
-    ]);
+    return fail([error('ID_GENERATOR_INVALID', 'O gerador de IDs precisa ser uma função.')]);
+  }
+  if (typeof random !== 'function') {
+    return fail([error('RANDOM_INVALID', 'O gerador aleatório precisa ser uma função.')]);
   }
 
   const totalIterations = Number.isInteger(iterations) && iterations > 0 ? iterations : 10000;
   let bestGroups = null;
   let minPenalty = Infinity;
 
-  for (let round = 0; round < totalIterations; round += 1) {
-    const shuffled = shuffleCopy(source, random);
-    const teams = chunkPairs(shuffled);
-    const penalty = calcTeamBalancePenalty(teams, { balanceGender, balanceHeight });
-    if (penalty < minPenalty) {
-      minPenalty = penalty;
-      bestGroups = teams;
-      if (minPenalty === 0) break;
+  try {
+    for (let round = 0; round < totalIterations; round += 1) {
+      const shuffled = shuffleCopy(source, random);
+      const teams = chunkPairs(shuffled);
+      const penalty = calcTeamBalancePenalty(teams, { balanceGender, balanceHeight });
+      if (penalty < minPenalty) {
+        minPenalty = penalty;
+        bestGroups = teams;
+        if (minPenalty === 0) break;
+      }
     }
+  } catch (caught) {
+    if (caught?.code === 'RANDOM_INVALID') {
+      return fail([error('RANDOM_INVALID', caught.message)]);
+    }
+    throw caught;
   }
 
   const usedIds = new Set();

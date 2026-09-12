@@ -114,6 +114,9 @@ export default function TeamBuilder({
   };
 
   const applyResult = (result, { resetOnSuccess } = { resetOnSuccess: true }) => {
+    if (result?.errors?.[0]?.code === 'INVALID_CACHE_CONFIRMATION_REQUIRED') {
+      return false;
+    }
     if (!result?.ok) {
       setError(result?.errors?.[0]?.message || `Não foi possível atualizar ${doubles ? 'a dupla' : 'o time'}.`);
       return false;

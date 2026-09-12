@@ -6,6 +6,7 @@ import {
   applySuccessfulGistLoad,
   canSaveToGist,
   clearPendingGistChanges,
+  createSyncLock,
   getGistGateMessage,
   gistLoadNeedsFetch,
   GIST_LOAD_STRATEGY,
@@ -15,6 +16,7 @@ import {
   persistLocalGameSessions,
   readLocalGameSessions,
   readPendingGistChanges,
+  runExclusiveSync,
 } from './syncHelpers.js';
 
 function createMemoryStorage(initial = {}) {
@@ -355,5 +357,66 @@ describe('estratégias de carregamento do Gist', () => {
     expect(result.gameSessions).toBe(localGameSessions);
     expect(result.hasPendingGistChanges).toBe(true);
     expect(result.syncStatus).toBe('Erro ao carregar: rede indisponível');
+  });
+});
+
+describe('proteção de reentrada da sincronização', () => {
+  it('segunda chamada simultânea de load não inicia GET', async () => {
+    const lock = createSyncLock();
+    let loads = 0;
+    let releaseFirst;
+    const first = runExclusiveSync(
+      lock,
+      () =>
+        new Promise((resolve) => {
+          loads += 1;
+          releaseFirst = resolve;
+        })
+    );
+    const second = await runExclusiveSync(lock, async () => {
+      loads += 1;
+      return 'second-load';
+    });
+
+    expect(second).toEqual({ started: false, result: undefined });
+    expect(loads).toBe(1);
+    releaseFirst('ok');
+    await expect(first).resolves.toEqual({ started: true, result: 'ok' });
+  });
+
+  it('segunda chamada simultânea de save não inicia PATCH', async () => {
+    const lock = createSyncLock();
+    let patches = 0;
+    let releaseFirst;
+    const first = runExclusiveSync(
+      lock,
+      () =>
+        new Promise((resolve) => {
+          patches += 1;
+          releaseFirst = resolve;
+        })
+    );
+    const second = await runExclusiveSync(lock, async () => {
+      patches += 1;
+      return 'second-save';
+    });
+
+    expect(second.started).toBe(false);
+    expect(patches).toBe(1);
+    releaseFirst('saved');
+    await expect(first).resolves.toEqual({ started: true, result: 'saved' });
+  });
+
+  it('erro libera o lock para a próxima operação', async () => {
+    const lock = createSyncLock();
+    await expect(
+      runExclusiveSync(lock, async () => {
+        throw new Error('falha de rede');
+      })
+    ).rejects.toThrow('falha de rede');
+
+    const next = await runExclusiveSync(lock, async () => 'recovered');
+    expect(next).toEqual({ started: true, result: 'recovered' });
+    expect(lock.isLocked()).toBe(false);
   });
 });

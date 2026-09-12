@@ -178,4 +178,24 @@ describe('generateBalancedPairs', () => {
     });
     expect(fourPlayers).toEqual(snapshot);
   });
+
+  it('rejeita retornos inválidos de random sem resultado parcial', () => {
+    const invalidValues = [1, -0.1, Number.NaN, Infinity, '0.2'];
+
+    for (const value of invalidValues) {
+      const result = generateBalancedPairs(fourPlayers, {
+        random: () => value,
+        iterations: 8,
+        idGenerator: sequentialIds(),
+      });
+      expect(result.ok).toBe(false);
+      expect(result.pairs).toBeNull();
+      expect(result.errors[0].code).toBe('RANDOM_INVALID');
+    }
+
+    expect(
+      generateBalancedPairs(fourPlayers, { random: null, iterations: 1, idGenerator: sequentialIds() })
+        .errors[0].code
+    ).toBe('RANDOM_INVALID');
+  });
 });

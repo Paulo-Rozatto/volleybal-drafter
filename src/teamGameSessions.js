@@ -1,6 +1,7 @@
 import { generateRoundRobinSchedule } from './domain/roundRobin.js';
 import {
   countSessionMatches,
+  sessionIsReadyToFinalize,
   validateCanFinalize,
   validateDate,
   validateScore,
@@ -16,7 +17,6 @@ import {
   validateSessionTeams,
   validateTeam,
 } from './domain/teamSession.js';
-import { sessionIsReadyToFinalize } from './gameSessions.js';
 import {
   formatFinalizeMatchProgress,
   generateRoundsConfirmationMessage,

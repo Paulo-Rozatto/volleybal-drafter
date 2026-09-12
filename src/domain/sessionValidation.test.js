@@ -9,6 +9,7 @@ import {
   validatePair,
   validateScore,
   validateSessionPairs,
+  sessionIsReadyToFinalize,
 } from './sessionValidation.js';
 
 const roster = [
@@ -269,5 +270,11 @@ describe('estado das partidas e finalização', () => {
     ]);
     expect(canFinalizeSession(session)).toBe(false);
     expect(validateCanFinalize(session).errors[0].code).toBe('FINALIZE_INCOMPLETE');
+  });
+
+  it('sessionIsReadyToFinalize exige todas as partidas válidas e concluídas', () => {
+    expect(sessionIsReadyToFinalize(sessionFromScores([[21, 18], [15, 21]]))).toBe(true);
+    expect(sessionIsReadyToFinalize(sessionFromScores([[21, 18], [null, null]]))).toBe(false);
+    expect(sessionIsReadyToFinalize({ rounds: [] })).toBe(false);
   });
 });

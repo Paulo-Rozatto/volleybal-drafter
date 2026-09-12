@@ -68,6 +68,9 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
       setError(null);
       return result;
     }
+    if (result?.errors?.[0]?.code === 'INVALID_CACHE_CONFIRMATION_REQUIRED') {
+      return result;
+    }
     if (!result?.ok) {
       setError(result?.errors?.[0]?.message || `Não foi possível sortear os ${units}.`);
       return result;

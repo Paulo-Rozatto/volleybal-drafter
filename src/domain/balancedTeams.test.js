@@ -321,6 +321,36 @@ describe('generateBalancedTeams', () => {
     expect(duplicateIds.teams).toBeNull();
   });
 
+  it('rejeita retornos inválidos de random sem resultado parcial', () => {
+    const players = makePlayers(4);
+    const format = { teamSize: 2, teamCount: 2 };
+    const invalidValues = [1, -0.1, Number.NaN, Infinity, '0.2'];
+
+    for (const value of invalidValues) {
+      const result = generateBalancedTeams(players, format, {
+        random: () => value,
+        iterations: 8,
+        idGenerator: sequentialIds(),
+      });
+      expect(result.ok).toBe(false);
+      expect(result.teams).toBeNull();
+      expect(result.errors[0].code).toBe('RANDOM_INVALID');
+    }
+
+    let calls = 0;
+    const delayed = generateBalancedTeams(players, format, {
+      random: () => {
+        calls += 1;
+        return calls === 2 ? 1 : 0;
+      },
+      iterations: 8,
+      idGenerator: sequentialIds(),
+    });
+    expect(delayed.ok).toBe(false);
+    expect(delayed.teams).toBeNull();
+    expect(delayed.errors[0].code).toBe('RANDOM_INVALID');
+  });
+
   it('usa a penalidade compartilhada e respeita gênero/altura ligados ou desligados', () => {
     const players = makePlayers(6);
     const format = { teamSize: 3, teamCount: 2 };

@@ -26,10 +26,11 @@ function emptyForm() {
 
 export default function GameSessionsView({
   sessions = [],
-  sessionsDocument,
   players = [],
+  cacheInvalid = false,
+  cacheError = null,
   onCreateSession,
-  onApplyDocument,
+  onApplyOperation,
   syncPanel,
 }) {
   const [isCreating, setIsCreating] = useState(false);
@@ -65,11 +66,10 @@ export default function GameSessionsView({
     return (
       <GameSessionDetail
         session={openSession}
-        sessionsDocument={sessionsDocument}
         players={players}
         syncPanel={syncPanel}
         onBack={() => setOpenSessionId(null)}
-        onApplyDocument={onApplyDocument}
+        onApplyOperation={onApplyOperation}
       />
     );
   }
@@ -113,12 +113,13 @@ export default function GameSessionsView({
       return;
     }
 
-    onCreateSession?.({
+    const created = onCreateSession?.({
       date: form.date,
       name: form.name,
       teamSize: formatResult.format.teamSize,
       teamCount: formatResult.format.teamCount,
     });
+    if (created?.ok === false) return;
     closeForm();
   };
 
@@ -145,6 +146,22 @@ export default function GameSessionsView({
       </div>
 
       {syncPanel}
+
+      {cacheInvalid && (
+        <div
+          className="p-4 rounded-xl border space-y-1"
+          style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--primary)' }}
+        >
+          <p className="text-sm font-bold">O cache local de encontros está inválido.</p>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            Criar ou editar um encontro não vai sobrescrever os dados locais até você confirmar a
+            substituição.
+          </p>
+          {cacheError && (
+            <p className="text-xs font-semibold text-red-500">{cacheError}</p>
+          )}
+        </div>
+      )}
 
       {isCreating && (
         <form

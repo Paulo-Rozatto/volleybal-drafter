@@ -181,6 +181,27 @@ describe('gameSessionsDocument', () => {
       })
     ).toThrow('Documento de encontros híbrido ou V1 não pode ser salvo');
   });
+
+  it('rejeita documento V2 com status inválido na serialização', () => {
+    expect(() =>
+      serializeGameSessionsDocument({
+        schemaVersion: 2,
+        sessions: [
+          {
+            id: 's1',
+            date: '2026-09-12',
+            name: null,
+            status: 'archived',
+            createdAt: '2026-09-12T18:00:00.000Z',
+            updatedAt: '2026-09-12T18:00:00.000Z',
+            format: { teamSize: 2, teamCount: 2 },
+            teams: [],
+            rounds: [],
+          },
+        ],
+      })
+    ).toThrow('O status do encontro precisa ser rascunho, em andamento ou finalizado.');
+  });
 });
 
 describe('gameSessionsStorage', () => {
@@ -226,6 +247,42 @@ describe('gameSessionsStorage', () => {
     );
     expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBeNull();
     expect(storage.getItem('volleyPlayers')).toBe('[]');
+  });
+
+  it('rejeita documento V2 inválido antes de setItem', () => {
+    const writes = [];
+    const storage = {
+      getItem() {
+        return null;
+      },
+      setItem(key, value) {
+        writes.push([key, value]);
+      },
+      removeItem() {},
+    };
+
+    expect(() =>
+      saveGameSessionsDocument(
+        {
+          schemaVersion: 2,
+          sessions: [
+            {
+              id: 's1',
+              date: '2026-09-12',
+              name: null,
+              status: 'archived',
+              createdAt: '2026-09-12T18:00:00.000Z',
+              updatedAt: '2026-09-12T18:00:00.000Z',
+              format: { teamSize: 2, teamCount: 2 },
+              teams: [],
+              rounds: [],
+            },
+          ],
+        },
+        storage
+      )
+    ).toThrow('O status do encontro precisa ser rascunho, em andamento ou finalizado.');
+    expect(writes).toEqual([]);
   });
 
   it('lança erro claro para JSON corrompido e preserva a chave', () => {

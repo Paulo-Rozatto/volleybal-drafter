@@ -11,6 +11,20 @@ import { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constant
 import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
 
 const TOKEN = 'ghp_test_token_secret';
+const ISO = '2026-09-12T18:00:00.000Z';
+
+function v1DraftSession(id = 's1') {
+  return {
+    id,
+    date: '2026-09-12',
+    name: null,
+    status: 'draft',
+    createdAt: ISO,
+    updatedAt: ISO,
+    pairs: [],
+    rounds: [],
+  };
+}
 
 function jsonResponse(body, { status = 200, statusText = 'OK' } = {}) {
   return {
@@ -54,7 +68,7 @@ describe('loadGistState', () => {
     const players = [{ id: 'p1', name: 'Erik' }];
     const gameSessions = {
       schemaVersion: 1,
-      sessions: [{ id: 's1' }],
+      sessions: [v1DraftSession()],
     };
     const fetchImpl = mockFetch(
       jsonResponse(
@@ -111,7 +125,7 @@ describe('loadGistState', () => {
       jsonResponse(
         gistPayload({
           [GAME_SESSIONS_FILENAME]: {
-            content: JSON.stringify({ schemaVersion: 1, sessions: [{ id: 's1' }] }),
+            content: JSON.stringify({ schemaVersion: 1, sessions: [v1DraftSession()] }),
           },
         })
       )
@@ -306,6 +320,36 @@ describe('patchGistFiles e saveGistState', () => {
         fetchImpl,
       })
     ).rejects.toThrow('Versão de schema de encontros não suportada: 1.');
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejeita PATCH de documento V2 inválido antes do fetch', async () => {
+    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
+
+    await expect(
+      saveGistState({
+        players: [{ id: 'p1', name: 'Erik' }],
+        gameSessions: {
+          schemaVersion: 2,
+          sessions: [
+            {
+              id: 's1',
+              date: '2026-09-12',
+              name: null,
+              status: 'archived',
+              createdAt: ISO,
+              updatedAt: ISO,
+              format: { teamSize: 2, teamCount: 2 },
+              teams: [],
+              rounds: [],
+            },
+          ],
+        },
+        token: TOKEN,
+        fetchImpl,
+      })
+    ).rejects.toThrow('O status do encontro precisa ser rascunho, em andamento ou finalizado.');
 
     expect(fetchImpl).not.toHaveBeenCalled();
   });

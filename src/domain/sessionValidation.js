@@ -287,3 +287,8 @@ export function validateCanFinalize(session) {
 export function canFinalizeSession(session) {
   return validateCanFinalize(session).ok;
 }
+
+export function sessionIsReadyToFinalize(session) {
+  const { total, completed, invalid } = countSessionMatches(session);
+  return total > 0 && completed === total && invalid === 0;
+}

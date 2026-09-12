@@ -38,6 +38,7 @@ import {
   updateSessionTeam,
   setTeamSessionMatchLineups,
 } from './teamGameSessions.js';
+import { INVALID_CACHE_CONFIRMATION_REQUIRED } from './persistence/sessionOperations.js';
 
 function ConfirmDialog({ titleId, title, message, confirmLabel, onConfirm, onCancel }) {
   useEffect(() => {
@@ -103,11 +104,10 @@ function pluralize(count, singular, plural) {
 
 export default function GameSessionDetail({
   session,
-  sessionsDocument,
   players = [],
   syncPanel,
   onBack,
-  onApplyDocument,
+  onApplyOperation,
 }) {
   const [teamMode, setTeamMode] = useState('manual');
   const [confirmGenerate, setConfirmGenerate] = useState(false);
@@ -129,9 +129,11 @@ export default function GameSessionDetail({
   const canFinalize = canEnableFinalizeTeamSession(session);
   const finalizeProgressLabel = teamSessionFinalizeProgressLabel(session);
 
-  const persistIfOk = (result) => {
+  const applyOperation = (operation) => onApplyOperation?.(operation);
+
+  const persistIfOk = (operation) => {
+    const result = applyOperation(operation);
     if (result?.ok) {
-      onApplyDocument?.(result.document);
       setConfirmGenerate(false);
       setConfirmReset(false);
       setConfirmFinalize(false);
@@ -140,30 +142,44 @@ export default function GameSessionDetail({
     return result;
   };
 
-  const applyTeamChange = (result) => persistIfOk(result);
+  const applyTeamChange = (operation) => persistIfOk(operation);
 
-  const applyRoundAction = (result) => {
-    if (result?.ok) return persistIfOk(result);
+  const applyRoundAction = (operation) => {
+    const result = persistIfOk(operation);
+    if (result?.ok) return result;
+    const code = result?.errors?.[0]?.code;
+    if (code === 'GENERATE_ROUNDS_CONFIRMATION_REQUIRED') {
+      setConfirmGenerate(true);
+      setActionError(null);
+      return result;
+    }
+    if (code === 'RESET_TO_DRAFT_CONFIRMATION_REQUIRED') {
+      setConfirmReset(true);
+      setActionError(null);
+      return result;
+    }
+    if (code === 'FINALIZE_CONFIRMATION_REQUIRED') {
+      setConfirmFinalize(true);
+      setActionError(null);
+      return result;
+    }
+    if (code === INVALID_CACHE_CONFIRMATION_REQUIRED) return result;
     if (result?.errors?.[0]?.message) setActionError(result.errors[0].message);
     return result;
   };
 
   const requestGenerateRounds = () => {
-    const result = startTeamSessionRoundRobin(sessionsDocument, session.id, {
-      roster: players,
-      generateConfirmed: false,
-    });
-    if (result?.errors?.[0]?.code === 'GENERATE_ROUNDS_CONFIRMATION_REQUIRED') {
-      setConfirmGenerate(true);
-      setActionError(null);
-      return;
-    }
-    applyRoundAction(result);
+    applyRoundAction((document) =>
+      startTeamSessionRoundRobin(document, session.id, {
+        roster: players,
+        generateConfirmed: false,
+      })
+    );
   };
 
   const confirmGenerateRounds = () => {
-    applyRoundAction(
-      startTeamSessionRoundRobin(sessionsDocument, session.id, {
+    applyRoundAction((document) =>
+      startTeamSessionRoundRobin(document, session.id, {
         roster: players,
         generateConfirmed: true,
       })
@@ -171,40 +187,32 @@ export default function GameSessionDetail({
   };
 
   const requestResetToDraft = () => {
-    const result = resetTeamSessionToDraftForTeamEditing(sessionsDocument, session.id, {
-      resetConfirmed: false,
-    });
-    if (result?.errors?.[0]?.code === 'RESET_TO_DRAFT_CONFIRMATION_REQUIRED') {
-      setConfirmReset(true);
-      setActionError(null);
-      return;
-    }
-    applyRoundAction(result);
+    applyRoundAction((document) =>
+      resetTeamSessionToDraftForTeamEditing(document, session.id, {
+        resetConfirmed: false,
+      })
+    );
   };
 
   const confirmResetToDraft = () => {
-    applyRoundAction(
-      resetTeamSessionToDraftForTeamEditing(sessionsDocument, session.id, {
+    applyRoundAction((document) =>
+      resetTeamSessionToDraftForTeamEditing(document, session.id, {
         resetConfirmed: true,
       })
     );
   };
 
   const requestFinalize = () => {
-    const result = finalizeTeamSession(sessionsDocument, session.id, {
-      finalizeConfirmed: false,
-    });
-    if (result?.errors?.[0]?.code === 'FINALIZE_CONFIRMATION_REQUIRED') {
-      setConfirmFinalize(true);
-      setActionError(null);
-      return;
-    }
-    applyRoundAction(result);
+    applyRoundAction((document) =>
+      finalizeTeamSession(document, session.id, {
+        finalizeConfirmed: false,
+      })
+    );
   };
 
   const confirmFinalizeSession = () => {
-    applyRoundAction(
-      finalizeTeamSession(sessionsDocument, session.id, {
+    applyRoundAction((document) =>
+      finalizeTeamSession(document, session.id, {
         finalizeConfirmed: true,
       })
     );
@@ -302,8 +310,8 @@ export default function GameSessionDetail({
           session={session}
           roster={players}
           onReplaceTeams={(teams, { replaceConfirmed } = {}) =>
-            applyTeamChange(
-              replaceSessionTeams(sessionsDocument, session.id, teams, {
+            applyTeamChange((document) =>
+              replaceSessionTeams(document, session.id, teams, {
                 roster: players,
                 replaceConfirmed,
               })
@@ -318,22 +326,22 @@ export default function GameSessionDetail({
         showForm={mode === 'manual'}
         onRequestEdit={() => setTeamMode('manual')}
         onAddTeam={(memberIds) =>
-          applyTeamChange(
-            addSessionTeam(sessionsDocument, session.id, memberIds, {
+          applyTeamChange((document) =>
+            addSessionTeam(document, session.id, memberIds, {
               roster: players,
             })
           )
         }
         onUpdateTeam={(teamId, memberIds) =>
-          applyTeamChange(
-            updateSessionTeam(sessionsDocument, session.id, teamId, memberIds, {
+          applyTeamChange((document) =>
+            updateSessionTeam(document, session.id, teamId, memberIds, {
               roster: players,
             })
           )
         }
         onRemoveTeam={(teamId) =>
-          applyTeamChange(
-            removeSessionTeam(sessionsDocument, session.id, teamId, { roster: players })
+          applyTeamChange((document) =>
+            removeSessionTeam(document, session.id, teamId, { roster: players })
           )
         }
       />
@@ -366,21 +374,21 @@ export default function GameSessionDetail({
         canEditScores={inProgress}
         canEditLineups={inProgress}
         onSaveScore={(roundId, matchId, scoreA, scoreB) =>
-          persistIfOk(
-            setTeamSessionMatchScore(sessionsDocument, session.id, roundId, matchId, scoreA, scoreB)
+          persistIfOk((document) =>
+            setTeamSessionMatchScore(document, session.id, roundId, matchId, scoreA, scoreB)
           )
         }
         onClearScore={(roundId, matchId, { clearConfirmed } = {}) =>
-          persistIfOk(
-            clearTeamSessionMatchScore(sessionsDocument, session.id, roundId, matchId, {
+          persistIfOk((document) =>
+            clearTeamSessionMatchScore(document, session.id, roundId, matchId, {
               clearConfirmed,
             })
           )
         }
         onSaveLineups={(roundId, matchId, lineupAPlayerIds, lineupBPlayerIds) =>
-          persistIfOk(
+          persistIfOk((document) =>
             setTeamSessionMatchLineups(
-              sessionsDocument,
+              document,
               session.id,
               roundId,
               matchId,
