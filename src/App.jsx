@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import PlayerList from './PlayerList';
 import GameSessionsView from './GameSessionsView';
+import PlayerPerformanceView from './PlayerPerformanceView.jsx';
 import GistSyncPanel from './GistSyncPanel';
 import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
@@ -38,7 +39,7 @@ const INITIAL_ROSTER = [];
 
 export default function App() {
   // --- Core Navigation & Drawer States ---
-  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions'
+  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'performance'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // --- Players & History States ---
@@ -521,6 +522,7 @@ export default function App() {
               👥 Elenco Completo ({players.length})
             </button>
             <button
+              type="button"
               onClick={() => { setCurrentView('sessions'); setIsMenuOpen(false); }}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
@@ -529,6 +531,18 @@ export default function App() {
               }}
             >
               🗓️ Encontros
+            </button>
+            <button
+              type="button"
+              onClick={() => { setCurrentView('performance'); setIsMenuOpen(false); }}
+              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+              style={{
+                backgroundColor: currentView === 'performance' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)'
+              }}
+              aria-current={currentView === 'performance' ? 'page' : undefined}
+            >
+              📊 Desempenho
             </button>
             <button
               onClick={() => {
@@ -777,6 +791,10 @@ export default function App() {
               onApplyOperation={requestGameSessionsOperation}
               syncPanel={gistSyncPanel}
             />
+          )}
+
+          {currentView === 'performance' && (
+            <PlayerPerformanceView document={gameSessions} roster={players} />
           )}
 
           {/* 4. HISTORY VIEW */}

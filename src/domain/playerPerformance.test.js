@@ -13,6 +13,7 @@ import {
   getBestPartner,
   getPlayerPartnerPerformance,
   getPlayerPerformance,
+  listPerformancePlayers,
 } from './playerPerformance.js';
 
 const ISO = '2026-09-12T18:00:00.000Z';
@@ -1061,5 +1062,79 @@ describe('cenário realista 2x2 e 6x6 com 6 contra 5', () => {
     });
     expect(getBestPartner(index, 'andre', { lineupSize: 2 }).partnerId).toBe('ana');
     expect(getBestPartner(index, 'andre', { lineupSize: 6 }).partnerId).toBe('bruno');
+  });
+});
+
+describe('listPerformancePlayers', () => {
+  it('inclui jogadores atuais sem partidas e ordena por nome e ID', () => {
+    const listed = listPerformancePlayers(indexOf(documentOf()));
+    expect(listed.every((player) => player.matches === 0)).toBe(true);
+    expect(listed.every((player) => player.isCurrentRosterPlayer)).toBe(true);
+    expect(listed.map((player) => player.playerId)).toEqual([
+      'ana',
+      'andre',
+      'bruno',
+      'carla',
+      'diego',
+      'erika',
+      'fabio',
+      'gabi',
+      'geo',
+      'helen',
+      'luiza',
+    ]);
+    expect(listed.find((player) => player.playerId === 'andre').playerName).toBe('André');
+    expect(() => {
+      listed.push({ playerId: 'x' });
+    }).toThrow();
+  });
+
+  it('lista jogador histórico excluído com snapshot e não o recria no elenco', () => {
+    const older = doublesSession({
+      id: 'old',
+      date: '2026-09-10',
+      lineupA: [member('ghost', 'Nome Antigo'), member('ana', 'Ana')],
+    });
+    older.teams[0] = team('t1', [member('ghost', 'Nome Antigo'), member('ana', 'Ana')]);
+    const newer = doublesSession({
+      id: 'new',
+      date: '2026-09-12',
+      updatedAt: LATER,
+      lineupA: [member('ghost', 'Nome Recente'), member('ana', 'Ana')],
+    });
+    newer.teams[0] = team('t1', [member('ghost', 'Nome Recente'), member('ana', 'Ana')]);
+    const currentRoster = roster.filter((player) => player.id !== 'ghost');
+    const listed = listPerformancePlayers(indexOf(documentOf(older, newer), currentRoster));
+    const ghost = listed.find((player) => player.playerId === 'ghost');
+    expect(ghost).toMatchObject({
+      playerId: 'ghost',
+      playerName: 'Nome Recente',
+      isCurrentRosterPlayer: false,
+      matches: 2,
+    });
+    expect(currentRoster.some((player) => player.id === 'ghost')).toBe(false);
+  });
+
+  it('mantém IDs diferentes com o mesmo nome como pessoas distintas', () => {
+    const twins = doublesSession({
+      lineupA: [member('andre-1', 'André'), member('ana', 'Ana')],
+      lineupB: [member('andre-2', 'André'), member('gabi', 'Gabi')],
+    });
+    twins.teams = [
+      team('t1', [member('andre-1', 'André'), member('ana', 'Ana')]),
+      team('t2', [member('andre-2', 'André'), member('gabi', 'Gabi')]),
+    ];
+    const listed = listPerformancePlayers(
+      indexOf(documentOf(twins), [
+        { id: 'andre-1', name: 'André' },
+        { id: 'andre-2', name: 'André' },
+        { id: 'ana', name: 'Ana' },
+        { id: 'gabi', name: 'Gabi' },
+      ])
+    );
+    const andres = listed.filter((player) => player.playerName === 'André');
+    expect(andres.map((player) => player.playerId)).toEqual(['andre-1', 'andre-2']);
+    expect(andres[0].matches).toBe(1);
+    expect(andres[1].matches).toBe(1);
   });
 });

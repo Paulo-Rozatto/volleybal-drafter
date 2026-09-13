@@ -498,3 +498,35 @@ export function getBestPartner(index, playerId, filters) {
   const partners = getPlayerPartnerPerformance(index, playerId, filters);
   return partners[0] ?? null;
 }
+
+/**
+ * Lista jogadores do elenco atual e IDs históricos conhecidos pelo índice.
+ * Não recria excluídos no elenco e não expõe o estado interno.
+ *
+ * @param {object} index
+ */
+export function listPerformancePlayers(index) {
+  const state = requireIndex(index);
+  const ids = new Set([
+    ...state.rosterById.keys(),
+    ...state.history.keys(),
+    ...state.players.keys(),
+  ]);
+
+  const listed = [...ids].map((playerId) =>
+    Object.freeze({
+      playerId,
+      playerName: resolveDisplayName(playerId, state.rosterById, state.history),
+      isCurrentRosterPlayer: state.rosterById.has(playerId),
+      matches: state.players.get(playerId)?.totals.matches ?? 0,
+    })
+  );
+
+  listed.sort((left, right) => {
+    const byName = NAME_COLLATOR.compare(left.playerName, right.playerName);
+    if (byName !== 0) return byName;
+    return String(left.playerId).localeCompare(String(right.playerId));
+  });
+
+  return Object.freeze(listed);
+}
