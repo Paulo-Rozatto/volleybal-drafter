@@ -209,6 +209,7 @@ function SessionDetailsForm({
 
 export default function GameSessionsView({
   sessions = [],
+  document = null,
   players = [],
   cacheInvalid = false,
   cacheError = null,
@@ -368,6 +369,7 @@ export default function GameSessionsView({
       <>
         <GameSessionDetail
           session={openSession}
+          document={document}
           players={players}
           syncPanel={syncPanel}
           onBack={() => setOpenSessionId(null)}

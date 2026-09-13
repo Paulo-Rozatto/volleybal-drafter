@@ -46,6 +46,61 @@ function fail(errors) {
   return { ok: false, errors, index: null };
 }
 
+function error(code, message, extras = {}) {
+  return { code, message, ...extras };
+}
+
+function collectParticipantIds(into, members) {
+  (members ?? []).forEach((member) => {
+    if (typeof member?.playerId === 'string' && member.playerId.trim() !== '') {
+      into.add(member.playerId);
+    }
+  });
+}
+
+function listedPlayer(state, playerId) {
+  return Object.freeze({
+    playerId,
+    playerName: resolveDisplayName(playerId, state.rosterById, state.history),
+    isCurrentRosterPlayer: state.rosterById.has(playerId),
+    matches: state.players.get(playerId)?.totals.matches ?? 0,
+  });
+}
+
+function sortListedPlayers(listed) {
+  listed.sort((left, right) => {
+    const byName = NAME_COLLATOR.compare(left.playerName, right.playerName);
+    if (byName !== 0) return byName;
+    return String(left.playerId).localeCompare(String(right.playerId));
+  });
+  return Object.freeze(listed);
+}
+
+function assertPlayerId(playerId, label) {
+  if (typeof playerId !== 'string' || playerId.trim() === '') {
+    throw new TypeError(label);
+  }
+}
+
+function normalizeParticipantIds(participantIds) {
+  if (participantIds == null) return [];
+  if (!Array.isArray(participantIds)) {
+    throw new TypeError('A coorte de participantes é inválida.');
+  }
+  const unique = [];
+  const seen = new Set();
+  for (const id of participantIds) {
+    if (typeof id !== 'string' || id.trim() === '' || seen.has(id)) continue;
+    seen.add(id);
+    unique.push(id);
+  }
+  return unique;
+}
+
+function failParticipants(errors) {
+  return { ok: false, errors, participantIds: null, participants: null };
+}
+
 function requireIndex(index) {
   const state = internals.get(index);
   if (!state) {
@@ -333,6 +388,7 @@ function listScopedPartners(state, playerId, { lineupSize, partnerId }) {
 /**
  * Constrói um índice imutável de desempenho a partir de um documento V2.
  * Não muta `document` nem `roster` e não persiste agregados.
+ * Todas as sessões entram: a coorte de um encontro só filtra quem é exibido.
  *
  * @param {unknown} document
  * @param {Array<{ id?: string, name?: string }> | null} [roster]
@@ -438,7 +494,11 @@ export function buildPlayerPerformanceIndex(document, roster = []) {
     skippedPendingMatches,
     skippedInvalidMatches,
   });
-  internals.set(index, { players, history, rosterById });
+  internals.set(index, {
+    players,
+    history,
+    rosterById,
+  });
   return okIndex(index);
 }
 
@@ -512,21 +572,203 @@ export function listPerformancePlayers(index) {
     ...state.history.keys(),
     ...state.players.keys(),
   ]);
+  return sortListedPlayers([...ids].map((playerId) => listedPlayer(state, playerId)));
+}
 
-  const listed = [...ids].map((playerId) =>
+/**
+ * Coorte do encontro: união de times-base e lineups, por playerId.
+ * Não calcula métricas; a fonte dos números é o índice global.
+ *
+ * @param {unknown} document
+ * @param {Array<{ id?: string, name?: string }> | null} [roster]
+ * @param {string} sessionId
+ */
+export function listSessionParticipants(document, roster = [], sessionId) {
+  if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+    return failParticipants([
+      error('SESSION_ID_INVALID', 'O encontro da análise precisa de um ID válido.'),
+    ]);
+  }
+
+  const validation = validateV2Document(document);
+  if (!validation.ok) {
+    const fatal = structuralErrors(validation.errors);
+    if (fatal.length > 0) return failParticipants(fatal);
+  }
+
+  const session = (document.sessions ?? []).find((item) => item?.id === sessionId);
+  if (!session) {
+    return failParticipants([
+      error('SESSION_NOT_FOUND', 'Encontro não encontrado.', { sessionId }),
+    ]);
+  }
+
+  const ids = new Set();
+  const history = new Map();
+  const rosterById = new Map(
+    (Array.isArray(roster) ? roster : [])
+      .filter((player) => typeof player?.id === 'string' && player.id.trim())
+      .map((player) => [player.id, player])
+  );
+  const sessionRecency = {
+    date: session?.date,
+    updatedAt: session?.updatedAt,
+    createdAt: session?.createdAt,
+    sessionIndex: 0,
+  };
+
+  (session.teams ?? []).forEach((team, teamIndex) => {
+    collectParticipantIds(ids, team?.members);
+    rememberGroupNames(history, team?.members, {
+      ...sessionRecency,
+      roundIndex: -2,
+      matchIndex: -2,
+      sideIndex: teamIndex,
+    });
+  });
+  (session.rounds ?? []).forEach((round, roundIndex) => {
+    (round?.matches ?? []).forEach((match, matchIndex) => {
+      collectParticipantIds(ids, match?.lineupA);
+      collectParticipantIds(ids, match?.lineupB);
+      rememberGroupNames(history, match?.lineupA, {
+        ...sessionRecency,
+        roundIndex,
+        matchIndex,
+        sideIndex: 0,
+      });
+      rememberGroupNames(history, match?.lineupB, {
+        ...sessionRecency,
+        roundIndex,
+        matchIndex,
+        sideIndex: 1,
+      });
+    });
+  });
+
+  const participantIds = Object.freeze([...ids]);
+  const participants = sortListedPlayers(
+    participantIds.map((playerId) =>
+      Object.freeze({
+        playerId,
+        playerName: resolveDisplayName(playerId, rosterById, history),
+        isCurrentRosterPlayer: rosterById.has(playerId),
+      })
+    )
+  );
+
+  return { ok: true, errors: [], participantIds, participants };
+}
+
+/**
+ * Identidade dos participantes da coorte, com nomes do índice global.
+ *
+ * @param {object} index
+ * @param {string[]} participantIds
+ */
+export function listCohortPlayers(index, participantIds) {
+  const state = requireIndex(index);
+  return sortListedPlayers(
+    normalizeParticipantIds(participantIds).map((playerId) => listedPlayer(state, playerId))
+  );
+}
+
+/**
+ * União das modalidades históricas dos participantes da coorte.
+ *
+ * @param {object} index
+ * @param {string[]} participantIds
+ */
+export function listCohortModalities(index, participantIds) {
+  requireIndex(index);
+  const sizes = new Set();
+  for (const playerId of normalizeParticipantIds(participantIds)) {
+    for (const size of getPlayerPerformance(index, playerId).modalities) {
+      sizes.add(size);
+    }
+  }
+  return Object.freeze([...sizes].sort((left, right) => left - right));
+}
+
+/**
+ * Desempenho histórico de cada participante da coorte.
+ *
+ * @param {object} index
+ * @param {string[]} participantIds
+ * @param {{ lineupSize?: number | null }} [filters]
+ */
+export function getCohortPlayerPerformances(index, participantIds, filters) {
+  const listed = listCohortPlayers(index, participantIds);
+  return Object.freeze(
+    listed.map((player) =>
+      Object.freeze({
+        ...player,
+        ...getPlayerPerformance(index, player.playerId, filters),
+      })
+    )
+  );
+}
+
+/**
+ * Parceria histórica entre dois jogadores, consultada no índice global.
+ *
+ * @param {object} index
+ * @param {string} playerId
+ * @param {string} partnerId
+ * @param {{ lineupSize?: number | null }} [filters]
+ */
+export function getCohortPartnershipPerformance(index, playerId, partnerId, filters) {
+  const state = requireIndex(index);
+  assertPlayerId(playerId, 'O jogador da parceria é inválido.');
+  assertPlayerId(partnerId, 'O parceiro da parceria é inválido.');
+  const { lineupSize } = assertQueryFilters(filters);
+  const metrics = getPlayerPerformance(index, playerId, { lineupSize, partnerId });
+  return Object.freeze({
+    ...metrics,
+    partnerId,
+    partnerName: resolveDisplayName(partnerId, state.rosterById, state.history),
+  });
+}
+
+/**
+ * Matriz simétrica da coorte com parcerias do histórico completo.
+ *
+ * @param {object} index
+ * @param {string[]} participantIds
+ * @param {{ lineupSize?: number | null }} [filters]
+ */
+export function getCohortPartnershipMatrix(index, participantIds, filters) {
+  const state = requireIndex(index);
+  const { lineupSize } = assertQueryFilters(filters);
+  const players = listCohortPlayers(index, participantIds);
+
+  const rows = players.map((rowPlayer) =>
     Object.freeze({
-      playerId,
-      playerName: resolveDisplayName(playerId, state.rosterById, state.history),
-      isCurrentRosterPlayer: state.rosterById.has(playerId),
-      matches: state.players.get(playerId)?.totals.matches ?? 0,
+      playerId: rowPlayer.playerId,
+      playerName: rowPlayer.playerName,
+      cells: Object.freeze(
+        players.map((columnPlayer) => {
+          if (rowPlayer.playerId === columnPlayer.playerId) {
+            return Object.freeze({
+              playerId: rowPlayer.playerId,
+              partnerId: columnPlayer.playerId,
+              matches: null,
+              diagonal: true,
+            });
+          }
+          const metrics = partnerMetrics(state, rowPlayer.playerId, columnPlayer.playerId, lineupSize);
+          return Object.freeze({
+            playerId: rowPlayer.playerId,
+            partnerId: columnPlayer.playerId,
+            matches: metrics.matches,
+            diagonal: false,
+          });
+        })
+      ),
     })
   );
 
-  listed.sort((left, right) => {
-    const byName = NAME_COLLATOR.compare(left.playerName, right.playerName);
-    if (byName !== 0) return byName;
-    return String(left.playerId).localeCompare(String(right.playerId));
+  return Object.freeze({
+    players,
+    rows: Object.freeze(rows),
   });
-
-  return Object.freeze(listed);
 }

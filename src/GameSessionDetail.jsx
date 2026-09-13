@@ -2,6 +2,15 @@ import React, { useState } from 'react';
 import AutomaticTeamBuilder from './AutomaticTeamBuilder.jsx';
 import TeamBuilder from './TeamBuilder.jsx';
 import RoundBoard from './RoundBoard.jsx';
+import SessionPerformanceView from './SessionPerformanceView.jsx';
+import {
+  SESSION_DETAIL_DEFAULT_VIEW,
+  SESSION_DETAIL_GAMES_VIEW,
+  SESSION_DETAIL_PERFORMANCE_VIEW,
+  SESSION_GAMES_TAB_LABEL,
+  SESSION_PERFORMANCE_TAB_LABEL,
+  nextSessionDetailView,
+} from './sessionPerformancePresentation.js';
 import { generateRoundsBlockedReason } from './teamFormationUi.js';
 import {
   alterTeamsLabel,
@@ -48,6 +57,7 @@ function pluralize(count, singular, plural) {
 
 export default function GameSessionDetail({
   session,
+  document = null,
   players = [],
   syncPanel,
   onBack,
@@ -58,10 +68,19 @@ export default function GameSessionDetail({
   deleteButtonRef,
 }) {
   const [teamMode, setTeamMode] = useState('manual');
+  const [detailView, setDetailView] = useState(SESSION_DETAIL_DEFAULT_VIEW);
+  const [viewSessionId, setViewSessionId] = useState(session?.id);
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmFinalize, setConfirmFinalize] = useState(false);
   const [actionError, setActionError] = useState(null);
+
+  if (session?.id !== viewSessionId) {
+    setViewSessionId(session?.id);
+    setDetailView(SESSION_DETAIL_DEFAULT_VIEW);
+  }
+
+  const showGames = detailView === SESSION_DETAIL_GAMES_VIEW;
 
   const teamSize = resolveTeamSize(session);
   const units = teamUnitNoun(teamSize, 2);
@@ -240,6 +259,52 @@ export default function GameSessionDetail({
         </p>
       </div>
 
+      <div
+        className="flex rounded-lg p-1 gap-1"
+        style={{ backgroundColor: 'var(--bg-subtle)' }}
+        role="tablist"
+        aria-label="Visualização do encontro"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={showGames}
+          onClick={() => setDetailView(nextSessionDetailView(detailView, SESSION_DETAIL_GAMES_VIEW))}
+          className="flex-1 py-2 text-sm font-bold rounded-md transition cursor-pointer"
+          style={{
+            backgroundColor: showGames ? 'var(--primary)' : 'transparent',
+            color: showGames ? 'var(--text-inverse)' : 'var(--text-muted)',
+          }}
+        >
+          {SESSION_GAMES_TAB_LABEL}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!showGames}
+          onClick={() =>
+            setDetailView(nextSessionDetailView(detailView, SESSION_DETAIL_PERFORMANCE_VIEW))
+          }
+          className="flex-1 py-2 text-sm font-bold rounded-md transition cursor-pointer"
+          style={{
+            backgroundColor: !showGames ? 'var(--primary)' : 'transparent',
+            color: !showGames ? 'var(--text-inverse)' : 'var(--text-muted)',
+          }}
+        >
+          {SESSION_PERFORMANCE_TAB_LABEL}
+        </button>
+      </div>
+
+      {!showGames && (
+        <SessionPerformanceView
+          document={document}
+          roster={players}
+          sessionId={session.id}
+        />
+      )}
+
+      {showGames && (
+      <>
       {inProgress && canFinalize && (
         <div
           className="p-4 rounded-xl border"
@@ -416,6 +481,8 @@ export default function GameSessionDetail({
             {alterTeamsLabel(teamSize)}
           </button>
         </div>
+      )}
+      </>
       )}
 
       {confirmGenerate && (

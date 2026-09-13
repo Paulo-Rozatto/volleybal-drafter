@@ -784,6 +784,7 @@ export default function App() {
           {currentView === 'sessions' && (
             <GameSessionsView
               sessions={gameSessions.sessions}
+              document={gameSessions}
               players={players}
               cacheInvalid={Boolean(localCacheError)}
               cacheError={localCacheError}
