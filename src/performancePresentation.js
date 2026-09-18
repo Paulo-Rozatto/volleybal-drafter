@@ -184,3 +184,68 @@ export function modalitySectionTitle({ playerName, partnerName = null } = {}) {
   if (partnerName) return `Desempenho de ${playerName} com ${partnerName} por modalidade`;
   return 'Desempenho por modalidade';
 }
+
+export const PERFORMANCE_PLAYER_TAB = 'player';
+export const PERFORMANCE_RANKING_TAB = 'ranking';
+export const PERFORMANCE_PLAYER_TAB_LABEL = 'Jogador';
+export const PERFORMANCE_RANKING_TAB_LABEL = 'Ranking';
+export const MATCH_HISTORY_EMPTY_MESSAGE = 'Nenhuma partida neste recorte.';
+export const RANKING_INTRO =
+  'Compare jogadores com as partidas válidas do histórico. O período usa a data do encontro.';
+export const RANKING_PLAYER_FILTER_NOTE =
+  'A seleção limita quem aparece no ranking. As estatísticas de cada jogador incluem jogos contra qualquer adversário no período.';
+
+export function formatMatchSideNames(members) {
+  return (Array.isArray(members) ? members : [])
+    .map((member) => {
+      const name = typeof member?.playerName === 'string' ? member.playerName.trim() : '';
+      return name === '' ? 'Jogador' : name;
+    })
+    .join(' / ');
+}
+
+export function formatMatchHistoryDate(sessionDate) {
+  if (typeof sessionDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(sessionDate)) {
+    return sessionDate ?? '';
+  }
+  const [year, month, day] = sessionDate.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+export function formatMatchHistoryScoreline(entry) {
+  const pointsFor = Number.isFinite(Number(entry?.pointsFor)) ? entry.pointsFor : entry?.scoreA;
+  const pointsAgainst = Number.isFinite(Number(entry?.pointsAgainst))
+    ? entry.pointsAgainst
+    : entry?.scoreB;
+  return `${formatMatchSideNames(entry?.teammates)} ${pointsFor} × ${pointsAgainst} ${formatMatchSideNames(entry?.opponents)}`;
+}
+
+export function formatMatchHistoryResult(result) {
+  if (result === 'win') return 'Vitória';
+  if (result === 'loss') return 'Derrota';
+  return '';
+}
+
+export function rankingSortOptions() {
+  return Object.freeze([
+    Object.freeze({ value: 'name', label: 'Nome' }),
+    Object.freeze({ value: 'matches', label: 'Jogos' }),
+    Object.freeze({ value: 'wins', label: 'Vitórias' }),
+    Object.freeze({ value: 'losses', label: 'Derrotas' }),
+    Object.freeze({ value: 'winRate', label: 'Percentual de vitórias' }),
+    Object.freeze({ value: 'pointsFor', label: 'Pontos feitos' }),
+    Object.freeze({ value: 'pointsAgainst', label: 'Pontos sofridos' }),
+    Object.freeze({ value: 'pointDifference', label: 'Saldo' }),
+  ]);
+}
+
+export function resolveRankingPlayerIds(selectedIds, players) {
+  const allowed = new Set((players ?? []).map((player) => player.playerId));
+  const selected = (selectedIds ?? []).filter((id) => allowed.has(id));
+  return selected.length === 0 ? null : Object.freeze(selected);
+}
+
+export function nextPerformanceTab(currentTab, nextTab) {
+  if (nextTab === PERFORMANCE_PLAYER_TAB || nextTab === PERFORMANCE_RANKING_TAB) return nextTab;
+  return currentTab === PERFORMANCE_RANKING_TAB ? PERFORMANCE_RANKING_TAB : PERFORMANCE_PLAYER_TAB;
+}

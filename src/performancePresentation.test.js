@@ -24,10 +24,16 @@ import {
   normalizeSearchText,
   partnerFilterOptions,
   rankingQueryFilters,
+  rankingSortOptions,
   resolvePartnerFilter,
+  resolveRankingPlayerIds,
   resolveSelectedPlayerId,
   sortPartnersForFilter,
   summaryQueryFilters,
+  formatMatchHistoryDate,
+  formatMatchHistoryResult,
+  formatMatchHistoryScoreline,
+  nextPerformanceTab,
 } from './performancePresentation.js';
 
 const ISO = '2026-09-12T18:00:00.000Z';
@@ -348,15 +354,52 @@ describe('integração com o domínio', () => {
 describe('isolamento da tela', () => {
   it('não importa persistência, Gist nem localStorage', () => {
     const view = readFileSync(new URL('./PlayerPerformanceView.jsx', import.meta.url), 'utf8');
+    const rankingView = readFileSync(new URL('./PlayerRankingView.jsx', import.meta.url), 'utf8');
+    const hub = readFileSync(new URL('./PerformanceHub.jsx', import.meta.url), 'utf8');
     const presentation = readFileSync(new URL('./performancePresentation.js', import.meta.url), 'utf8');
     const app = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-    const combined = `${view}\n${presentation}`;
+    const combined = `${view}\n${rankingView}\n${hub}\n${presentation}`;
     expect(combined).not.toMatch(/localStorage/);
     expect(combined).not.toMatch(/markPendingGistChanges/);
     expect(combined).not.toMatch(/gistService/);
     expect(combined).not.toMatch(/persistLocalGameSessions/);
     expect(combined).not.toMatch(/applyGameSessionsOperation/);
-    expect(app).toMatch('<PlayerPerformanceView document={gameSessions} roster={players} />');
-    expect(app).not.toMatch(/PlayerPerformanceView[\s\S]{0,200}onApplyOperation/);
+    expect(app).toMatch('<PerformanceHub document={gameSessions} roster={players} />');
+    expect(app).not.toMatch(/PerformanceHub[\s\S]{0,200}onApplyOperation/);
+  });
+});
+
+describe('histórico de partidas e ranking', () => {
+  it('formata data, placar do ponto de vista do jogador e resultado', () => {
+    expect(formatMatchHistoryDate('2026-08-31')).toBe('31/08/2026');
+    expect(
+      formatMatchHistoryScoreline({
+        teammates: [{ playerName: 'André' }, { playerName: 'Paulo' }],
+        opponents: [{ playerName: 'João' }, { playerName: 'Pedro' }],
+        pointsFor: 21,
+        pointsAgainst: 17,
+        scoreA: 17,
+        scoreB: 21,
+      })
+    ).toBe('André / Paulo 21 × 17 João / Pedro');
+    expect(formatMatchHistoryResult('win')).toBe('Vitória');
+    expect(formatMatchHistoryResult('loss')).toBe('Derrota');
+  });
+
+  it('expõe opções de ordenação e trata seleção vazia como todos os jogadores', () => {
+    expect(rankingSortOptions().map((item) => item.value)).toEqual([
+      'name',
+      'matches',
+      'wins',
+      'losses',
+      'winRate',
+      'pointsFor',
+      'pointsAgainst',
+      'pointDifference',
+    ]);
+    const players = [{ playerId: 'andre' }, { playerId: 'paulo' }];
+    expect(resolveRankingPlayerIds([], players)).toBeNull();
+    expect(resolveRankingPlayerIds(['andre', 'missing'], players)).toEqual(['andre']);
+    expect(nextPerformanceTab('player', 'ranking')).toBe('ranking');
   });
 });

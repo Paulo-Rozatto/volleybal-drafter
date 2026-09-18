@@ -24,6 +24,7 @@ export default function MatchScoreEditor({
   teams = [],
   teamSize = 2,
   canEdit = false,
+  canClear = false,
   onSave,
   onClear,
 }) {
@@ -184,7 +185,7 @@ export default function MatchScoreEditor({
               >
                 {pending ? 'Adicionar placar' : 'Editar placar'}
               </button>
-              {!pending && (
+              {canClear && !pending && (
                 <button
                   type="button"
                   onClick={requestClear}

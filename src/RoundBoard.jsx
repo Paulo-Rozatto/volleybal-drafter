@@ -8,6 +8,7 @@ export default function RoundBoard({
   session,
   roster = [],
   canEditScores = false,
+  canClearScores = false,
   canEditLineups = false,
   onSaveScore,
   onClearScore,
@@ -48,6 +49,7 @@ export default function RoundBoard({
                   teams={teams}
                   teamSize={teamSize}
                   canEdit={canEditScores}
+                  canClear={canClearScores}
                   onSave={(scoreA, scoreB) => onSaveScore?.(round.id, match.id, scoreA, scoreB)}
                   onClear={(options) => onClearScore?.(round.id, match.id, options)}
                 />

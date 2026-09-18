@@ -27,6 +27,8 @@ import {
 } from './teamPresentation.js';
 import {
   addSessionTeam,
+  canClearSessionScores,
+  canEditSessionScores,
   canEditSessionTeams,
   canEnableFinalizeTeamSession,
   canGenerateTeamSessionRounds,
@@ -417,7 +419,8 @@ export default function GameSessionDetail({
       <RoundBoard
         session={session}
         roster={players}
-        canEditScores={inProgress}
+        canEditScores={canEditSessionScores(session)}
+        canClearScores={canClearSessionScores(session)}
         canEditLineups={inProgress}
         onSaveScore={(roundId, matchId, scoreA, scoreB) =>
           persistIfOk((document) =>

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { TEAM_SESSION_SCHEMA_VERSION } from './domain/teamSession.js';
+import { TEAM_SESSION_SCHEMA_VERSION, validateV2Document } from './domain/teamSession.js';
 import { countSessionMatches } from './domain/sessionValidation.js';
 import {
   addSessionTeam,
   appendDraftTeamSession,
   availablePlayersForTeams,
+  canClearSessionScores,
+  canEditSessionScores,
   canEditSessionTeams,
   canEnableFinalizeTeamSession,
   canGenerateTeamSessionRounds,
@@ -760,6 +762,67 @@ describe('placares V2', () => {
     expect(teamSessionIsReadyToFinalize(cleared.session)).toBe(false);
   });
 
+  it('edita placar de encontro finalizado sem reabrir nem permitir limpar', () => {
+    const live = inProgressDocument();
+    const round = live.sessions[0].rounds[0];
+    const match = round.matches[0];
+    const scored = setTeamSessionMatchScore(live, 'session-1', round.id, match.id, 21, 18, {
+      now: NOW,
+    });
+    const finished = finalizeTeamSession(scored.document, 'session-1', {
+      now: LATER,
+      finalizeConfirmed: true,
+    });
+    const snapshot = JSON.parse(JSON.stringify(finished.document));
+    const later = () => new Date('2026-09-12T21:00:00.000Z');
+
+    expect(canEditSessionScores(finished.session)).toBe(true);
+    expect(canClearSessionScores(finished.session)).toBe(false);
+    expect(canEditSessionScores(scored.session)).toBe(true);
+    expect(canClearSessionScores(scored.session)).toBe(true);
+    expect(canEditSessionScores({ status: 'draft' })).toBe(false);
+
+    const edited = setTeamSessionMatchScore(
+      finished.document,
+      'session-1',
+      round.id,
+      match.id,
+      25,
+      20,
+      { now: later }
+    );
+
+    expect(edited.ok).toBe(true);
+    expect(edited.session.status).toBe('finished');
+    expect(edited.session.rounds[0].matches[0]).toMatchObject({ scoreA: 25, scoreB: 20 });
+    expect(edited.session.rounds[0].matches[0].lineupA).toEqual(match.lineupA);
+    expect(edited.session.rounds[0].matches[0].lineupB).toEqual(match.lineupB);
+    expect(edited.session.teams).toEqual(finished.session.teams);
+    expect(edited.session.updatedAt).toBe('2026-09-12T21:00:00.000Z');
+    expect(validateV2Document(edited.document).ok).toBe(true);
+    expect(finished.document).toEqual(snapshot);
+
+    expect(
+      setTeamSessionMatchScore(finished.document, 'session-1', round.id, match.id, 21, 21).errors[0]
+        .code
+    ).toBe('SCORE_TIE');
+    expect(
+      clearTeamSessionMatchScore(edited.document, 'session-1', round.id, match.id, {
+        clearConfirmed: true,
+      }).errors[0].code
+    ).toBe('SESSION_FINISHED');
+    expect(
+      setTeamSessionMatchScore(
+        documentWith(draftSession({ teams: twoTeams })),
+        'session-1',
+        round.id,
+        match.id,
+        21,
+        18
+      ).errors[0].code
+    ).toBe('SESSION_NOT_IN_PROGRESS');
+  });
+
   it('reutiliza validateScore e não muta a entrada', () => {
     const original = inProgressDocument();
     const snapshot = JSON.parse(JSON.stringify(original));
@@ -1246,16 +1309,20 @@ describe('finalização de encontros V2', () => {
         { roster }
       ).errors[0].code
     ).toBe('SESSION_FINISHED');
-    expect(
-      setTeamSessionMatchScore(
-        finished.document,
-        'session-1',
-        session.rounds[0].id,
-        match.id,
-        25,
-        20
-      ).errors[0].code
-    ).toBe('SESSION_FINISHED');
+    const editedScore = setTeamSessionMatchScore(
+      finished.document,
+      'session-1',
+      session.rounds[0].id,
+      match.id,
+      25,
+      20,
+      { now: LATER }
+    );
+    expect(editedScore.ok).toBe(true);
+    expect(editedScore.session.status).toBe('finished');
+    expect(editedScore.session.rounds[0].matches[0]).toMatchObject({ scoreA: 25, scoreB: 20 });
+    expect(editedScore.session.teams).toEqual(session.teams);
+    expect(editedScore.session.rounds[0].matches[0].lineupA).toEqual(match.lineupA);
     expect(
       clearTeamSessionMatchScore(finished.document, 'session-1', session.rounds[0].id, match.id, {
         clearConfirmed: true,

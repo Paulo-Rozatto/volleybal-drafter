@@ -44,7 +44,7 @@ export const CLEAR_SCORE_CONFIRMATION_MESSAGE =
   'Remover o placar desta partida e marcá-la novamente como pendente?';
 
 export const FINALIZE_TEAM_SESSION_CONFIRMATION_MESSAGE =
-  'Depois da finalização, times, escalações e placares ficarão bloqueados para edição.';
+  'Depois da finalização, times e escalações ficarão bloqueados. Os placares ainda poderão ser corrigidos.';
 
 export const FORMAT_CHANGE_CONFIRMATION_REQUIRED = 'FORMAT_CHANGE_CONFIRMATION_REQUIRED';
 export const FORMAT_CHANGE_CONFIRMATION_MESSAGE =
@@ -244,6 +244,14 @@ function withUpdatedTeams(session, teams, now) {
 
 export function canEditSessionTeams(session) {
   return session?.status === 'draft' && (!Array.isArray(session?.rounds) || session.rounds.length === 0);
+}
+
+export function canEditSessionScores(session) {
+  return session?.status === 'in_progress' || session?.status === 'finished';
+}
+
+export function canClearSessionScores(session) {
+  return session?.status === 'in_progress';
 }
 
 function lockedResult(session) {
@@ -772,8 +780,13 @@ export function resetTeamSessionToDraftForTeamEditing(document, sessionId, optio
   });
 }
 
-const SCORE_LOCK_MESSAGES = {
+const SCORE_EDIT_LOCK_MESSAGES = {
   finished: 'Não é possível alterar placares de um encontro finalizado.',
+  notInProgress: 'Só é possível alterar placares em um encontro em andamento ou finalizado.',
+};
+
+const SCORE_CLEAR_LOCK_MESSAGES = {
+  finished: 'Não é possível remover o placar de um encontro finalizado.',
   notInProgress: 'Só é possível alterar placares em um encontro em andamento.',
 };
 
@@ -782,19 +795,24 @@ const LINEUP_LOCK_MESSAGES = {
   notInProgress: 'Só é possível alterar escalações em um encontro em andamento.',
 };
 
-function locateInProgressMatch(document, sessionId, roundId, matchId, messages = SCORE_LOCK_MESSAGES) {
-  const session = findSession(document, sessionId);
-  if (!session) {
-    return fail([error('SESSION_NOT_FOUND', 'Encontro não encontrado.')]);
-  }
+function rejectUnlessStatuses(session, allowedStatuses, messages) {
+  if (allowedStatuses.includes(session.status)) return null;
 
   if (session.status === 'finished') {
     return fail([error('SESSION_FINISHED', messages.finished)]);
   }
 
-  if (session.status !== 'in_progress') {
-    return fail([error('SESSION_NOT_IN_PROGRESS', messages.notInProgress)]);
+  return fail([error('SESSION_NOT_IN_PROGRESS', messages.notInProgress)]);
+}
+
+function locateSessionMatch(document, sessionId, roundId, matchId, allowedStatuses, messages) {
+  const session = findSession(document, sessionId);
+  if (!session) {
+    return fail([error('SESSION_NOT_FOUND', 'Encontro não encontrado.')]);
   }
+
+  const locked = rejectUnlessStatuses(session, allowedStatuses, messages);
+  if (locked) return locked;
 
   const round = (session.rounds ?? []).find((item) => item?.id === roundId);
   if (!round) {
@@ -807,6 +825,32 @@ function locateInProgressMatch(document, sessionId, roundId, matchId, messages =
   }
 
   return { ok: true, errors: [], session, round, match };
+}
+
+function locateInProgressMatch(document, sessionId, roundId, matchId, messages = LINEUP_LOCK_MESSAGES) {
+  return locateSessionMatch(document, sessionId, roundId, matchId, ['in_progress'], messages);
+}
+
+function locateScoreEditableMatch(document, sessionId, roundId, matchId) {
+  return locateSessionMatch(
+    document,
+    sessionId,
+    roundId,
+    matchId,
+    ['in_progress', 'finished'],
+    SCORE_EDIT_LOCK_MESSAGES
+  );
+}
+
+function locateScoreClearableMatch(document, sessionId, roundId, matchId) {
+  return locateSessionMatch(
+    document,
+    sessionId,
+    roundId,
+    matchId,
+    ['in_progress'],
+    SCORE_CLEAR_LOCK_MESSAGES
+  );
 }
 
 function withUpdatedMatchScore(session, roundId, matchId, scoreA, scoreB, now) {
@@ -848,7 +892,7 @@ export function setTeamSessionMatchScore(
   scoreB,
   options = {}
 ) {
-  const located = locateInProgressMatch(document, sessionId, roundId, matchId);
+  const located = locateScoreEditableMatch(document, sessionId, roundId, matchId);
   if (!located.ok) return located;
 
   if (scoreA === null && scoreB === null) {
@@ -865,7 +909,7 @@ export function setTeamSessionMatchScore(
 
 export function clearTeamSessionMatchScore(document, sessionId, roundId, matchId, options = {}) {
   const { now, clearConfirmed = false } = options;
-  const located = locateInProgressMatch(document, sessionId, roundId, matchId);
+  const located = locateScoreClearableMatch(document, sessionId, roundId, matchId);
   if (!located.ok) return located;
 
   if (!clearConfirmed) {

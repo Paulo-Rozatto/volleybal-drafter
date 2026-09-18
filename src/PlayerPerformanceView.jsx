@@ -3,6 +3,7 @@ import {
   buildPlayerPerformanceIndex,
   formatPerformanceModality,
   getBestPartner,
+  getPlayerPartnerMatchHistory,
   getPlayerPartnerPerformance,
   getPlayerPerformance,
   listPerformancePlayers,
@@ -11,10 +12,14 @@ import {
   ALL_PARTNERS_LABEL,
   BEST_PARTNER_RANKING_NOTE,
   HISTORICAL_PLAYER_LABEL,
+  MATCH_HISTORY_EMPTY_MESSAGE,
   NO_PARTNERS_IN_SCOPE_MESSAGE,
   PERFORMANCE_INTRO,
   filterPlayersBySearch,
   formatHistoryDiagnostics,
+  formatMatchHistoryDate,
+  formatMatchHistoryResult,
+  formatMatchHistoryScoreline,
   formatPerformanceScopeTitle,
   formatPointDifference,
   formatRecordLine,
@@ -64,6 +69,34 @@ function MetricLine({ label, value }) {
   );
 }
 
+function MatchHistoryList({ matches }) {
+  if (!matches || matches.length === 0) {
+    return (
+      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        {MATCH_HISTORY_EMPTY_MESSAGE}
+      </p>
+    );
+  }
+
+  return (
+    <ol className="space-y-2">
+      {matches.map((match) => (
+        <li
+          key={`${match.sessionId}:${match.roundId}:${match.matchId}`}
+          className="rounded-lg border p-2 space-y-1"
+          style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-app)' }}
+        >
+          <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+            {formatMatchHistoryDate(match.sessionDate)}
+          </p>
+          <p className="text-sm font-bold">{formatMatchHistoryScoreline(match)}</p>
+          <p className="text-xs font-semibold">{formatMatchHistoryResult(match.result)}</p>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export default function PlayerPerformanceView({ document, roster = [] }) {
   const built = useMemo(
     () => buildPlayerPerformanceIndex(document, roster),
@@ -96,6 +129,24 @@ export default function PlayerPerformanceView({ document, roster = [] }) {
       getPlayerPartnerPerformance(built.index, playerId, rankingQueryFilters(lineupSize))
     );
   }, [built, playerId, lineupSize]);
+
+  const partnerHistories = useMemo(() => {
+    if (!built.ok || !playerId) return new Map();
+    const next = new Map();
+    for (const partner of rankingPartners) {
+      next.set(partner.partnerId, {
+        wins: getPlayerPartnerMatchHistory(built.index, playerId, partner.partnerId, {
+          lineupSize,
+          result: 'win',
+        }),
+        losses: getPlayerPartnerMatchHistory(built.index, playerId, partner.partnerId, {
+          lineupSize,
+          result: 'loss',
+        }),
+      });
+    }
+    return next;
+  }, [built, playerId, lineupSize, rankingPartners]);
 
   const partnerId = resolvePartnerFilter(
     playerId === scope.playerId ? scope.partnerId : null,
@@ -345,6 +396,32 @@ export default function PlayerPerformanceView({ document, roster = [] }) {
                     value={formatPointDifference(summary.pointDifference)}
                   />
                 </div>
+                {selectedPartner && (
+                  <div className="space-y-2">
+                    <details>
+                      <summary className={`cursor-pointer text-sm font-bold ${focusClass}`}>
+                        {summary.wins} {summary.wins === 1 ? 'vitória' : 'vitórias'} com{' '}
+                        {selectedPartner.partnerName}
+                      </summary>
+                      <div className="mt-2">
+                        <MatchHistoryList
+                          matches={partnerHistories.get(selectedPartner.partnerId)?.wins}
+                        />
+                      </div>
+                    </details>
+                    <details>
+                      <summary className={`cursor-pointer text-sm font-bold ${focusClass}`}>
+                        {summary.losses} {summary.losses === 1 ? 'derrota' : 'derrotas'} com{' '}
+                        {selectedPartner.partnerName}
+                      </summary>
+                      <div className="mt-2">
+                        <MatchHistoryList
+                          matches={partnerHistories.get(selectedPartner.partnerId)?.losses}
+                        />
+                      </div>
+                    </details>
+                  </div>
+                )}
               </div>
 
               <article className="rounded-xl border p-3 space-y-2" style={surfaceStyle}>
@@ -386,32 +463,53 @@ export default function PlayerPerformanceView({ document, roster = [] }) {
                   <ol className="space-y-2">
                     {rankingPartners.map((partner, index) => {
                       const current = partner.partnerId === partnerId;
+                      const history = partnerHistories.get(partner.partnerId);
                       return (
                         <li key={partner.partnerId}>
-                          <button
-                            type="button"
-                            aria-current={current ? 'true' : undefined}
-                            onClick={() => pinScope({ partnerId: partner.partnerId })}
-                            className={`w-full text-left rounded-xl border p-3 cursor-pointer ${focusClass}`}
+                          <div
+                            className="rounded-xl border p-3 space-y-2"
                             style={{
                               backgroundColor: current ? 'var(--bg-subtle)' : 'var(--bg-surface)',
                               borderColor: current ? 'var(--primary)' : 'var(--border-color)',
                               borderWidth: current ? 2 : 1,
                             }}
                           >
-                            <span className="flex items-center justify-between gap-2">
-                              <span className="font-bold">
-                                {index + 1}º {partner.partnerName}
-                                {current ? ' (filtro atual)' : ''}
+                            <button
+                              type="button"
+                              aria-current={current ? 'true' : undefined}
+                              onClick={() => pinScope({ partnerId: partner.partnerId })}
+                              className={`w-full text-left cursor-pointer ${focusClass}`}
+                            >
+                              <span className="flex items-center justify-between gap-2">
+                                <span className="font-bold">
+                                  {index + 1}º {partner.partnerName}
+                                  {current ? ' (filtro atual)' : ''}
+                                </span>
+                                <span className="text-sm font-black">
+                                  {formatWinRatePercent(partner.winRate, partner.matches)}
+                                </span>
                               </span>
-                              <span className="text-sm font-black">
-                                {formatWinRatePercent(partner.winRate, partner.matches)}
+                              <span className="mt-1 block text-xs" style={{ color: 'var(--text-muted)' }}>
+                                {formatRecordLine(partner)}
                               </span>
-                            </span>
-                            <span className="mt-1 block text-xs" style={{ color: 'var(--text-muted)' }}>
-                              {formatRecordLine(partner)}
-                            </span>
-                          </button>
+                            </button>
+                            <details>
+                              <summary className={`cursor-pointer text-sm font-bold ${focusClass}`}>
+                                {partner.wins} {partner.wins === 1 ? 'vitória' : 'vitórias'}
+                              </summary>
+                              <div className="mt-2">
+                                <MatchHistoryList matches={history?.wins} />
+                              </div>
+                            </details>
+                            <details>
+                              <summary className={`cursor-pointer text-sm font-bold ${focusClass}`}>
+                                {partner.losses} {partner.losses === 1 ? 'derrota' : 'derrotas'}
+                              </summary>
+                              <div className="mt-2">
+                                <MatchHistoryList matches={history?.losses} />
+                              </div>
+                            </details>
+                          </div>
                         </li>
                       );
                     })}

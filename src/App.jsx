@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import PlayerList from './PlayerList';
 import GameSessionsView from './GameSessionsView';
-import PlayerPerformanceView from './PlayerPerformanceView.jsx';
+import PerformanceHub from './PerformanceHub.jsx';
 import GistSyncPanel from './GistSyncPanel';
 import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
@@ -795,7 +795,7 @@ export default function App() {
           )}
 
           {currentView === 'performance' && (
-            <PlayerPerformanceView document={gameSessions} roster={players} />
+            <PerformanceHub document={gameSessions} roster={players} />
           )}
 
           {/* 4. HISTORY VIEW */}

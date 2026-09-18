@@ -10,9 +10,13 @@ import {
   ANALYSIS_SCORE_ERROR_CODES,
   buildPlayerPerformanceIndex,
   formatPerformanceModality,
+  RANKING_SORT_FIELDS,
   getBestPartner,
+  getPlayerMatchHistory,
+  getPlayerPartnerMatchHistory,
   getPlayerPartnerPerformance,
   getPlayerPerformance,
+  getPlayerPerformanceRanking,
   listPerformancePlayers,
 } from './playerPerformance.js';
 
@@ -94,12 +98,14 @@ function doublesSession({
   lineupA = namesOf(['andre', 'ana']),
   lineupB = namesOf(['gabi', 'luiza']),
   date = '2026-09-12',
+  name = 'Arena',
   updatedAt = ISO,
   createdAt = ISO,
 } = {}) {
   return session({
     id,
     date,
+    name,
     status,
     createdAt,
     updatedAt,
@@ -1136,5 +1142,259 @@ describe('listPerformancePlayers', () => {
     expect(andres.map((player) => player.playerId)).toEqual(['andre-1', 'andre-2']);
     expect(andres[0].matches).toBe(1);
     expect(andres[1].matches).toBe(1);
+  });
+});
+
+function pairingSession({
+  id,
+  date,
+  scoreA,
+  scoreB,
+  lineupA,
+  lineupB,
+} = {}) {
+  return doublesSession({
+    id,
+    date,
+    name: `Encontro ${id}`,
+    scoreA,
+    scoreB,
+    lineupA,
+    lineupB,
+    teams: [team('t1', lineupA), team('t2', lineupB)],
+  });
+}
+
+describe('histórico de partidas', () => {
+  const andrePaulo = [member('andre', 'André'), member('paulo', 'Paulo Antigo')];
+  const joaoPedro = [member('joao', 'João'), member('pedro', 'Pedro')];
+  const andreAna = [member('andre', 'André'), member('ana', 'Ana')];
+  const gabiLuiza = [member('gabi', 'Gabi'), member('luiza', 'Luiza')];
+
+  function historyDocument() {
+    const pending = pairingSession({
+      id: 'pending-day',
+      date: '2026-09-02',
+      scoreA: null,
+      scoreB: null,
+      lineupA: andrePaulo,
+      lineupB: joaoPedro,
+    });
+    return documentOf(
+      pairingSession({
+        id: 'win-day',
+        date: '2026-08-31',
+        scoreA: 21,
+        scoreB: 17,
+        lineupA: andrePaulo,
+        lineupB: joaoPedro,
+      }),
+      pairingSession({
+        id: 'loss-day',
+        date: '2026-09-01',
+        scoreA: 15,
+        scoreB: 21,
+        lineupA: andrePaulo,
+        lineupB: joaoPedro,
+      }),
+      pairingSession({
+        id: 'other-partner',
+        date: '2026-09-03',
+        scoreA: 21,
+        scoreB: 10,
+        lineupA: andreAna,
+        lineupB: gabiLuiza,
+      }),
+      pending
+    );
+  }
+
+  const historyRoster = [
+    { id: 'andre', name: 'André' },
+    { id: 'paulo', name: 'Paulo' },
+    { id: 'joao', name: 'João' },
+    { id: 'pedro', name: 'Pedro' },
+    { id: 'ana', name: 'Ana' },
+    { id: 'gabi', name: 'Gabi' },
+    { id: 'luiza', name: 'Luiza' },
+  ];
+
+  it('separa vitórias e derrotas com adversários, placares e snapshot histórico', () => {
+    const index = indexOf(historyDocument(), historyRoster);
+    const wins = getPlayerPartnerMatchHistory(index, 'andre', 'paulo', { result: 'win' });
+    const losses = getPlayerPartnerMatchHistory(index, 'andre', 'paulo', { result: 'loss' });
+
+    expect(wins).toHaveLength(1);
+    expect(wins[0]).toMatchObject({
+      sessionId: 'win-day',
+      sessionName: 'Encontro win-day',
+      sessionDate: '2026-08-31',
+      roundId: 'win-day-r1',
+      roundNumber: 1,
+      matchId: 'win-day-m1',
+      scoreA: 21,
+      scoreB: 17,
+      result: 'win',
+    });
+    expect(wins[0].teammates.map((player) => player.playerName)).toEqual(['André', 'Paulo Antigo']);
+    expect(wins[0].partners.map((player) => player.playerName)).toEqual(['Paulo Antigo']);
+    expect(wins[0].opponents.map((player) => player.playerId)).toEqual(['joao', 'pedro']);
+    expect(wins[0].opponents.map((player) => player.playerName)).toEqual(['João', 'Pedro']);
+
+    expect(losses).toHaveLength(1);
+    expect(losses[0]).toMatchObject({
+      sessionId: 'loss-day',
+      sessionDate: '2026-09-01',
+      scoreA: 15,
+      scoreB: 21,
+      result: 'loss',
+      pointsFor: 15,
+      pointsAgainst: 21,
+    });
+    expect(getPlayerMatchHistory(index, 'andre', { partnerId: 'paulo' })).toHaveLength(2);
+    expect(getPlayerMatchHistory(index, 'andre')).toHaveLength(3);
+  });
+
+  it('não inclui partida pendente no histórico nem nas estatísticas', () => {
+    const index = indexOf(historyDocument(), historyRoster);
+    expect(index).toMatchObject({
+      includedMatches: 3,
+      skippedPendingMatches: 1,
+    });
+    expect(getPlayerMatchHistory(index, 'andre').map((item) => item.sessionId)).not.toContain(
+      'pending-day'
+    );
+    expect(getPlayerPerformance(index, 'andre').matches).toBe(3);
+    expect(getPlayerPerformance(index, 'andre', { partnerId: 'paulo' })).toMatchObject({
+      matches: 2,
+      wins: 1,
+      losses: 1,
+    });
+  });
+
+  it('filtra histórico por data inicial, final e intervalo', () => {
+    const index = indexOf(historyDocument(), historyRoster);
+    expect(
+      getPlayerMatchHistory(index, 'andre', { startDate: '2026-09-01' }).map((item) => item.sessionDate)
+    ).toEqual(['2026-09-01', '2026-09-03']);
+    expect(
+      getPlayerMatchHistory(index, 'andre', { endDate: '2026-08-31' }).map((item) => item.sessionDate)
+    ).toEqual(['2026-08-31']);
+    expect(
+      getPlayerMatchHistory(index, 'andre', {
+        startDate: '2026-08-31',
+        endDate: '2026-09-01',
+      }).map((item) => item.sessionId)
+    ).toEqual(['win-day', 'loss-day']);
+  });
+});
+
+describe('ranking de jogadores', () => {
+  function rankedSession(id, date, lineupA, lineupB, scoreA, scoreB) {
+    return pairingSession({ id, date, lineupA, lineupB, scoreA, scoreB });
+  }
+
+  const andre = [member('andre', 'André'), member('ana', 'Ana')];
+  const bruno = [member('bruno', 'Bruno'), member('carla', 'Carla')];
+  const diego = [member('diego', 'Diego'), member('erika', 'Erika')];
+
+  function rankingDocument() {
+    return documentOf(
+      rankedSession('early-win', '2026-08-30', andre, bruno, 21, 10),
+      rankedSession('mid-win', '2026-09-01', andre, diego, 21, 18),
+      rankedSession('mid-loss', '2026-09-01', bruno, diego, 8, 21),
+      rankedSession('late-win', '2026-09-05', bruno, andre, 21, 15),
+      rankedSession('pending', '2026-09-06', andre, bruno, null, null)
+    );
+  }
+
+  it('filtra por data e não conta partida pendente', () => {
+    const index = indexOf(rankingDocument());
+    expect(index.skippedPendingMatches).toBe(1);
+    const fromStart = getPlayerPerformanceRanking(index, {
+      startDate: '2026-09-01',
+      playerIds: ['andre', 'bruno', 'diego'],
+      sortBy: 'wins',
+      sortDirection: 'desc',
+    });
+    expect(fromStart.map((row) => [row.playerId, row.matches, row.wins])).toEqual([
+      ['diego', 2, 1],
+      ['andre', 2, 1],
+      ['bruno', 2, 1],
+    ]);
+
+    const untilEnd = getPlayerPerformanceRanking(index, {
+      endDate: '2026-08-30',
+      playerIds: ['andre', 'bruno'],
+      sortBy: 'wins',
+    });
+    expect(untilEnd.map((row) => [row.playerId, row.matches, row.wins, row.losses])).toEqual([
+      ['andre', 1, 1, 0],
+      ['bruno', 1, 0, 1],
+    ]);
+
+    const range = getPlayerPerformanceRanking(index, {
+      startDate: '2026-08-30',
+      endDate: '2026-09-01',
+      playerIds: ['andre', 'bruno', 'diego'],
+      sortBy: 'wins',
+    });
+    expect(range.find((row) => row.playerId === 'andre')).toMatchObject({
+      matches: 2,
+      wins: 2,
+    });
+    expect(range.find((row) => row.playerId === 'bruno').matches).toBe(2);
+  });
+
+  it('limita o ranking ao subconjunto, mas conta jogos contra quem ficou de fora', () => {
+    const index = indexOf(rankingDocument());
+    const subset = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre', 'bruno'],
+      sortBy: 'wins',
+    });
+    expect(subset.map((row) => row.playerId)).toEqual(['andre', 'bruno']);
+    expect(subset.find((row) => row.playerId === 'andre').matches).toBe(3);
+    expect(subset.find((row) => row.playerId === 'bruno').matches).toBe(3);
+    expect(subset.some((row) => row.playerId === 'diego')).toBe(false);
+  });
+
+  it('ordena por vitórias, aproveitamento e saldo com desempate determinístico', () => {
+    const index = indexOf(rankingDocument());
+    const byWins = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre', 'bruno', 'diego'],
+      sortBy: 'wins',
+      sortDirection: 'desc',
+    });
+    expect(byWins.map((row) => row.playerId)).toEqual(['andre', 'bruno', 'diego']);
+    expect(byWins[0]).toMatchObject({ playerId: 'andre', wins: 2, losses: 1 });
+
+    const byWinRate = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre', 'bruno', 'diego'],
+      sortBy: 'winRate',
+      sortDirection: 'desc',
+    });
+    expect(byWinRate[0].playerId).toBe('andre');
+    expect(byWinRate[0].winRate).toBeCloseTo(2 / 3);
+
+    const byDiff = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre', 'bruno', 'diego'],
+      sortBy: 'pointDifference',
+      sortDirection: 'desc',
+    });
+    expect(byDiff.map((row) => row.playerId)).toEqual(['diego', 'andre', 'bruno']);
+
+    const tied = getPlayerPerformanceRanking(index, {
+      startDate: '2026-09-01',
+      endDate: '2026-09-01',
+      playerIds: ['andre', 'bruno', 'diego'],
+      sortBy: 'wins',
+      sortDirection: 'desc',
+    });
+    expect(tied.map((row) => [row.playerId, row.wins, row.matches])).toEqual([
+      ['diego', 1, 2],
+      ['andre', 1, 1],
+      ['bruno', 0, 1],
+    ]);
+    expect(RANKING_SORT_FIELDS).toContain('winRate');
   });
 });
