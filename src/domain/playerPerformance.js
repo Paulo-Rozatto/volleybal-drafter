@@ -44,7 +44,9 @@ export const RANKING_SORT_FIELDS = Object.freeze([
   'losses',
   'winRate',
   'pointsFor',
+  'averagePointsFor',
   'pointsAgainst',
+  'averagePointsAgainst',
   'pointDifference',
 ]);
 const RANKING_SORT_FIELD_SET = new Set(RANKING_SORT_FIELDS);
@@ -238,6 +240,12 @@ function addParticipation(bucket, won, pointsFor, pointsAgainst) {
   bucket.pointsAgainst += pointsAgainst;
 }
 
+function averagePerMatch(total, matches) {
+  if (matches === 0) return 0;
+  const value = total / matches;
+  return Number.isFinite(value) ? value : 0;
+}
+
 function metricsFromBucket(bucket, identity) {
   const matches = bucket?.matches ?? 0;
   const wins = bucket?.wins ?? 0;
@@ -251,7 +259,9 @@ function metricsFromBucket(bucket, identity) {
     losses,
     winRate: matches === 0 ? 0 : wins / matches,
     pointsFor,
+    averagePointsFor: averagePerMatch(pointsFor, matches),
     pointsAgainst,
+    averagePointsAgainst: averagePerMatch(pointsAgainst, matches),
     pointDifference: pointsFor - pointsAgainst,
   });
 }

@@ -255,7 +255,9 @@ describe('buildPlayerPerformanceIndex', () => {
       losses: 1,
       winRate: 0.5,
       pointsFor: 36,
+      averagePointsFor: 18,
       pointsAgainst: 39,
+      averagePointsAgainst: 19.5,
       pointDifference: -3,
     });
   });
@@ -963,7 +965,9 @@ describe('contrato das consultas', () => {
       losses: 0,
       winRate: 0,
       pointsFor: 0,
+      averagePointsFor: 0,
       pointsAgainst: 0,
+      averagePointsAgainst: 0,
       pointDifference: 0,
     });
     expect(getPlayerPartnerPerformance(index, 'desconhecido')).toEqual([]);
@@ -1396,7 +1400,200 @@ describe('ranking de jogadores', () => {
       ['andre', 1, 1],
       ['bruno', 0, 1],
     ]);
-    expect(RANKING_SORT_FIELDS).toContain('winRate');
+    expect(RANKING_SORT_FIELDS).toEqual([
+      'name',
+      'matches',
+      'wins',
+      'losses',
+      'winRate',
+      'pointsFor',
+      'averagePointsFor',
+      'pointsAgainst',
+      'averagePointsAgainst',
+      'pointDifference',
+    ]);
+  });
+
+  it('calcula médias de pontos a partir das estatísticas do recorte', () => {
+    const index = indexOf(
+      documentOf(
+        rankedSession('g1', '2026-09-10', andre, bruno, 21, 15),
+        rankedSession('g2', '2026-09-11', andre, diego, 21, 18),
+        rankedSession('g3', '2026-09-12', andre, bruno, 18, 16),
+        rankedSession('g4', '2026-09-13', andre, diego, 18, 16)
+      )
+    );
+    const [andreRow] = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre'],
+    });
+    expect(andreRow).toMatchObject({
+      matches: 4,
+      pointsFor: 78,
+      pointsAgainst: 65,
+      averagePointsFor: 19.5,
+      averagePointsAgainst: 16.25,
+    });
+    expect(Number.isFinite(andreRow.averagePointsFor)).toBe(true);
+    expect(Number.isFinite(andreRow.averagePointsAgainst)).toBe(true);
+  });
+
+  it('zera as médias quando o jogador não tem partidas no recorte', () => {
+    const index = indexOf(rankingDocument());
+    const [fabio] = getPlayerPerformanceRanking(index, {
+      playerIds: ['fabio'],
+    });
+    expect(fabio).toMatchObject({
+      playerId: 'fabio',
+      matches: 0,
+      pointsFor: 0,
+      pointsAgainst: 0,
+      averagePointsFor: 0,
+      averagePointsAgainst: 0,
+    });
+    expect(Object.is(fabio.averagePointsFor, 0)).toBe(true);
+    expect(Object.is(fabio.averagePointsAgainst, 0)).toBe(true);
+  });
+
+  it('recalcula as médias com o mesmo recorte de datas do ranking', () => {
+    const index = indexOf(rankingDocument());
+    const untilEnd = getPlayerPerformanceRanking(index, {
+      endDate: '2026-08-30',
+      playerIds: ['andre', 'bruno'],
+    });
+    expect(untilEnd.find((row) => row.playerId === 'andre')).toMatchObject({
+      matches: 1,
+      pointsFor: 21,
+      pointsAgainst: 10,
+      averagePointsFor: 21,
+      averagePointsAgainst: 10,
+    });
+
+    const fromStart = getPlayerPerformanceRanking(index, {
+      startDate: '2026-09-01',
+      playerIds: ['andre'],
+    });
+    expect(fromStart[0]).toMatchObject({
+      matches: 2,
+      pointsFor: 36,
+      pointsAgainst: 39,
+      averagePointsFor: 18,
+      averagePointsAgainst: 19.5,
+    });
+
+    const range = getPlayerPerformanceRanking(index, {
+      startDate: '2026-08-30',
+      endDate: '2026-09-01',
+      playerIds: ['andre'],
+    });
+    expect(range[0]).toMatchObject({
+      matches: 2,
+      pointsFor: 42,
+      pointsAgainst: 28,
+      averagePointsFor: 21,
+      averagePointsAgainst: 14,
+    });
+  });
+
+  it('ordena por média de pontos feitos e sofridos nos dois sentidos', () => {
+    const index = indexOf(rankingDocument());
+    const ids = ['andre', 'bruno', 'diego'];
+
+    const forDesc = getPlayerPerformanceRanking(index, {
+      playerIds: ids,
+      sortBy: 'averagePointsFor',
+      sortDirection: 'desc',
+    });
+    expect(forDesc.map((row) => [row.playerId, row.averagePointsFor])).toEqual([
+      ['diego', 19.5],
+      ['andre', 19],
+      ['bruno', 13],
+    ]);
+
+    const forAsc = getPlayerPerformanceRanking(index, {
+      playerIds: ids,
+      sortBy: 'averagePointsFor',
+      sortDirection: 'asc',
+    });
+    expect(forAsc.map((row) => row.playerId)).toEqual(['bruno', 'andre', 'diego']);
+
+    const againstDesc = getPlayerPerformanceRanking(index, {
+      playerIds: ids,
+      sortBy: 'averagePointsAgainst',
+      sortDirection: 'desc',
+    });
+    expect(againstDesc.map((row) => [row.playerId, row.averagePointsAgainst])).toEqual([
+      ['bruno', 19],
+      ['andre', 49 / 3],
+      ['diego', 14.5],
+    ]);
+
+    const againstAsc = getPlayerPerformanceRanking(index, {
+      playerIds: ids,
+      sortBy: 'averagePointsAgainst',
+      sortDirection: 'asc',
+    });
+    expect(againstAsc.map((row) => row.playerId)).toEqual(['diego', 'andre', 'bruno']);
+  });
+
+  it('desempata médias iguais de forma determinística', () => {
+    const index = indexOf(
+      documentOf(
+        rankedSession('a-win', '2026-09-10', andre, diego, 21, 18),
+        rankedSession('b-win', '2026-09-10', bruno, diego, 21, 18)
+      )
+    );
+    const desc = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre', 'bruno'],
+      sortBy: 'averagePointsFor',
+      sortDirection: 'desc',
+    });
+    const asc = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre', 'bruno'],
+      sortBy: 'averagePointsFor',
+      sortDirection: 'asc',
+    });
+    expect(desc.map((row) => row.playerId)).toEqual(['andre', 'bruno']);
+    expect(asc.map((row) => row.playerId)).toEqual(['andre', 'bruno']);
+    expect(desc[0].averagePointsFor).toBe(21);
+    expect(desc[1].averagePointsFor).toBe(21);
+  });
+
+  it('compara médias com precisão completa, sem arredondar antes da ordenação', () => {
+    const anaLine = [member('ana', 'Ana'), member('carla', 'Carla')];
+    const brunoLine = [member('bruno', 'Bruno'), member('diego', 'Diego')];
+    const oppA = [member('erika', 'Erika'), member('fabio', 'Fábio')];
+    const oppB = [member('gabi', 'Gabi'), member('luiza', 'Luiza')];
+    const index = indexOf(
+      documentOf(
+        rankedSession('ana-1', '2026-09-10', anaLine, oppA, 21, 10),
+        rankedSession('ana-2', '2026-09-11', anaLine, oppB, 21, 10),
+        rankedSession('ana-3', '2026-09-12', anaLine, oppA, 19, 18),
+        rankedSession('bruno-1', '2026-09-10', brunoLine, oppB, 21, 10),
+        rankedSession('bruno-2', '2026-09-11', brunoLine, oppA, 21, 10),
+        rankedSession('bruno-3', '2026-09-12', brunoLine, oppB, 21, 10),
+        rankedSession('bruno-4', '2026-09-13', brunoLine, oppA, 18, 16)
+      )
+    );
+    const anaAvg = 61 / 3;
+    const brunoAvg = 81 / 4;
+    expect(anaAvg).toBeGreaterThan(brunoAvg);
+    expect(Math.round(anaAvg * 10) / 10).toBe(Math.round(brunoAvg * 10) / 10);
+
+    const desc = getPlayerPerformanceRanking(index, {
+      playerIds: ['ana', 'bruno'],
+      sortBy: 'averagePointsFor',
+      sortDirection: 'desc',
+    });
+    expect(desc.map((row) => row.playerId)).toEqual(['ana', 'bruno']);
+    expect(desc[0].averagePointsFor).toBe(anaAvg);
+    expect(desc[1].averagePointsFor).toBe(brunoAvg);
+
+    const asc = getPlayerPerformanceRanking(index, {
+      playerIds: ['ana', 'bruno'],
+      sortBy: 'averagePointsFor',
+      sortDirection: 'asc',
+    });
+    expect(asc.map((row) => row.playerId)).toEqual(['bruno', 'ana']);
   });
 });
 

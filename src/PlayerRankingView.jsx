@@ -11,6 +11,7 @@ import {
   filterPlayersBySearch,
   formatHistoryDiagnostics,
   formatPointDifference,
+  formatPointsAverage,
   formatWinRatePercent,
   rankingSortOptions,
   resolveRankingPlayerIds,
@@ -230,7 +231,7 @@ export default function PlayerRankingView({ document, roster = [] }) {
         </p>
       ) : (
         <div className="overflow-x-auto rounded-xl border" style={surfaceStyle}>
-          <table className="w-full min-w-[40rem] text-sm">
+          <table className="w-full min-w-[52rem] text-sm">
             <caption className="sr-only">Ranking de jogadores</caption>
             <thead>
               <tr style={{ backgroundColor: 'var(--bg-subtle)' }}>
@@ -241,7 +242,9 @@ export default function PlayerRankingView({ document, roster = [] }) {
                 <th className="text-right px-3 py-2 font-bold">Derrotas</th>
                 <th className="text-right px-3 py-2 font-bold">Aproveitamento</th>
                 <th className="text-right px-3 py-2 font-bold">Pontos feitos</th>
+                <th className="text-right px-3 py-2 font-bold">Média feitos</th>
                 <th className="text-right px-3 py-2 font-bold">Pontos sofridos</th>
+                <th className="text-right px-3 py-2 font-bold">Média sofridos</th>
                 <th className="text-right px-3 py-2 font-bold">Saldo</th>
               </tr>
             </thead>
@@ -259,7 +262,9 @@ export default function PlayerRankingView({ document, roster = [] }) {
                     {formatWinRatePercent(row.winRate, row.matches)}
                   </td>
                   <td className="text-right px-3 py-2">{row.pointsFor}</td>
+                  <td className="text-right px-3 py-2">{formatPointsAverage(row.averagePointsFor)}</td>
                   <td className="text-right px-3 py-2">{row.pointsAgainst}</td>
+                  <td className="text-right px-3 py-2">{formatPointsAverage(row.averagePointsAgainst)}</td>
                   <td className="text-right px-3 py-2">
                     {formatPointDifference(row.pointDifference)}
                   </td>

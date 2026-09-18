@@ -43,6 +43,17 @@ export function resolveSelectedPlayerId(players, selectedId) {
   return players[0].playerId;
 }
 
+export function formatPointsAverage(value) {
+  const number = Number(value);
+  const safe = Number.isFinite(number) ? number : 0;
+  const roundedTenths = Math.round(safe * 10) / 10;
+  const fractionDigits = Number.isInteger(roundedTenths) ? 0 : 1;
+  return new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: 1,
+  }).format(safe);
+}
+
 export function formatWinRatePercent(winRate, matches) {
   if (!matches) {
     return new Intl.NumberFormat('pt-BR', {
@@ -234,7 +245,9 @@ export function rankingSortOptions() {
     Object.freeze({ value: 'losses', label: 'Derrotas' }),
     Object.freeze({ value: 'winRate', label: 'Percentual de vitórias' }),
     Object.freeze({ value: 'pointsFor', label: 'Pontos feitos' }),
+    Object.freeze({ value: 'averagePointsFor', label: 'Média de pontos feitos' }),
     Object.freeze({ value: 'pointsAgainst', label: 'Pontos sofridos' }),
+    Object.freeze({ value: 'averagePointsAgainst', label: 'Média de pontos sofridos' }),
     Object.freeze({ value: 'pointDifference', label: 'Saldo' }),
   ]);
 }

@@ -16,6 +16,7 @@ import {
   formatHistoryDiagnostics,
   formatPerformanceScopeTitle,
   formatPointDifference,
+  formatPointsAverage,
   formatRecordLine,
   formatWinRatePercent,
   keepDomainPartnerOrder,
@@ -203,6 +204,17 @@ describe('formatação de apresentação', () => {
     expect(formatWinRatePercent(0.5, 2)).toBe('50%');
     expect(formatWinRatePercent(2 / 3, 3)).toBe('66,7%');
     expect(2 / 3).toBeGreaterThan(0.66);
+  });
+
+  it('formata médias de pontos no locale pt-BR com no máximo uma casa', () => {
+    expect(formatPointsAverage(19.5)).toBe('19,5');
+    expect(formatPointsAverage(16.25)).toBe('16,3');
+    expect(formatPointsAverage(18.7)).toBe('18,7');
+    expect(formatPointsAverage(15.3)).toBe('15,3');
+    expect(formatPointsAverage(21)).toBe('21');
+    expect(formatPointsAverage(0)).toBe('0');
+    expect(formatPointsAverage(Number.NaN)).toBe('0');
+    expect(formatPointsAverage(Number.POSITIVE_INFINITY)).toBe('0');
   });
 
   it('formata saldo positivo, negativo e zero', () => {
@@ -394,9 +406,28 @@ describe('histórico de partidas e ranking', () => {
       'losses',
       'winRate',
       'pointsFor',
+      'averagePointsFor',
       'pointsAgainst',
+      'averagePointsAgainst',
       'pointDifference',
     ]);
+    expect(rankingSortOptions().map((item) => item.label)).toEqual([
+      'Nome',
+      'Jogos',
+      'Vitórias',
+      'Derrotas',
+      'Percentual de vitórias',
+      'Pontos feitos',
+      'Média de pontos feitos',
+      'Pontos sofridos',
+      'Média de pontos sofridos',
+      'Saldo',
+    ]);
+    const rankingView = readFileSync(new URL('./PlayerRankingView.jsx', import.meta.url), 'utf8');
+    expect(rankingView).toContain('Média feitos');
+    expect(rankingView).toContain('Média sofridos');
+    expect(rankingView).toContain('formatPointsAverage');
+    expect(rankingView).not.toMatch(/toFixed\(/);
     const players = [{ playerId: 'andre' }, { playerId: 'paulo' }];
     expect(resolveRankingPlayerIds([], players)).toBeNull();
     expect(resolveRankingPlayerIds(['andre', 'missing'], players)).toEqual(['andre']);
