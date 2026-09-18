@@ -1,5 +1,11 @@
 import { calcTeamBalancePenalty } from './teamBalance.js';
 import { validateFormat, validateSessionTeams } from './teamSession.js';
+import {
+  comparePairingScores,
+  isPerfectPairingScore,
+  normalizePartnershipRepeats,
+  scorePairing,
+} from './balancedPairs.js';
 
 function fail(errors) {
   return {
@@ -199,6 +205,7 @@ function snapshotMember(player) {
  *   iterations?: number,
  *   balanceGender?: boolean,
  *   balanceHeight?: boolean
+ *   partnershipRepeats?: Map<string, number> | { count: (a: string, b: string) => number } | null
  * }} [options]
  */
 export function generateBalancedTeams(players, format, options = {}) {
@@ -212,6 +219,8 @@ export function generateBalancedTeams(players, format, options = {}) {
   const iterations = optionsBag.iterations === undefined ? 10000 : optionsBag.iterations;
   const balanceGender = optionsBag.balanceGender === undefined ? true : optionsBag.balanceGender;
   const balanceHeight = optionsBag.balanceHeight === undefined ? true : optionsBag.balanceHeight;
+  const partnershipRepeats =
+    optionsBag.partnershipRepeats === undefined ? null : optionsBag.partnershipRepeats;
 
   if (typeof idGenerator !== 'function') {
     return fail([error('ID_GENERATOR_INVALID', 'O gerador de IDs precisa ser uma função.')]);
@@ -225,6 +234,18 @@ export function generateBalancedTeams(players, format, options = {}) {
     ]);
   }
 
+  let history = null;
+  if (format.teamSize === 2) {
+    try {
+      history = normalizePartnershipRepeats(partnershipRepeats);
+    } catch (caught) {
+      if (caught?.code === 'PARTNERSHIP_HISTORY_INVALID') {
+        return fail([error('PARTNERSHIP_HISTORY_INVALID', caught.message)]);
+      }
+      throw caught;
+    }
+  }
+
   const invalidPlayers = assertPlayers(players);
   if (invalidPlayers) return invalidPlayers;
 
@@ -233,18 +254,31 @@ export function generateBalancedTeams(players, format, options = {}) {
   if (!distribution.ok) return fail(distribution.errors);
 
   const sizes = distribution.sizes;
+  const preferPartnerVariety = format.teamSize === 2;
+  const scoring = { partnershipRepeats: history, balanceGender, balanceHeight };
   let bestGroups = null;
+  let bestScore = null;
   let minPenalty = Infinity;
 
   try {
     for (let round = 0; round < iterations; round += 1) {
       const shuffled = shuffleCopy(source, random);
       const groups = splitBySizes(shuffled, sizes);
-      const penalty = calcTeamBalancePenalty(groups, { balanceGender, balanceHeight });
-      if (penalty < minPenalty) {
-        minPenalty = penalty;
-        bestGroups = groups;
-        if (minPenalty === 0) break;
+      if (preferPartnerVariety) {
+        const score = scorePairing(groups, scoring);
+        if (!bestScore || comparePairingScores(score, bestScore) < 0) {
+          bestScore = score;
+          bestGroups = groups;
+          minPenalty = score.balancePenalty;
+          if (isPerfectPairingScore(score)) break;
+        }
+      } else {
+        const penalty = calcTeamBalancePenalty(groups, { balanceGender, balanceHeight });
+        if (penalty < minPenalty) {
+          minPenalty = penalty;
+          bestGroups = groups;
+          if (minPenalty === 0) break;
+        }
       }
     }
   } catch (caught) {

@@ -730,6 +730,44 @@ export function getBestPartner(index, playerId, filters) {
   return partners[0] ?? null;
 }
 
+function pairRepeatKey(leftId, rightId) {
+  return leftId < rightId ? `${leftId}|${rightId}` : `${rightId}|${leftId}`;
+}
+
+/**
+ * Lookup compacto de quantas partidas válidas dois jogadores disputaram juntos.
+ * Não expõe o índice interno e não muta `index`.
+ *
+ * @param {object} index
+ * @param {string[] | null} [playerIds]
+ */
+export function buildPartnershipRepeatLookup(index, playerIds) {
+  const state = requireIndex(index);
+  const scoped = playerIds == null ? null : new Set(normalizeParticipantIds(playerIds));
+  const counts = new Map();
+
+  for (const [playerId, record] of state.players) {
+    if (scoped && !scoped.has(playerId)) continue;
+    for (const [partnerId, partner] of record.partners) {
+      if (scoped && !scoped.has(partnerId)) continue;
+      const matches = partner.totals.matches ?? 0;
+      if (matches <= 0) continue;
+      const key = pairRepeatKey(playerId, partnerId);
+      const current = counts.get(key);
+      if (current == null || matches > current) counts.set(key, matches);
+    }
+  }
+
+  return Object.freeze({
+    count(leftId, rightId) {
+      if (typeof leftId !== 'string' || typeof rightId !== 'string' || leftId === rightId) {
+        return 0;
+      }
+      return counts.get(pairRepeatKey(leftId, rightId)) ?? 0;
+    },
+  });
+}
+
 function listRecordAppearances(state, playerId, filters) {
   const record = state.players.get(playerId);
   if (!record) return [];

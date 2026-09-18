@@ -4,6 +4,7 @@ export const TEAM_SESSION_SCHEMA_VERSION = 2;
 export const MIN_TEAM_SIZE = 2;
 export const MAX_TEAM_SIZE = 6;
 export const MIN_TEAM_COUNT = 2;
+export const MIN_COURT_COUNT = 1;
 export const SESSION_STATUSES = Object.freeze(['draft', 'in_progress', 'finished']);
 
 function ok() {
@@ -99,16 +100,20 @@ export function cloneV2Match(match) {
 }
 
 export function cloneV2Round(round) {
-  return {
+  const cloned = {
     id: round?.id,
     number: round?.number,
     byeTeamId: round?.byeTeamId ?? null,
     matches: (round?.matches ?? []).map(cloneV2Match),
   };
+  if (Object.prototype.hasOwnProperty.call(round ?? {}, 'cycleNumber')) {
+    cloned.cycleNumber = round.cycleNumber;
+  }
+  return cloned;
 }
 
 export function cloneV2Session(session) {
-  return {
+  const cloned = {
     id: session?.id,
     date: session?.date,
     name: session?.name ?? null,
@@ -122,6 +127,10 @@ export function cloneV2Session(session) {
     teams: (session?.teams ?? []).map(cloneV2Team),
     rounds: (session?.rounds ?? []).map(cloneV2Round),
   };
+  if (Object.prototype.hasOwnProperty.call(session ?? {}, 'courtCount')) {
+    cloned.courtCount = session.courtCount;
+  }
+  return cloned;
 }
 
 export function cloneV2Document(document) {
@@ -167,6 +176,23 @@ export function validateFormat(format) {
   }
 
   return errors.length > 0 ? fail(errors) : ok();
+}
+
+export function validateCourtCount(courtCount) {
+  if (!Number.isInteger(courtCount) || courtCount < MIN_COURT_COUNT) {
+    return fail([
+      error(
+        'COURT_COUNT_INVALID',
+        'A quantidade de quadras precisa ser um inteiro maior ou igual a 1.',
+        { field: 'courtCount' }
+      ),
+    ]);
+  }
+  return ok();
+}
+
+export function roundCycleNumber(round) {
+  return Number.isInteger(round?.cycleNumber) && round.cycleNumber >= 1 ? round.cycleNumber : 1;
 }
 
 export function validateTeamCount(teams, format) {
@@ -554,6 +580,13 @@ function collectSessionIntegrityErrors(session, { roster = null, sessionIndex = 
     errors.push(...formatResult.errors.map((item) => ({ ...item, ...context })));
   }
 
+  if (Object.prototype.hasOwnProperty.call(session ?? {}, 'courtCount')) {
+    const courtResult = validateCourtCount(session.courtCount);
+    if (!courtResult.ok) {
+      errors.push(...courtResult.errors.map((item) => ({ ...item, ...context })));
+    }
+  }
+
   if (!Array.isArray(session?.teams)) {
     errors.push(
       error('TEAMS_NOT_ARRAY', 'Os times do encontro precisam ser uma lista.', context)
@@ -662,6 +695,18 @@ function collectSessionIntegrityErrors(session, { roster = null, sessionIndex = 
       seenRoundNumbers.add(round.number);
     }
 
+    if (Object.prototype.hasOwnProperty.call(round, 'cycleNumber')) {
+      if (!Number.isInteger(round.cycleNumber) || round.cycleNumber < 1) {
+        errors.push(
+          error('CYCLE_NUMBER_INVALID', 'O número do ciclo precisa ser um inteiro positivo.', {
+            ...context,
+            roundIndex,
+            field: 'cycleNumber',
+          })
+        );
+      }
+    }
+
     if (round.byeTeamId != null && !teamExists(session.teams, round.byeTeamId)) {
       errors.push(
         error('BYE_TEAM_NOT_FOUND', 'O time de folga referenciado não existe.', {
@@ -682,6 +727,21 @@ function collectSessionIntegrityErrors(session, { roster = null, sessionIndex = 
       return;
     }
 
+    if (
+      Number.isInteger(session?.courtCount) &&
+      session.courtCount >= MIN_COURT_COUNT &&
+      round.matches.length > session.courtCount
+    ) {
+      errors.push(
+        error(
+          'ROUND_COURT_OVERFLOW',
+          `A rodada não pode ter mais partidas do que as ${session.courtCount} quadras disponíveis.`,
+          { ...context, roundIndex, courtCount: session.courtCount }
+        )
+      );
+    }
+
+    const teamsInBlock = new Set();
     round.matches.forEach((match, matchIndex) => {
       if (!isPlainObject(match)) {
         errors.push(
@@ -714,6 +774,25 @@ function collectSessionIntegrityErrors(session, { roster = null, sessionIndex = 
         );
       } else {
         seenMatchIds.add(match.id);
+      }
+
+      for (const teamId of [match.teamAId, match.teamBId]) {
+        if (!isNonEmptyId(teamId)) continue;
+        if (
+          Number.isInteger(session?.courtCount) &&
+          session.courtCount >= MIN_COURT_COUNT &&
+          teamsInBlock.has(teamId)
+        ) {
+          errors.push(
+            error(
+              'ROUND_TEAM_DUPLICATE',
+              'O mesmo time não pode jogar duas vezes no mesmo bloco.',
+              { ...context, roundIndex, matchIndex, matchId: match.id, teamId }
+            )
+          );
+        } else {
+          teamsInBlock.add(teamId);
+        }
       }
 
       const lineupResult = validateMatchLineups(match, session.format, session.teams ?? [], roster, {

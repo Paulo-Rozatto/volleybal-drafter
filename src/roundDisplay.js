@@ -1,4 +1,5 @@
 import { isMatchCompleted, isMatchPending } from './domain/sessionValidation.js';
+import { roundCycleNumber } from './domain/teamSession.js';
 import {
   formatDoublesNames,
   formatMatchSideLabel,
@@ -39,6 +40,29 @@ export function roundsInOrder(rounds) {
   return [...(Array.isArray(rounds) ? rounds : [])].sort(
     (left, right) => (left?.number ?? 0) - (right?.number ?? 0)
   );
+}
+
+export function cyclesInOrder(rounds) {
+  const groups = new Map();
+  for (const round of roundsInOrder(rounds)) {
+    const cycleNumber = roundCycleNumber(round);
+    if (!groups.has(cycleNumber)) groups.set(cycleNumber, []);
+    groups.get(cycleNumber).push(round);
+  }
+  return [...groups.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([cycleNumber, cycleRounds]) => ({ cycleNumber, rounds: cycleRounds }));
+}
+
+export function idleTeamIds(teams, round) {
+  const playing = new Set();
+  for (const match of round?.matches ?? []) {
+    if (typeof match?.teamAId === 'string') playing.add(match.teamAId);
+    if (typeof match?.teamBId === 'string') playing.add(match.teamBId);
+  }
+  return (teams ?? [])
+    .map((team) => team?.id)
+    .filter((id) => typeof id === 'string' && id.trim() !== '' && !playing.has(id));
 }
 
 export function formatMatchScore(match) {

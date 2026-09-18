@@ -212,6 +212,39 @@ describe('generateBalancedTeams', () => {
     ).toBeNull();
   });
 
+  it('no 2x2 prioriza parceria inédita sobre o balanceamento', () => {
+    const players = [
+      { id: 'p1', name: 'Erik', score: 4, gender: 'M', height: 'tall' },
+      { id: 'p2', name: 'André', score: 3, gender: 'M', height: 'tall' },
+      { id: 'p3', name: 'Gabi', score: 4, gender: 'F', height: 'short' },
+      { id: 'p4', name: 'Luiza', score: 3, gender: 'F', height: 'short' },
+    ];
+    let state = 7 >>> 0;
+    const random = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 4294967296;
+    };
+    const result = generateBalancedTeams(
+      players,
+      { teamSize: 2, teamCount: 2 },
+      {
+        idGenerator: sequentialIds(),
+        random,
+        iterations: 400,
+        partnershipRepeats: new Map([['p1|p2', 5]]),
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(memberIds(result.teams)).toEqual(['p1', 'p2', 'p3', 'p4']);
+    expect(
+      result.teams.some((team) => {
+        const ids = team.members.map((member) => member.playerId);
+        return ids.includes('p1') && ids.includes('p2');
+      })
+    ).toBe(false);
+  });
+
   it('aceita mínimo e máximo e rejeita insuficiente ou excesso', () => {
     const format = { teamSize: 6, teamCount: 3 };
     expect(

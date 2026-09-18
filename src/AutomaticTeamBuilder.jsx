@@ -18,7 +18,12 @@ import {
   sessionTeamMemberIdsInRoster,
 } from './teamGameSessions.js';
 
-export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTeams }) {
+export default function AutomaticTeamBuilder({
+  session,
+  roster = [],
+  partnershipRepeats = null,
+  onReplaceTeams,
+}) {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState(() =>
     sessionTeamMemberIdsInRoster(session?.teams, roster)
@@ -95,6 +100,7 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
     const generated = generateBalancedTeams(selectedPlayers, format, {
       balanceGender,
       balanceHeight,
+      partnershipRepeats: teamSize === 2 ? partnershipRepeats : null,
     });
     if (!generated.ok) {
       setError(generated.errors[0]?.message || `Não foi possível sortear os ${units}.`);
@@ -119,6 +125,9 @@ export default function AutomaticTeamBuilder({ session, roster = [], onReplaceTe
       <h3 className="font-bold text-sm">{drawTeamsLabel(teamSize)}</h3>
       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
         O balanceamento por nível está sempre ativo.
+        {teamSize === 2
+          ? ' O sorteio prioriza parcerias inéditas no histórico e, em seguida, o equilíbrio dos times.'
+          : ''}
       </p>
       {bounds && (
         <p className="text-sm font-semibold">

@@ -13,6 +13,91 @@ function error(code, message) {
   return { code, message };
 }
 
+function pairKey(leftId, rightId) {
+  return leftId < rightId ? `${leftId}|${rightId}` : `${rightId}|${leftId}`;
+}
+
+function deviationSquareSum(values) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return values.reduce((sum, value) => sum + (value - mean) ** 2, 0);
+}
+
+function readRepeatCount(history, leftId, rightId) {
+  if (history == null || leftId === rightId) return 0;
+  const value = history.count(leftId, rightId);
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+/**
+ * Aceita `null`, um Map `"idA|idB" → n` ou `{ count(a, b) }`.
+ * Não muta a estrutura recebida.
+ */
+export function normalizePartnershipRepeats(partnershipRepeats) {
+  if (partnershipRepeats == null) return null;
+
+  if (typeof partnershipRepeats.count === 'function') {
+    return partnershipRepeats;
+  }
+
+  if (partnershipRepeats instanceof Map) {
+    return {
+      count(leftId, rightId) {
+        if (typeof leftId !== 'string' || typeof rightId !== 'string' || leftId === rightId) {
+          return 0;
+        }
+        const value = Number(partnershipRepeats.get(pairKey(leftId, rightId)));
+        return Number.isFinite(value) && value > 0 ? value : 0;
+      },
+    };
+  }
+
+  throw Object.assign(new Error('O histórico de parcerias é inválido.'), {
+    code: 'PARTNERSHIP_HISTORY_INVALID',
+  });
+}
+
+function pairRepeatCounts(groups, history) {
+  return (groups ?? []).map((group) => {
+    const leftId = group?.[0]?.id;
+    const rightId = group?.[1]?.id;
+    if (typeof leftId !== 'string' || typeof rightId !== 'string') return 0;
+    return readRepeatCount(history, leftId, rightId);
+  });
+}
+
+/**
+ * Métrica explícita de um conjunto de duplas.
+ * Ordem de comparação: maxRepeat, repeatSum, repeatSpread, balancePenalty.
+ */
+export function scorePairing(groups, options = {}) {
+  const history = normalizePartnershipRepeats(options.partnershipRepeats ?? null);
+  const repeats = pairRepeatCounts(groups, history);
+  const maxRepeat = repeats.reduce((max, value) => (value > max ? value : max), 0);
+  const repeatSum = repeats.reduce((sum, value) => sum + value, 0);
+  return Object.freeze({
+    maxRepeat,
+    repeatSum,
+    repeatSpread: deviationSquareSum(repeats),
+    balancePenalty: calcTeamBalancePenalty(groups, {
+      balanceGender: options.balanceGender ?? true,
+      balanceHeight: options.balanceHeight ?? true,
+    }),
+  });
+}
+
+export function comparePairingScores(left, right) {
+  if (left.maxRepeat !== right.maxRepeat) return left.maxRepeat - right.maxRepeat;
+  if (left.repeatSum !== right.repeatSum) return left.repeatSum - right.repeatSum;
+  if (left.repeatSpread !== right.repeatSpread) return left.repeatSpread - right.repeatSpread;
+  return left.balancePenalty - right.balancePenalty;
+}
+
+export function isPerfectPairingScore(score) {
+  return score.maxRepeat === 0 && score.balancePenalty === 0;
+}
+
 function readRandomUnit(random) {
   const value = random();
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value >= 1) {
@@ -122,7 +207,8 @@ function assertPlayers(players) {
  *   random?: () => number,
  *   iterations?: number,
  *   balanceGender?: boolean,
- *   balanceHeight?: boolean
+ *   balanceHeight?: boolean,
+ *   partnershipRepeats?: Map<string, number> | { count: (a: string, b: string) => number } | null
  * }} [options]
  */
 export function generateBalancedPairs(players, options = {}) {
@@ -136,6 +222,7 @@ export function generateBalancedPairs(players, options = {}) {
     iterations = 10000,
     balanceGender = true,
     balanceHeight = true,
+    partnershipRepeats = null,
   } = options;
 
   if (typeof idGenerator !== 'function') {
@@ -145,19 +232,30 @@ export function generateBalancedPairs(players, options = {}) {
     return fail([error('RANDOM_INVALID', 'O gerador aleatório precisa ser uma função.')]);
   }
 
+  let history;
+  try {
+    history = normalizePartnershipRepeats(partnershipRepeats);
+  } catch (caught) {
+    if (caught?.code === 'PARTNERSHIP_HISTORY_INVALID') {
+      return fail([error('PARTNERSHIP_HISTORY_INVALID', caught.message)]);
+    }
+    throw caught;
+  }
+
   const totalIterations = Number.isInteger(iterations) && iterations > 0 ? iterations : 10000;
+  const scoring = { partnershipRepeats: history, balanceGender, balanceHeight };
   let bestGroups = null;
-  let minPenalty = Infinity;
+  let bestScore = null;
 
   try {
     for (let round = 0; round < totalIterations; round += 1) {
       const shuffled = shuffleCopy(source, random);
       const teams = chunkPairs(shuffled);
-      const penalty = calcTeamBalancePenalty(teams, { balanceGender, balanceHeight });
-      if (penalty < minPenalty) {
-        minPenalty = penalty;
+      const score = scorePairing(teams, scoring);
+      if (!bestScore || comparePairingScores(score, bestScore) < 0) {
+        bestScore = score;
         bestGroups = teams;
-        if (minPenalty === 0) break;
+        if (isPerfectPairingScore(score)) break;
       }
     }
   } catch (caught) {

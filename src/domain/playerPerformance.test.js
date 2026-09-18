@@ -8,6 +8,7 @@ import {
 } from '../teamGameSessions.js';
 import {
   ANALYSIS_SCORE_ERROR_CODES,
+  buildPartnershipRepeatLookup,
   buildPlayerPerformanceIndex,
   formatPerformanceModality,
   RANKING_SORT_FIELDS,
@@ -1396,5 +1397,71 @@ describe('ranking de jogadores', () => {
       ['bruno', 0, 1],
     ]);
     expect(RANKING_SORT_FIELDS).toContain('winRate');
+  });
+});
+
+describe('lookup compacto de parcerias', () => {
+  const andrePaulo = [member('andre', 'André'), member('paulo', 'Paulo')];
+  const joaoPedro = [member('joao', 'João'), member('pedro', 'Pedro')];
+  const andreAna = [member('andre', 'André'), member('ana', 'Ana')];
+  const gabiLuiza = [member('gabi', 'Gabi'), member('luiza', 'Luiza')];
+
+  function lookupDocument() {
+    return documentOf(
+      pairingSession({
+        id: 'win-day',
+        date: '2026-08-31',
+        scoreA: 21,
+        scoreB: 17,
+        lineupA: andrePaulo,
+        lineupB: joaoPedro,
+      }),
+      pairingSession({
+        id: 'loss-day',
+        date: '2026-09-01',
+        scoreA: 15,
+        scoreB: 21,
+        lineupA: andrePaulo,
+        lineupB: joaoPedro,
+      }),
+      pairingSession({
+        id: 'pending-day',
+        date: '2026-09-02',
+        scoreA: null,
+        scoreB: null,
+        lineupA: andrePaulo,
+        lineupB: joaoPedro,
+      }),
+      pairingSession({
+        id: 'other-partner',
+        date: '2026-09-03',
+        scoreA: 21,
+        scoreB: 10,
+        lineupA: andreAna,
+        lineupB: gabiLuiza,
+      })
+    );
+  }
+
+  it('conta só partidas concluídas e não muta o índice', () => {
+    const document = lookupDocument();
+    const index = indexOf(document, roster);
+    const andrePauloBefore = getPlayerPartnerPerformance(index, 'andre', { partnerId: 'paulo' });
+    const lookup = buildPartnershipRepeatLookup(index);
+
+    expect(lookup.count('andre', 'paulo')).toBe(2);
+    expect(lookup.count('paulo', 'andre')).toBe(2);
+    expect(lookup.count('andre', 'ana')).toBe(1);
+    expect(lookup.count('andre', 'pedro')).toBe(0);
+    expect(lookup.count('andre', 'andre')).toBe(0);
+
+    const scoped = buildPartnershipRepeatLookup(index, ['andre', 'paulo', 'ana']);
+    expect(scoped.count('andre', 'paulo')).toBe(2);
+    expect(scoped.count('andre', 'ana')).toBe(1);
+    expect(scoped.count('joao', 'pedro')).toBe(0);
+
+    expect(getPlayerPartnerPerformance(index, 'andre', { partnerId: 'paulo' })).toEqual(andrePauloBefore);
+    expect(index.includedMatches).toBe(3);
+    expect(index.skippedPendingMatches).toBe(1);
   });
 });

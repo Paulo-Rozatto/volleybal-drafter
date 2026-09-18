@@ -1,6 +1,10 @@
-import { generateRoundRobinSchedule } from './domain/roundRobin.js';
+import {
+  generateBlockedRoundRobinSchedule,
+  generateRoundRobinSchedule,
+} from './domain/roundRobin.js';
 import {
   countSessionMatches,
+  isMatchCompleted,
   sessionIsReadyToFinalize,
   validateCanFinalize,
   validateDate,
@@ -14,6 +18,8 @@ import {
   cloneV2Team,
   collectSessionSnapshotPlayerIds,
   createInitialLineups,
+  roundCycleNumber,
+  validateCourtCount,
   validateFormat,
   validateMatchLineups,
   validateSessionTeams,
@@ -37,6 +43,9 @@ export const DEFAULT_TEAM_SESSION_FORMAT = {
 export const REPLACE_TEAMS_CONFIRMATION_MESSAGE = replaceTeamsConfirmationMessage(6);
 
 export const GENERATE_TEAM_ROUNDS_CONFIRMATION_MESSAGE = generateRoundsConfirmationMessage(6);
+
+export const APPEND_ROUND_ROBIN_CYCLE_CONFIRMATION_MESSAGE =
+  'Gerar um novo todos-contra-todos com as mesmas duplas, sem apagar os jogos anteriores?';
 
 export const RESET_TEAM_SESSION_TO_DRAFT_CONFIRMATION_MESSAGE = resetToDraftConfirmationMessage(6);
 
@@ -666,11 +675,51 @@ function generationBlockers(session, roster) {
   return null;
 }
 
-function roundsFromSchedule(schedule, teams) {
+function collectScheduleIds(session) {
+  const used = new Set();
+  for (const round of session?.rounds ?? []) {
+    if (typeof round?.id === 'string' && round.id.trim() !== '') used.add(round.id);
+    for (const match of round?.matches ?? []) {
+      if (typeof match?.id === 'string' && match.id.trim() !== '') used.add(match.id);
+    }
+  }
+  return used;
+}
+
+function latestCycleNumber(session) {
+  const rounds = Array.isArray(session?.rounds) ? session.rounds : [];
+  if (rounds.length === 0) return 0;
+  return rounds.reduce((max, round) => Math.max(max, roundCycleNumber(round)), 1);
+}
+
+function maxRoundNumber(session) {
+  const rounds = Array.isArray(session?.rounds) ? session.rounds : [];
+  return rounds.reduce((max, round) => {
+    const number = Number.isInteger(round?.number) ? round.number : 0;
+    return number > max ? number : max;
+  }, 0);
+}
+
+function matchesForCycle(session, cycleNumber) {
+  return (session?.rounds ?? [])
+    .filter((round) => roundCycleNumber(round) === cycleNumber)
+    .flatMap((round) => round.matches ?? []);
+}
+
+export function canAppendTeamSessionRoundRobinCycle(session) {
+  if (session?.status !== 'in_progress') return false;
+  const cycleNumber = latestCycleNumber(session);
+  if (cycleNumber < 1) return false;
+  const matches = matchesForCycle(session, cycleNumber);
+  return matches.length > 0 && matches.every((match) => isMatchCompleted(match));
+}
+
+function roundsFromSchedule(schedule, teams, { cycleNumber = 1 } = {}) {
   const byId = new Map((teams ?? []).map((team) => [team.id, team]));
   return schedule.map((round) => ({
     id: round.id,
     number: round.number,
+    cycleNumber,
     byeTeamId: round.byeTeamId,
     matches: round.matches.map((match) => {
       const { lineupA, lineupB } = createInitialLineups(byId.get(match.teamAId), byId.get(match.teamBId));
@@ -687,11 +736,54 @@ function roundsFromSchedule(schedule, teams) {
   }));
 }
 
+function buildRoundRobinRounds(teams, options = {}) {
+  const {
+    idGenerator,
+    usedIds,
+    courtCount = null,
+    cycleNumber = 1,
+    startRoundNumber = 1,
+  } = options;
+  const generator = idGenerator ?? (() => crypto.randomUUID());
+
+  if (courtCount == null) {
+    return roundsFromSchedule(
+      generateRoundRobinSchedule(teams, generator, { usedIds, startRoundNumber }),
+      teams,
+      { cycleNumber }
+    );
+  }
+
+  const courtResult = validateCourtCount(courtCount);
+  if (!courtResult.ok) {
+    throw Object.assign(new Error(courtResult.errors[0].message), {
+      code: courtResult.errors[0].code,
+      errors: courtResult.errors,
+    });
+  }
+
+  return roundsFromSchedule(
+    generateBlockedRoundRobinSchedule(teams, {
+      courtCount,
+      idGenerator: generator,
+      usedIds,
+      startRoundNumber,
+    }),
+    teams,
+    { cycleNumber }
+  );
+}
+
 export function startTeamSessionRoundRobin(document, sessionId, options = {}) {
-  const { idGenerator, now, roster, generateConfirmed = false } = options;
+  const { idGenerator, now, roster, generateConfirmed = false, courtCount = null } = options;
   const session = findSession(document, sessionId);
   const blocked = generationBlockers(session, roster);
   if (blocked) return blocked;
+
+  if (courtCount != null) {
+    const courtResult = validateCourtCount(courtCount);
+    if (!courtResult.ok) return fail(courtResult.errors);
+  }
 
   if (!generateConfirmed) {
     return fail([
@@ -702,17 +794,22 @@ export function startTeamSessionRoundRobin(document, sessionId, options = {}) {
     ]);
   }
 
-  let schedule;
+  let rounds;
   try {
-    schedule = generateRoundRobinSchedule(session.teams, idGenerator ?? (() => crypto.randomUUID()));
+    rounds = buildRoundRobinRounds(session.teams, {
+      idGenerator,
+      courtCount,
+      cycleNumber: 1,
+      startRoundNumber: 1,
+    });
   } catch (caught) {
+    if (caught?.errors) return fail(caught.errors);
     return fail([
       error('ROUND_ROBIN_FAILED', caught.message || 'Não foi possível gerar as rodadas.'),
     ]);
   }
 
   const teams = cloneTeams(session.teams);
-  const rounds = roundsFromSchedule(schedule, teams);
   const clock = now ?? (() => new Date());
   const updatedSession = {
     ...session,
@@ -725,9 +822,104 @@ export function startTeamSessionRoundRobin(document, sessionId, options = {}) {
     rounds,
     updatedAt: clock().toISOString(),
   };
+  if (courtCount != null) updatedSession.courtCount = courtCount;
 
   return succeed({
     document: replaceSession(document, session.id, updatedSession),
+    session: updatedSession,
+  });
+}
+
+export function appendTeamSessionRoundRobinCycle(document, sessionId, options = {}) {
+  const { idGenerator, now, roster, appendConfirmed = false, courtCount: courtCountOption } = options;
+  const session = findSession(document, sessionId);
+
+  if (!session) {
+    return fail([error('SESSION_NOT_FOUND', 'Encontro não encontrado.')]);
+  }
+
+  if (session.status === 'finished') {
+    return fail([
+      error('SESSION_FINISHED', 'Não é possível gerar um novo ciclo em um encontro finalizado.'),
+    ]);
+  }
+
+  if (session.status !== 'in_progress') {
+    return fail([
+      error('SESSION_NOT_IN_PROGRESS', 'Só é possível gerar um novo ciclo em um encontro em andamento.'),
+    ]);
+  }
+
+  if (!canAppendTeamSessionRoundRobinCycle(session)) {
+    return fail([
+      error(
+        'CYCLE_INCOMPLETE',
+        'Conclua todos os jogos do ciclo atual antes de gerar uma nova sequência.'
+      ),
+    ]);
+  }
+
+  const setResult = validateSessionTeams(session.teams, session.format, roster, {
+    existingMemberIds: collectSessionSnapshotPlayerIds(session),
+  });
+  if (!setResult.ok) return fail(setResult.errors);
+
+  const courtCount =
+    courtCountOption != null
+      ? courtCountOption
+      : Number.isInteger(session.courtCount)
+        ? session.courtCount
+        : null;
+
+  if (courtCount != null) {
+    const courtResult = validateCourtCount(courtCount);
+    if (!courtResult.ok) return fail(courtResult.errors);
+  }
+
+  if (!appendConfirmed) {
+    return fail([
+      error(
+        'APPEND_CYCLE_CONFIRMATION_REQUIRED',
+        APPEND_ROUND_ROBIN_CYCLE_CONFIRMATION_MESSAGE
+      ),
+    ]);
+  }
+
+  const previousRounds = (session.rounds ?? []).map(cloneV2Round);
+  let nextRounds;
+  try {
+    nextRounds = buildRoundRobinRounds(session.teams, {
+      idGenerator,
+      usedIds: collectScheduleIds(session),
+      courtCount,
+      cycleNumber: latestCycleNumber(session) + 1,
+      startRoundNumber: maxRoundNumber(session) + 1,
+    });
+  } catch (caught) {
+    if (caught?.errors) return fail(caught.errors);
+    return fail([
+      error('ROUND_ROBIN_FAILED', caught.message || 'Não foi possível gerar o novo ciclo.'),
+    ]);
+  }
+
+  const clock = now ?? (() => new Date());
+  const updatedSession = {
+    ...session,
+    format: {
+      teamSize: session.format.teamSize,
+      teamCount: session.format.teamCount,
+    },
+    teams: cloneTeams(session.teams),
+    rounds: [...previousRounds, ...nextRounds],
+    updatedAt: clock().toISOString(),
+  };
+
+  const persisted = replaceSession(document, session.id, updatedSession);
+  const documentResult = validateV2Document(persisted, roster);
+  if (!documentResult.ok) return fail(documentResult.errors);
+
+  return succeed({
+    document: persisted,
     session: updatedSession,
   });
 }

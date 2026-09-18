@@ -4,12 +4,14 @@ import { countSessionMatches } from './domain/sessionValidation.js';
 import {
   addSessionTeam,
   appendDraftTeamSession,
+  appendTeamSessionRoundRobinCycle,
   availablePlayersForTeams,
   canClearSessionScores,
   canEditSessionScores,
   canEditSessionTeams,
   canEnableFinalizeTeamSession,
   canGenerateTeamSessionRounds,
+  canAppendTeamSessionRoundRobinCycle,
   classifyLineupMember,
   clearTeamSessionMatchScore,
   createDraftTeamSession,
@@ -492,6 +494,81 @@ describe('geração das rodadas V2', () => {
       pending: 6,
       invalid: 0,
     });
+  });
+
+  it('com courtCount empacota partidas em blocos sem perder confrontos', () => {
+    const bigRoster = makeRoster(12);
+    const sixTeams = Array.from({ length: 6 }, (_, index) =>
+      team(`team-${index + 1}`, [
+        member(bigRoster[index * 2].id, bigRoster[index * 2].name),
+        member(bigRoster[index * 2 + 1].id, bigRoster[index * 2 + 1].name),
+      ])
+    );
+    const result = startTeamSessionRoundRobin(
+      documentWith(draftSession({ format: { teamSize: 2, teamCount: 6 }, teams: sixTeams })),
+      'session-1',
+      {
+        roster: bigRoster,
+        idGenerator: sequentialIds(),
+        now: NOW,
+        generateConfirmed: true,
+        courtCount: 2,
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.session.courtCount).toBe(2);
+    expect(allMatches(result.session.rounds)).toHaveLength(15);
+    expect(result.session.rounds.every((round) => round.matches.length <= 2)).toBe(true);
+    expect(result.session.rounds.every((round) => round.cycleNumber === 1)).toBe(true);
+    expect(result.session.rounds.length).toBeGreaterThan(5);
+  });
+
+  it('acrescenta um novo ciclo com as mesmas duplas sem apagar o anterior', () => {
+    const started = startTeamSessionRoundRobin(
+      documentWith(draftSession({ teams: twoTeams })),
+      'session-1',
+      { roster, idGenerator: sequentialIds(), now: NOW, generateConfirmed: true }
+    );
+    const round = started.session.rounds[0];
+    const match = round.matches[0];
+    const scored = setTeamSessionMatchScore(
+      started.document,
+      'session-1',
+      round.id,
+      match.id,
+      21,
+      18,
+      { now: LATER }
+    );
+    expect(canAppendTeamSessionRoundRobinCycle(scored.session)).toBe(true);
+
+    const preview = appendTeamSessionRoundRobinCycle(scored.document, 'session-1', {
+      roster,
+      idGenerator: sequentialIds('next'),
+      now: LATER,
+      appendConfirmed: false,
+    });
+    expect(preview.errors[0].code).toBe('APPEND_CYCLE_CONFIRMATION_REQUIRED');
+
+    const appended = appendTeamSessionRoundRobinCycle(scored.document, 'session-1', {
+      roster,
+      idGenerator: sequentialIds('next'),
+      now: LATER,
+      appendConfirmed: true,
+    });
+    expect(appended.ok).toBe(true);
+    expect(appended.session.rounds).toHaveLength(2);
+    expect(appended.session.rounds[0].matches[0]).toMatchObject({
+      id: match.id,
+      scoreA: 21,
+      scoreB: 18,
+      lineupA: match.lineupA,
+    });
+    expect(appended.session.rounds[1].cycleNumber).toBe(2);
+    expect(appended.session.rounds[1].matches[0].id).not.toBe(match.id);
+    expect(appended.session.rounds[1].matches[0].scoreA).toBeNull();
+    expect(scored.session.rounds).toHaveLength(1);
   });
 
   it('copia lineups iniciais de forma independente, inclusive incompletas', () => {

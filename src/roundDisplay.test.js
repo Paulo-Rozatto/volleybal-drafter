@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cyclesInOrder,
   formatTeamLabel,
   formatMatchScore,
+  idleTeamIds,
   matchWinningSide,
   MISSING_TEAM_LABEL,
   resolveByeLabel,
@@ -97,6 +99,30 @@ describe('roundsInOrder', () => {
     const snapshot = [...rounds];
     expect(roundsInOrder(rounds).map((round) => round.id)).toEqual(['r1', 'r2']);
     expect(rounds).toEqual(snapshot);
+  });
+});
+
+describe('cyclesInOrder e folgas de bloco', () => {
+  it('agrupa blocos por ciclo e lista quem não joga', () => {
+    const rounds = [
+      {
+        id: 'r3',
+        number: 3,
+        cycleNumber: 2,
+        matches: [{ teamAId: 'pair-1', teamBId: 'pair-2' }],
+      },
+      {
+        id: 'r1',
+        number: 1,
+        cycleNumber: 1,
+        matches: [{ teamAId: 'pair-1', teamBId: 'pair-2' }],
+      },
+    ];
+    expect(cyclesInOrder(rounds).map((cycle) => [cycle.cycleNumber, cycle.rounds.map((round) => round.id)])).toEqual([
+      [1, ['r1']],
+      [2, ['r3']],
+    ]);
+    expect(idleTeamIds(teams, rounds[0])).toEqual([]);
   });
 });
 

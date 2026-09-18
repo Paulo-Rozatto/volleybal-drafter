@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import AutomaticTeamBuilder from './AutomaticTeamBuilder.jsx';
 import TeamBuilder from './TeamBuilder.jsx';
 import RoundBoard from './RoundBoard.jsx';
@@ -12,6 +12,10 @@ import {
   nextSessionDetailView,
 } from './sessionPerformancePresentation.js';
 import { generateRoundsBlockedReason } from './teamFormationUi.js';
+import {
+  buildPartnershipRepeatLookup,
+  buildPlayerPerformanceIndex,
+} from './domain/playerPerformance.js';
 import {
   alterTeamsLabel,
   drawTeamsLabel,
@@ -27,6 +31,9 @@ import {
 } from './teamPresentation.js';
 import {
   addSessionTeam,
+  APPEND_ROUND_ROBIN_CYCLE_CONFIRMATION_MESSAGE,
+  appendTeamSessionRoundRobinCycle,
+  canAppendTeamSessionRoundRobinCycle,
   canClearSessionScores,
   canEditSessionScores,
   canEditSessionTeams,
@@ -75,11 +82,14 @@ export default function GameSessionDetail({
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmFinalize, setConfirmFinalize] = useState(false);
+  const [confirmAppendCycle, setConfirmAppendCycle] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [courtCount, setCourtCount] = useState(2);
 
   if (session?.id !== viewSessionId) {
     setViewSessionId(session?.id);
     setDetailView(SESSION_DETAIL_DEFAULT_VIEW);
+    setCourtCount(Number.isInteger(session?.courtCount) ? session.courtCount : 2);
   }
 
   const showGames = detailView === SESSION_DETAIL_GAMES_VIEW;
@@ -87,16 +97,29 @@ export default function GameSessionDetail({
   const teamSize = resolveTeamSize(session);
   const units = teamUnitNoun(teamSize, 2);
   const { teamCount } = sessionListStats(session);
+  const formatTeamCount = session?.format?.teamCount ?? teamCount;
   const { roundCount, matchCount, completedCount, pendingCount, invalidCount } =
     teamSessionRoundSummary(session);
   const editable = canEditSessionTeams(session);
   const mode = editable ? teamMode : 'manual';
   const canGenerate = canGenerateTeamSessionRounds(session, players);
+  const canAppendCycle = canAppendTeamSessionRoundRobinCycle(session);
   const generateBlockedReason = editable && !canGenerate ? generateRoundsBlockedReason(session) : null;
   const inProgress = session?.status === 'in_progress';
   const finished = session?.status === 'finished';
   const canFinalize = canEnableFinalizeTeamSession(session);
   const finalizeProgressLabel = teamSessionFinalizeProgressLabel(session);
+  const maxCourts = Math.max(1, Math.floor(Math.max(formatTeamCount, 2) / 2));
+  const selectedCourtCount = Math.min(Math.max(courtCount, 1), maxCourts);
+  const partnershipIndex = useMemo(
+    () => buildPlayerPerformanceIndex(document, players),
+    [document, players]
+  );
+  const partnershipRepeats = useMemo(
+    () =>
+      partnershipIndex.ok ? buildPartnershipRepeatLookup(partnershipIndex.index) : null,
+    [partnershipIndex]
+  );
 
   const applyOperation = (operation) => onApplyOperation?.(operation);
 
@@ -106,6 +129,7 @@ export default function GameSessionDetail({
       setConfirmGenerate(false);
       setConfirmReset(false);
       setConfirmFinalize(false);
+      setConfirmAppendCycle(false);
       setActionError(null);
     }
     return result;
@@ -132,6 +156,11 @@ export default function GameSessionDetail({
       setActionError(null);
       return result;
     }
+    if (code === 'APPEND_CYCLE_CONFIRMATION_REQUIRED') {
+      setConfirmAppendCycle(true);
+      setActionError(null);
+      return result;
+    }
     if (code === INVALID_CACHE_CONFIRMATION_REQUIRED) return result;
     if (result?.errors?.[0]?.message) setActionError(result.errors[0].message);
     return result;
@@ -141,6 +170,7 @@ export default function GameSessionDetail({
     applyRoundAction((document) =>
       startTeamSessionRoundRobin(document, session.id, {
         roster: players,
+        courtCount: selectedCourtCount,
         generateConfirmed: false,
       })
     );
@@ -150,7 +180,28 @@ export default function GameSessionDetail({
     applyRoundAction((document) =>
       startTeamSessionRoundRobin(document, session.id, {
         roster: players,
+        courtCount: selectedCourtCount,
         generateConfirmed: true,
+      })
+    );
+  };
+
+  const requestAppendCycle = () => {
+    applyRoundAction((document) =>
+      appendTeamSessionRoundRobinCycle(document, session.id, {
+        roster: players,
+        courtCount: session.courtCount ?? selectedCourtCount,
+        appendConfirmed: false,
+      })
+    );
+  };
+
+  const confirmAppendCycleAction = () => {
+    applyRoundAction((document) =>
+      appendTeamSessionRoundRobinCycle(document, session.id, {
+        roster: players,
+        courtCount: session.courtCount ?? selectedCourtCount,
+        appendConfirmed: true,
       })
     );
   };
@@ -249,6 +300,11 @@ export default function GameSessionDetail({
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
           {formatTeamCountPhrase(teamCount, teamSize)}
         </p>
+        {Number.isInteger(session?.courtCount) && (
+          <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+            {pluralize(session.courtCount, 'quadra', 'quadras')}
+          </p>
+        )}
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
           {pluralize(roundCount, 'rodada', 'rodadas')} · {pluralize(matchCount, 'partida', 'partidas')}
         </p>
@@ -357,6 +413,7 @@ export default function GameSessionDetail({
           key={session.updatedAt}
           session={session}
           roster={players}
+          partnershipRepeats={partnershipRepeats}
           onReplaceTeams={(teams, { replaceConfirmed } = {}) =>
             applyTeamChange((document) =>
               replaceSessionTeams(document, session.id, teams, {
@@ -404,6 +461,38 @@ export default function GameSessionDetail({
           {actionError && !confirmGenerate && (
             <p className="text-xs font-semibold text-red-500">{actionError}</p>
           )}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold">Número de quadras</p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCourtCount((current) => Math.max(1, current - 1))}
+                disabled={selectedCourtCount <= 1}
+                className="w-10 h-10 font-bold rounded-lg border cursor-pointer disabled:opacity-50"
+                style={{
+                  backgroundColor: 'var(--bg-subtle)',
+                  borderColor: 'var(--border-color)',
+                  color: 'var(--text-main)',
+                }}
+              >
+                -
+              </button>
+              <span className="w-8 text-center font-bold">{selectedCourtCount}</span>
+              <button
+                type="button"
+                onClick={() => setCourtCount((current) => Math.min(maxCourts, current + 1))}
+                disabled={selectedCourtCount >= maxCourts}
+                className="w-10 h-10 font-bold rounded-lg border cursor-pointer disabled:opacity-50"
+                style={{
+                  backgroundColor: 'var(--bg-subtle)',
+                  borderColor: 'var(--border-color)',
+                  color: 'var(--text-main)',
+                }}
+              >
+                +
+              </button>
+            </div>
+          </div>
           <button
             type="button"
             onClick={requestGenerateRounds}
@@ -459,8 +548,18 @@ export default function GameSessionDetail({
               </p>
             </>
           )}
-          {actionError && !confirmReset && !confirmFinalize && (
+          {actionError && !confirmReset && !confirmFinalize && !confirmAppendCycle && (
             <p className="text-xs font-semibold text-red-500">{actionError}</p>
+          )}
+          {canAppendCycle && (
+            <button
+              type="button"
+              onClick={requestAppendCycle}
+              className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer"
+              style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+            >
+              Gerar nova sequência
+            </button>
           )}
           <button
             type="button"
@@ -496,6 +595,17 @@ export default function GameSessionDetail({
           confirmLabel="Gerar rodadas"
           onConfirm={confirmGenerateRounds}
           onCancel={() => setConfirmGenerate(false)}
+        />
+      )}
+
+      {confirmAppendCycle && (
+        <ConfirmDialog
+          titleId="append-cycle-title"
+          title="Gerar nova sequência"
+          message={APPEND_ROUND_ROBIN_CYCLE_CONFIRMATION_MESSAGE}
+          confirmLabel="Gerar nova sequência"
+          onConfirm={confirmAppendCycleAction}
+          onCancel={() => setConfirmAppendCycle(false)}
         />
       )}
 

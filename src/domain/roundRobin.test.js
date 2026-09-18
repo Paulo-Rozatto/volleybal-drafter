@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { generateRoundRobin, generateRoundRobinSchedule } from './roundRobin.js';
+import {
+  countBackToBackTeamPlays,
+  generateBlockedRoundRobinSchedule,
+  generateRoundRobin,
+  generateRoundRobinSchedule,
+  naiveBlockedRoundRobinSchedule,
+} from './roundRobin.js';
 
 function makePairs(count) {
   return Array.from({ length: count }, (_, index) => ({
@@ -373,5 +379,93 @@ describe('generateRoundRobinSchedule', () => {
     expect(() => generateRoundRobinSchedule(makeTeams(2), () => 'same')).toThrow(
       'O gerador de IDs retornou um identificador repetido.'
     );
+  });
+});
+
+function assertBlockedInvariants(teams, rounds, courtCount) {
+  const n = teams.length;
+  const teamIds = teams.map((team) => team.id);
+  const pairingKeys = new Set();
+  const roundIds = new Set();
+  const matchIds = new Set();
+
+  expect(allMatches(rounds)).toHaveLength(expectedMatchCount(n));
+
+  rounds.forEach((round, index) => {
+    expect(round.number).toBe(index + 1);
+    expect(round.matches.length).toBeLessThanOrEqual(courtCount);
+    expect(round.matches.length).toBeGreaterThan(0);
+    roundIds.add(round.id);
+
+    const seenThisBlock = new Set();
+    round.matches.forEach((match) => {
+      expect(match.teamAId).not.toBe(match.teamBId);
+      expect(teamIds).toContain(match.teamAId);
+      expect(teamIds).toContain(match.teamBId);
+      expect(seenThisBlock.has(match.teamAId)).toBe(false);
+      expect(seenThisBlock.has(match.teamBId)).toBe(false);
+      seenThisBlock.add(match.teamAId);
+      seenThisBlock.add(match.teamBId);
+
+      const key = scheduleMatchKey(match.teamAId, match.teamBId);
+      expect(pairingKeys.has(key)).toBe(false);
+      pairingKeys.add(key);
+      matchIds.add(match.id);
+    });
+  });
+
+  expect(pairingKeys.size).toBe(expectedMatchCount(n));
+  expect(roundIds.size).toBe(rounds.length);
+  expect(matchIds.size).toBe(allMatches(rounds).length);
+}
+
+describe('generateBlockedRoundRobinSchedule', () => {
+  const cases = [
+    [4, 1],
+    [4, 2],
+    [5, 2],
+    [6, 2],
+    [7, 2],
+    [8, 3],
+  ];
+
+  cases.forEach(([teamCount, courtCount]) => {
+    it(`empacota ${teamCount} times em blocos de ${courtCount} quadra(s)`, () => {
+      const teams = makeTeams(teamCount);
+      const rounds = generateBlockedRoundRobinSchedule(teams, {
+        courtCount,
+        idGenerator: createIdGenerator(),
+      });
+      assertBlockedInvariants(teams, rounds, courtCount);
+
+      const naive = naiveBlockedRoundRobinSchedule(teams, courtCount);
+      expect(countBackToBackTeamPlays(rounds)).toBeLessThanOrEqual(countBackToBackTeamPlays(naive));
+    });
+  });
+
+  it('é determinístico para os mesmos times, quadras e gerador', () => {
+    const teams = makeTeams(7);
+    const first = generateBlockedRoundRobinSchedule(teams, {
+      courtCount: 2,
+      idGenerator: createIdGenerator(),
+    });
+    const second = generateBlockedRoundRobinSchedule(teams, {
+      courtCount: 2,
+      idGenerator: createIdGenerator(),
+    });
+    expect(first).toEqual(second);
+  });
+
+  it('não modifica os times recebidos', () => {
+    const teams = makeTeams(6);
+    const original = structuredClone(teams);
+    generateBlockedRoundRobinSchedule(teams, { courtCount: 2, idGenerator: createIdGenerator() });
+    expect(teams).toEqual(original);
+  });
+
+  it('rejeita courtCount inválido sem resultado parcial', () => {
+    expect(() =>
+      generateBlockedRoundRobinSchedule(makeTeams(4), { courtCount: 0, idGenerator: createIdGenerator() })
+    ).toThrow('A quantidade de quadras precisa ser um inteiro maior ou igual a 1.');
   });
 });

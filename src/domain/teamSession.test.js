@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   TEAM_SESSION_SCHEMA_VERSION,
   cloneTeamMembers,
+  cloneV2Round,
+  cloneV2Session,
   createInitialLineups,
   validateFormat,
   validateLineup,
@@ -351,6 +353,137 @@ describe('validateV2Session', () => {
     };
 
     expect(validateV2Session(session, roster).ok).toBe(true);
+  });
+
+  it('rejeita mais partidas do que quadras e o mesmo time em duas quadras', () => {
+    const base = {
+      id: 's1',
+      date: '2026-09-12',
+      name: null,
+      status: 'in_progress',
+      createdAt: '2026-09-12T18:00:00.000Z',
+      updatedAt: '2026-09-12T18:00:00.000Z',
+      format: { teamSize: 2, teamCount: 4 },
+      courtCount: 1,
+      teams: [
+        team('t1', [member('p1', 'Erik'), member('p2', 'André')]),
+        team('t2', [member('p3', 'Gabi'), member('p4', 'Luiza')]),
+        team('t3', [member('p5', 'Ian'), member('p6', 'Ana')]),
+        team('t4', [member('p7', 'BH'), member('p8', 'Arthur')]),
+      ],
+    };
+    const overflow = {
+      ...base,
+      rounds: [
+        {
+          id: 'r1',
+          number: 1,
+          byeTeamId: null,
+          matches: [
+            {
+              id: 'm1',
+              teamAId: 't1',
+              teamBId: 't2',
+              lineupA: [member('p1', 'Erik')],
+              lineupB: [member('p3', 'Gabi')],
+              scoreA: null,
+              scoreB: null,
+            },
+            {
+              id: 'm2',
+              teamAId: 't3',
+              teamBId: 't4',
+              lineupA: [member('p5', 'Ian')],
+              lineupB: [member('p7', 'BH')],
+              scoreA: null,
+              scoreB: null,
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateV2Session(overflow, roster).errors.map((item) => item.code)).toContain(
+      'ROUND_COURT_OVERFLOW'
+    );
+
+    const duplicateTeam = {
+      ...base,
+      courtCount: 2,
+      rounds: [
+        {
+          id: 'r1',
+          number: 1,
+          cycleNumber: 1,
+          byeTeamId: null,
+          matches: [
+            {
+              id: 'm1',
+              teamAId: 't1',
+              teamBId: 't2',
+              lineupA: [member('p1', 'Erik')],
+              lineupB: [member('p3', 'Gabi')],
+              scoreA: null,
+              scoreB: null,
+            },
+            {
+              id: 'm2',
+              teamAId: 't1',
+              teamBId: 't3',
+              lineupA: [member('p2', 'André')],
+              lineupB: [member('p5', 'Ian')],
+              scoreA: null,
+              scoreB: null,
+            },
+          ],
+        },
+      ],
+    };
+    expect(validateV2Session(duplicateTeam, roster).errors.map((item) => item.code)).toContain(
+      'ROUND_TEAM_DUPLICATE'
+    );
+  });
+
+  it('preserva courtCount e cycleNumber no clone', () => {
+    const session = {
+      id: 's1',
+      date: '2026-09-12',
+      name: null,
+      status: 'in_progress',
+      createdAt: '2026-09-12T18:00:00.000Z',
+      updatedAt: '2026-09-12T18:00:00.000Z',
+      format: { teamSize: 2, teamCount: 2 },
+      courtCount: 2,
+      teams: [
+        team('t1', [member('p1', 'Erik'), member('p2', 'André')]),
+        team('t2', [member('p3', 'Gabi'), member('p4', 'Luiza')]),
+      ],
+      rounds: [
+        {
+          id: 'r1',
+          number: 1,
+          cycleNumber: 2,
+          byeTeamId: null,
+          matches: [
+            {
+              id: 'm1',
+              teamAId: 't1',
+              teamBId: 't2',
+              lineupA: [member('p1', 'Erik')],
+              lineupB: [member('p3', 'Gabi')],
+              scoreA: 21,
+              scoreB: 18,
+            },
+          ],
+        },
+      ],
+    };
+    const cloned = cloneV2Session(session);
+    expect(cloned.courtCount).toBe(2);
+    expect(cloneV2Round(session.rounds[0]).cycleNumber).toBe(2);
+    cloned.courtCount = 9;
+    cloned.rounds[0].cycleNumber = 8;
+    expect(session.courtCount).toBe(2);
+    expect(session.rounds[0].cycleNumber).toBe(2);
   });
 });
 
