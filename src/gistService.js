@@ -1,10 +1,20 @@
-import { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constants.js';
+import {
+  COMPETITIONS_FILENAME,
+  GAME_SESSIONS_FILENAME,
+  PLAYERS_FILENAME,
+} from './persistence/constants.js';
 import {
   createEmptyGameSessionsDocument,
   interpretGameSessionsJson,
   serializeGameSessionsDocument,
   validateGameSessionsDocument,
 } from './persistence/gameSessionsDocument.js';
+import {
+  createEmptyCompetitionDocument,
+  interpretCompetitionsJson,
+  serializeCompetitionsDocument,
+  validateCompetitionsDocument,
+} from './persistence/competitionsDocument.js';
 import { readGistFileContent } from './gistFileContent.js';
 import {
   extractGistRevision,
@@ -16,7 +26,7 @@ export const GIST_ID = '58f047706f0f4c48bc83b18aab5e5949';
 export const DEFAULT_FILENAME = PLAYERS_FILENAME;
 export const ENCRYPTED_GITHUB_TOKEN = 'Dh4mcqVeMAbw4SEOao+YGy+FZy6eEzQDxZ3fu30e3XuRWA7d/GATh9n0dQASmvfH5DLwOCJT+uak41sEDSPlolIN1NyCsqBc0olt7GkR7mIUStS1dFTA+cjZmaBlAtmPDOqFrxsA4LsnrxES85OWKKxxjUdoWWFDuQ==';
 
-export { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME };
+export { COMPETITIONS_FILENAME, GAME_SESSIONS_FILENAME, PLAYERS_FILENAME };
 export {
   extractGistRevision,
   GIST_EXPECTED_REVISION_REQUIRED_MESSAGE,
@@ -84,6 +94,38 @@ function parseGameSessionsContent(content) {
   }
 }
 
+function parseCompetitionsContent(content) {
+  if (isBlankContent(content)) {
+    return {
+      document: createEmptyCompetitionDocument(),
+      sourceVersion: null,
+      migrated: false,
+    };
+  }
+
+  try {
+    JSON.parse(content);
+  } catch {
+    throw new Error('JSON inválido em competitions.json.');
+  }
+
+  try {
+    return interpretCompetitionsJson(content);
+  } catch (error) {
+    throw new Error(`Arquivo competitions.json inválido: ${error.message}`);
+  }
+}
+
+function serializeGistFile(filename, value) {
+  if (filename === GAME_SESSIONS_FILENAME) {
+    return serializeGameSessionsDocument(value);
+  }
+  if (filename === COMPETITIONS_FILENAME) {
+    return serializeCompetitionsDocument(value);
+  }
+  return JSON.stringify(value, null, 2);
+}
+
 function isUsableRevision(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -108,13 +150,19 @@ export async function loadGistState({ fetchImpl } = {}) {
   const sessionsContent = await readGistFileContent(files, GAME_SESSIONS_FILENAME, {
     fetchImpl,
   });
+  const competitionsContent = await readGistFileContent(files, COMPETITIONS_FILENAME, {
+    fetchImpl,
+  });
   const sessions = parseGameSessionsContent(sessionsContent);
+  const competitions = parseCompetitionsContent(competitionsContent);
 
   return {
     players: parsePlayersContent(playersContent),
     gameSessions: sessions.document,
-    migrated: sessions.migrated,
+    competitions: competitions.document,
+    migrated: Boolean(sessions.migrated || competitions.migrated),
     sourceVersion: sessions.sourceVersion,
+    competitionsSourceVersion: competitions.sourceVersion,
     revision,
   };
 }
@@ -134,10 +182,7 @@ export async function patchGistFiles(fileMap, token, { fetchImpl } = {}) {
       throw new Error(`Não é permitido enviar ${filename} como null ou undefined.`);
     }
     files[filename] = {
-      content:
-        filename === GAME_SESSIONS_FILENAME
-          ? serializeGameSessionsDocument(value)
-          : JSON.stringify(value, null, 2),
+      content: serializeGistFile(filename, value),
     };
   }
 
@@ -173,6 +218,7 @@ function readSavedRevision(patchBody) {
 export async function saveGistState({
   players,
   gameSessions,
+  competitions,
   expectedRevision,
   token,
   getToken,
@@ -182,6 +228,9 @@ export async function saveGistState({
     throw new Error('players precisa ser um array.');
   }
   const validSessions = validateGameSessionsDocument(gameSessions);
+  const validCompetitions = validateCompetitionsDocument(
+    competitions ?? createEmptyCompetitionDocument()
+  );
 
   if (!isUsableRevision(expectedRevision)) {
     throw new Error(GIST_EXPECTED_REVISION_REQUIRED_MESSAGE);
@@ -197,6 +246,7 @@ export async function saveGistState({
     {
       [PLAYERS_FILENAME]: players,
       [GAME_SESSIONS_FILENAME]: validSessions,
+      [COMPETITIONS_FILENAME]: validCompetitions,
     },
     resolvedToken,
     { fetchImpl }

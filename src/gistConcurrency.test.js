@@ -7,7 +7,7 @@ import {
   loadGistState,
   saveGistState,
 } from './gistService.js';
-import { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constants.js';
+import { COMPETITIONS_FILENAME, GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constants.js';
 import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
 import {
   applyGistSaveFailure,
@@ -136,7 +136,7 @@ describe('preflight de salvamento', () => {
     expect(fetchImpl.mock.calls[1][1].method).toBe('PATCH');
     const body = JSON.parse(fetchImpl.mock.calls[1][1].body);
     expect(Object.keys(body.files).sort()).toEqual(
-      [GAME_SESSIONS_FILENAME, PLAYERS_FILENAME].sort()
+      [COMPETITIONS_FILENAME, GAME_SESSIONS_FILENAME, PLAYERS_FILENAME].sort()
     );
   });
 

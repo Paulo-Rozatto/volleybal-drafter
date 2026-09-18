@@ -8,11 +8,15 @@ import {
   saveGistState,
   savePlayersToGist,
 } from './gistService.js';
-import { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constants.js';
+import { COMPETITIONS_FILENAME, GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constants.js';
 import {
   createEmptyGameSessionsDocument,
   serializeGameSessionsDocument,
 } from './persistence/gameSessionsDocument.js';
+import {
+  createEmptyCompetitionDocument,
+  serializeCompetitionsDocument,
+} from './persistence/competitionsDocument.js';
 
 const TOKEN = 'ghp_test_token_secret';
 const ISO = '2026-09-12T18:00:00.000Z';
@@ -138,6 +142,7 @@ describe('loadGistState', () => {
     expect(state.migrated).toBe(false);
     expect(state.sourceVersion).toBe(2);
     expect(state.gameSessions).toEqual(createEmptyGameSessionsDocument());
+    expect(state.competitions).toEqual(createEmptyCompetitionDocument());
     expect(state.revision).toBe('version:rev-test');
   });
 
@@ -171,6 +176,7 @@ describe('loadGistState', () => {
     const state = await loadGistState({ fetchImpl });
     expect(state.players).toEqual([{ id: 'p1' }]);
     expect(state.gameSessions).toEqual(createEmptyGameSessionsDocument());
+    expect(state.competitions).toEqual(createEmptyCompetitionDocument());
     expect(state.migrated).toBe(false);
     expect(state.sourceVersion).toBeNull();
   });
@@ -187,6 +193,7 @@ describe('loadGistState', () => {
     const state = await loadGistState({ fetchImpl });
     expect(state.players).toEqual([]);
     expect(state.gameSessions).toEqual(createEmptyGameSessionsDocument());
+    expect(state.competitions).toEqual(createEmptyCompetitionDocument());
   });
 
   it('trata conteúdo vazio como arquivo ausente', async () => {
@@ -202,6 +209,7 @@ describe('loadGistState', () => {
     const state = await loadGistState({ fetchImpl });
     expect(state.players).toEqual([]);
     expect(state.gameSessions).toEqual(createEmptyGameSessionsDocument());
+    expect(state.competitions).toEqual(createEmptyCompetitionDocument());
   });
 
   it('identifica JSON inválido em players.json', async () => {
@@ -259,6 +267,77 @@ describe('loadGistState', () => {
     await expect(loadGistState({ fetchImpl })).rejects.toThrow(
       'Versão de schema de encontros não suportada: 9.'
     );
+  });
+
+  it('Gist antigo sem competitions.json carrega documento vazio', async () => {
+    const fetchImpl = mockFetch(
+      jsonResponse(
+        gistPayload({
+          [PLAYERS_FILENAME]: { content: JSON.stringify([{ id: 'p1' }]) },
+          [GAME_SESSIONS_FILENAME]: {
+            content: JSON.stringify({ schemaVersion: 2, sessions: [] }),
+          },
+        })
+      )
+    );
+
+    const state = await loadGistState({ fetchImpl });
+    expect(state.competitions).toEqual(createEmptyCompetitionDocument());
+    expect(state.competitionsSourceVersion).toBeNull();
+    expect(state.gameSessions).toEqual(createEmptyGameSessionsDocument());
+  });
+
+  it('lê competitions.json válido', async () => {
+    const competitions = {
+      schemaVersion: 1,
+      competitions: [
+        {
+          id: 'c1',
+          name: 'Open',
+          status: 'draft',
+          createdAt: ISO,
+          updatedAt: ISO,
+          format: { teamSize: 2 },
+          tournamentType: 'single_elimination',
+          teams: [],
+          rounds: [],
+        },
+      ],
+    };
+    const fetchImpl = mockFetch(
+      jsonResponse(
+        gistPayload({
+          [COMPETITIONS_FILENAME]: { content: JSON.stringify(competitions) },
+        })
+      )
+    );
+
+    const state = await loadGistState({ fetchImpl });
+    expect(state.competitions.schemaVersion).toBe(2);
+    expect(state.competitions.competitions[0]).toMatchObject({
+      id: 'c1',
+      name: 'Open',
+      status: 'draft',
+    });
+    expect(state.competitions.competitions[0].stages[0]).toMatchObject({
+      type: 'single_elimination',
+      status: 'pending',
+      rounds: [],
+    });
+    expect(state.competitionsSourceVersion).toBe(1);
+    expect(state.migrated).toBe(true);
+  });
+
+  it('identifica JSON inválido em competitions.json', async () => {
+    const fetchImpl = mockFetch(
+      jsonResponse(
+        gistPayload({
+          [COMPETITIONS_FILENAME]: { content: '{not-json' },
+        })
+      )
+    );
+
+    await expect(loadGistState({ fetchImpl })).rejects.toThrow('JSON inválido em competitions.json.');
   });
 
   it('propaga erro HTTP no GET', async () => {
@@ -490,13 +569,16 @@ describe('patchGistFiles e saveGistState', () => {
     expect(fetchImpl.mock.calls[1][1].method).toBe('PATCH');
     const body = JSON.parse(fetchImpl.mock.calls[1][1].body);
     expect(Object.keys(body.files).sort()).toEqual(
-      [GAME_SESSIONS_FILENAME, PLAYERS_FILENAME].sort()
+      [COMPETITIONS_FILENAME, GAME_SESSIONS_FILENAME, PLAYERS_FILENAME].sort()
     );
     expect(JSON.parse(body.files[PLAYERS_FILENAME].content)).toEqual(players);
     expect(body.files[GAME_SESSIONS_FILENAME].content).toBe(
       serializeGameSessionsDocument(gameSessions)
     );
     expect(JSON.parse(body.files[GAME_SESSIONS_FILENAME].content)).toEqual(gameSessions);
+    expect(body.files[COMPETITIONS_FILENAME].content).toBe(
+      serializeCompetitionsDocument(createEmptyCompetitionDocument())
+    );
   });
 
   it('rejeita PATCH de documento V1 antes do fetch e deixa players.json intacto', async () => {

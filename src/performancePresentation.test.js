@@ -32,9 +32,12 @@ import {
   sortPartnersForFilter,
   summaryQueryFilters,
   formatMatchHistoryDate,
+  formatMatchHistoryPhase,
   formatMatchHistoryResult,
   formatMatchHistoryScoreline,
+  formatMatchHistorySource,
   nextPerformanceTab,
+  rankingSourceFilterOptions,
 } from './performancePresentation.js';
 
 const ISO = '2026-09-12T18:00:00.000Z';
@@ -376,8 +379,11 @@ describe('isolamento da tela', () => {
     expect(combined).not.toMatch(/gistService/);
     expect(combined).not.toMatch(/persistLocalGameSessions/);
     expect(combined).not.toMatch(/applyGameSessionsOperation/);
-    expect(app).toMatch('<PerformanceHub document={gameSessions} roster={players} />');
-    expect(app).not.toMatch(/PerformanceHub[\s\S]{0,200}onApplyOperation/);
+    expect(app).toMatch('<PerformanceHub');
+    expect(app).toMatch('document={gameSessions}');
+    expect(app).toMatch('roster={players}');
+    expect(app).toMatch('competitionsDocument={competitions}');
+    expect(app).not.toMatch(/PerformanceHub[\s\S]{0,400}onApplyOperation/);
   });
 });
 
@@ -396,6 +402,30 @@ describe('histórico de partidas e ranking', () => {
     ).toBe('André / Paulo 21 × 17 João / Pedro');
     expect(formatMatchHistoryResult('win')).toBe('Vitória');
     expect(formatMatchHistoryResult('loss')).toBe('Derrota');
+    expect(
+      formatMatchHistorySource({
+        sourceType: 'competition',
+        sourceName: 'Clash de Sexta',
+      })
+    ).toBe('Competição · Clash de Sexta');
+    expect(
+      formatMatchHistorySource({
+        sourceType: 'session',
+        sourceName: 'Sábado na Arena',
+      })
+    ).toBe('Encontro · Sábado na Arena');
+    expect(
+      formatMatchHistoryPhase({
+        sourceType: 'competition',
+        roundLabel: 'Semifinal',
+      })
+    ).toBe('Semifinal');
+    expect(formatMatchHistoryPhase({ sourceType: 'session', roundLabel: 'Rodada 1' })).toBe('');
+    expect(rankingSourceFilterOptions().map((item) => item.label)).toEqual([
+      'Todas',
+      'Encontros',
+      'Competições',
+    ]);
   });
 
   it('expõe opções de ordenação e trata seleção vazia como todos os jogadores', () => {
@@ -427,7 +457,12 @@ describe('histórico de partidas e ranking', () => {
     expect(rankingView).toContain('Média feitos');
     expect(rankingView).toContain('Média sofridos');
     expect(rankingView).toContain('formatPointsAverage');
+    expect(rankingView).toContain('Origem');
+    expect(rankingView).toContain('ranking-source');
     expect(rankingView).not.toMatch(/toFixed\(/);
+    const playerView = readFileSync(new URL('./PlayerPerformanceView.jsx', import.meta.url), 'utf8');
+    expect(playerView).toContain('formatMatchHistorySource');
+    expect(playerView).toContain('formatMatchHistoryPhase');
     const players = [{ playerId: 'andre' }, { playerId: 'paulo' }];
     expect(resolveRankingPlayerIds([], players)).toBeNull();
     expect(resolveRankingPlayerIds(['andre', 'missing'], players)).toEqual(['andre']);

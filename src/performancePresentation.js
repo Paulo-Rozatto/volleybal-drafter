@@ -11,7 +11,7 @@ export const BEST_PARTNER_RANKING_NOTE =
 export const NO_PARTNERS_IN_SCOPE_MESSAGE =
   'Ainda não há partidas com parceiros neste recorte.';
 export const PERFORMANCE_INTRO =
-  'Qualquer partida com placar válido entra no cálculo, independentemente do status do encontro.';
+  'Qualquer partida com placar válido de encontros ou competições entra no cálculo. BYEs e partidas pendentes não contam.';
 export const MODALITY_RULE_NOTE =
   'A modalidade é determinada pela quantidade de jogadores na escalação de cada lado.';
 export const INVALID_SCORES_WARNING =
@@ -202,9 +202,12 @@ export const PERFORMANCE_PLAYER_TAB_LABEL = 'Jogador';
 export const PERFORMANCE_RANKING_TAB_LABEL = 'Ranking';
 export const MATCH_HISTORY_EMPTY_MESSAGE = 'Nenhuma partida neste recorte.';
 export const RANKING_INTRO =
-  'Compare jogadores com as partidas válidas do histórico. O período usa a data do encontro.';
+  'Compare jogadores com as partidas válidas de encontros e competições. O período usa a data do encontro ou a data em que a partida da competição foi disputada.';
 export const RANKING_PLAYER_FILTER_NOTE =
   'A seleção limita quem aparece no ranking. As estatísticas de cada jogador incluem jogos contra qualquer adversário no período.';
+export const RANKING_SOURCE_ALL_LABEL = 'Todas';
+export const RANKING_SOURCE_SESSION_LABEL = 'Encontros';
+export const RANKING_SOURCE_COMPETITION_LABEL = 'Competições';
 
 export function formatMatchSideNames(members) {
   return (Array.isArray(members) ? members : [])
@@ -221,6 +224,33 @@ export function formatMatchHistoryDate(sessionDate) {
   }
   const [year, month, day] = sessionDate.split('-');
   return `${day}/${month}/${year}`;
+}
+
+export function formatMatchHistorySource(entry) {
+  const typeLabel =
+    entry?.sourceType === 'competition'
+      ? 'Competição'
+      : entry?.sourceType === 'session'
+        ? 'Encontro'
+        : '';
+  const name = typeof entry?.sourceName === 'string' && entry.sourceName.trim() !== ''
+    ? entry.sourceName.trim()
+    : '';
+  if (typeLabel && name) return `${typeLabel} · ${name}`;
+  return typeLabel || name;
+}
+
+export function formatMatchHistoryPhase(entry) {
+  if (entry?.sourceType !== 'competition') return '';
+  return typeof entry?.roundLabel === 'string' ? entry.roundLabel.trim() : '';
+}
+
+export function rankingSourceFilterOptions() {
+  return Object.freeze([
+    Object.freeze({ value: '', label: RANKING_SOURCE_ALL_LABEL }),
+    Object.freeze({ value: 'session', label: RANKING_SOURCE_SESSION_LABEL }),
+    Object.freeze({ value: 'competition', label: RANKING_SOURCE_COMPETITION_LABEL }),
+  ]);
 }
 
 export function formatMatchHistoryScoreline(entry) {

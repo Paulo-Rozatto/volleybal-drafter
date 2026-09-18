@@ -18,8 +18,10 @@ import {
   filterPlayersBySearch,
   formatHistoryDiagnostics,
   formatMatchHistoryDate,
+  formatMatchHistoryPhase,
   formatMatchHistoryResult,
   formatMatchHistoryScoreline,
+  formatMatchHistorySource,
   formatPerformanceScopeTitle,
   formatPointDifference,
   formatRecordLine,
@@ -82,13 +84,21 @@ function MatchHistoryList({ matches }) {
     <ol className="space-y-2">
       {matches.map((match) => (
         <li
-          key={`${match.sessionId}:${match.roundId}:${match.matchId}`}
+          key={`${match.sourceType}:${match.sourceId}:${match.roundId}:${match.matchId}`}
           className="rounded-lg border p-2 space-y-1"
           style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-app)' }}
         >
           <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
             {formatMatchHistoryDate(match.sessionDate)}
           </p>
+          <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+            {formatMatchHistorySource(match)}
+          </p>
+          {formatMatchHistoryPhase(match) ? (
+            <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+              {formatMatchHistoryPhase(match)}
+            </p>
+          ) : null}
           <p className="text-sm font-bold">{formatMatchHistoryScoreline(match)}</p>
           <p className="text-xs font-semibold">{formatMatchHistoryResult(match.result)}</p>
         </li>
@@ -97,10 +107,10 @@ function MatchHistoryList({ matches }) {
   );
 }
 
-export default function PlayerPerformanceView({ document, roster = [] }) {
+export default function PlayerPerformanceView({ document, roster = [], competitionsDocument = null }) {
   const built = useMemo(
-    () => buildPlayerPerformanceIndex(document, roster),
-    [document, roster]
+    () => buildPlayerPerformanceIndex(document, roster, { competitionsDocument }),
+    [document, roster, competitionsDocument]
   );
   const players = useMemo(
     () => (built.ok ? listPerformancePlayers(built.index) : []),
@@ -214,8 +224,8 @@ export default function PlayerPerformanceView({ document, roster = [] }) {
         >
           <p className="font-bold">Não foi possível calcular o desempenho.</p>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            O documento de encontros está estruturalmente inválido. Nenhum número parcial é
-            exibido.
+            O documento de encontros ou de competições está estruturalmente inválido. Nenhum número
+            parcial é exibido.
           </p>
           <ul className="list-disc pl-5 text-sm space-y-1">
             {(built.errors ?? []).map((item, index) => (

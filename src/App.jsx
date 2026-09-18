@@ -1,14 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import PlayerList from './PlayerList';
 import GameSessionsView from './GameSessionsView';
+import CompetitionsView from './CompetitionsView.jsx';
 import PerformanceHub from './PerformanceHub.jsx';
 import GistSyncPanel from './GistSyncPanel';
 import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
 import { appendDraftTeamSession } from './teamGameSessions.js';
+import { appendDraftCompetition } from './competitions.js';
 import { createPlayer, deletePlayer, updatePlayer } from './players.js';
 import { calcTeamBalancePenalty, prepareTeamDraftPool } from './domain/teamBalance.js';
 import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
+import { createEmptyCompetitionDocument } from './persistence/competitionsDocument.js';
 import {
   applySuccessfulGistLoad,
   applyGistLoadFailure,
@@ -21,8 +24,11 @@ import {
   gistLoadNeedsFetch,
   GIST_LOAD_STRATEGY,
   markPendingGistChanges,
+  nextCompetitionsDocument,
   nextGameSessionsDocument,
+  persistLocalCompetitions,
   persistLocalGameSessions,
+  readLocalCompetitions,
   readLocalGameSessions,
   readPendingGistChanges,
   runExclusiveSync,
@@ -32,6 +38,11 @@ import {
   INVALID_CACHE_CONFIRMATION_MESSAGE,
   INVALID_CACHE_CONFIRMATION_REQUIRED,
 } from './persistence/sessionOperations.js';
+import {
+  applyCompetitionsOperation,
+  INVALID_COMPETITIONS_CACHE_CONFIRMATION_MESSAGE,
+  INVALID_COMPETITIONS_CACHE_CONFIRMATION_REQUIRED,
+} from './persistence/competitionOperations.js';
 import { applyPlayersOperation } from './persistence/playerOperations.js';
 
 
@@ -39,7 +50,7 @@ const INITIAL_ROSTER = [];
 
 export default function App() {
   // --- Core Navigation & Drawer States ---
-  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'performance'
+  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // --- Players & History States ---
@@ -67,15 +78,29 @@ export default function App() {
   const [currentDraftIndex, setCurrentDraftIndex] = useState(0);
 
   const [localSessions] = useState(() => readLocalGameSessions());
+  const [localCompetitions] = useState(() => readLocalCompetitions());
   const [gameSessions, setGameSessions] = useState(
     () => localSessions.document ?? createEmptyGameSessionsDocument()
   );
+  const [competitions, setCompetitions] = useState(
+    () => localCompetitions.document ?? createEmptyCompetitionDocument()
+  );
   const [localCacheError, setLocalCacheError] = useState(() => localSessions.error);
   const [localWriteError, setLocalWriteError] = useState(() => localSessions.writeError ?? null);
+  const [localCompetitionsCacheError, setLocalCompetitionsCacheError] = useState(
+    () => localCompetitions.error
+  );
+  const [localCompetitionsWriteError, setLocalCompetitionsWriteError] = useState(
+    () => localCompetitions.writeError ?? null
+  );
   const [showInvalidCacheConfirm, setShowInvalidCacheConfirm] = useState(false);
+  const [showInvalidCompetitionsCacheConfirm, setShowInvalidCompetitionsCacheConfirm] = useState(false);
   const sessionsRef = useRef(localSessions.document ?? createEmptyGameSessionsDocument());
+  const competitionsRef = useRef(localCompetitions.document ?? createEmptyCompetitionDocument());
   const cacheInvalidRef = useRef(Boolean(localSessions.error));
+  const competitionsCacheInvalidRef = useRef(Boolean(localCompetitions.error));
   const pendingGameSessionsOperationRef = useRef(null);
+  const pendingCompetitionsOperationRef = useRef(null);
   const syncLockRef = useRef(createSyncLock());
   const gistRevisionRef = useRef(null);
 
@@ -86,7 +111,7 @@ export default function App() {
   const [gistLoaded, setGistLoaded] = useState(false);
   const [gistRevision, setGistRevision] = useState(null);
   const [hasPendingGistChanges, setHasPendingGistChanges] = useState(
-    () => Boolean(localSessions.migrated) || readPendingGistChanges()
+    () => Boolean(localSessions.migrated || localCompetitions.migrated) || readPendingGistChanges()
   );
   const [showLoadConflict, setShowLoadConflict] = useState(false);
 
@@ -135,6 +160,11 @@ export default function App() {
   const commitSessionsDocument = (nextDocument) => {
     sessionsRef.current = nextDocument;
     setGameSessions(nextDocument);
+  };
+
+  const commitCompetitionsDocument = (nextDocument) => {
+    competitionsRef.current = nextDocument;
+    setCompetitions(nextDocument);
   };
 
   const commitGistRevision = (revision) => {
@@ -192,6 +222,39 @@ export default function App() {
     return result;
   };
 
+  const requestCompetitionsOperation = (operation, { discardConfirmed = false } = {}) => {
+    const result = applyCompetitionsOperation({
+      getDocument: () => competitionsRef.current,
+      setDocument: commitCompetitionsDocument,
+      persistDocument: persistLocalCompetitions,
+      markPending: () => {
+        markPendingGistChanges();
+        setHasPendingGistChanges(true);
+      },
+      operation,
+      cacheInvalid: competitionsCacheInvalidRef.current,
+      discardConfirmed,
+    });
+
+    if (result?.errors?.[0]?.code === INVALID_COMPETITIONS_CACHE_CONFIRMATION_REQUIRED) {
+      pendingCompetitionsOperationRef.current = operation;
+      setShowInvalidCompetitionsCacheConfirm(true);
+      return result;
+    }
+
+    if (result?.ok && result.persistOk) {
+      setLocalCompetitionsWriteError(null);
+      if (result.cacheCleared) {
+        competitionsCacheInvalidRef.current = false;
+        setLocalCompetitionsCacheError(null);
+      }
+    } else if (result?.persistOk === false) {
+      setLocalCompetitionsWriteError(result.persistError);
+    }
+
+    return result;
+  };
+
   const handleCreateGameSession = (input) =>
     requestGameSessionsOperation((document) => {
       const created = appendDraftTeamSession(document, {
@@ -210,6 +273,18 @@ export default function App() {
       };
     });
 
+  const handleCreateCompetition = (input) =>
+    requestCompetitionsOperation((document) =>
+      appendDraftCompetition(document, {
+        date: input.date,
+        name: input.name,
+        format: {
+          teamSize: input.teamSize,
+        },
+        stages: input.stages,
+      })
+    );
+
   const handleConfirmDiscardInvalidCache = () => {
     const operation = pendingGameSessionsOperationRef.current;
     pendingGameSessionsOperationRef.current = null;
@@ -221,6 +296,19 @@ export default function App() {
   const handleCancelDiscardInvalidCache = () => {
     pendingGameSessionsOperationRef.current = null;
     setShowInvalidCacheConfirm(false);
+  };
+
+  const handleConfirmDiscardInvalidCompetitionsCache = () => {
+    const operation = pendingCompetitionsOperationRef.current;
+    pendingCompetitionsOperationRef.current = null;
+    setShowInvalidCompetitionsCacheConfirm(false);
+    if (!operation) return null;
+    return requestCompetitionsOperation(operation, { discardConfirmed: true });
+  };
+
+  const handleCancelDiscardInvalidCompetitionsCache = () => {
+    pendingCompetitionsOperationRef.current = null;
+    setShowInvalidCompetitionsCacheConfirm(false);
   };
 
   const loadGistWithStrategy = async (strategy) => {
@@ -236,23 +324,36 @@ export default function App() {
           createEmptyGameSessionsDocument(),
           remote.gameSessions
         );
+        const remoteCompetitions = nextCompetitionsDocument(
+          createEmptyCompetitionDocument(),
+          remote.competitions
+        );
         const result = applySuccessfulGistLoad({
           strategy,
           localPlayers: playersRef.current,
           localGameSessions: sessionsRef.current,
+          localCompetitions: competitionsRef.current,
           remotePlayers: remote.players,
           remoteGameSessions: remoteSessions,
+          remoteCompetitions,
           remoteMigrated: remote.migrated,
         });
 
         if (result.replaceLocal) {
           const persistResult = persistLocalGameSessions(result.gameSessions);
+          const persistCompetitionsResult = persistLocalCompetitions(result.competitions);
           playersRef.current = result.players;
           setPlayers(result.players);
           commitSessionsDocument(result.gameSessions);
+          commitCompetitionsDocument(result.competitions);
           cacheInvalidRef.current = false;
           setLocalCacheError(null);
           setLocalWriteError(persistResult.ok ? null : persistResult.error);
+          competitionsCacheInvalidRef.current = false;
+          setLocalCompetitionsCacheError(null);
+          setLocalCompetitionsWriteError(
+            persistCompetitionsResult.ok ? null : persistCompetitionsResult.error
+          );
         }
 
         commitGistRevision(remote.revision);
@@ -272,6 +373,7 @@ export default function App() {
           hasPendingGistChanges,
           localPlayers: playersRef.current,
           localGameSessions: sessionsRef.current,
+          localCompetitions: competitionsRef.current,
         });
         setSyncStatus(failure.syncStatus);
       } finally {
@@ -315,6 +417,7 @@ export default function App() {
         const result = await saveGistState({
           players: playersRef.current,
           gameSessions: sessionsRef.current,
+          competitions: competitionsRef.current,
           expectedRevision: gistRevisionRef.current,
           getToken: async () => {
             setSyncStatus('Descriptografando token...');
@@ -459,11 +562,14 @@ export default function App() {
       syncStatus={syncStatus}
       localCacheError={localCacheError}
       localWriteError={localWriteError}
+      localCompetitionsCacheError={localCompetitionsCacheError}
+      localCompetitionsWriteError={localCompetitionsWriteError}
       showLoadConflict={showLoadConflict}
       onKeepLocalChanges={() => loadGistWithStrategy(GIST_LOAD_STRATEGY.KEEP_LOCAL)}
       onUseRemoteData={() => loadGistWithStrategy(GIST_LOAD_STRATEGY.USE_REMOTE)}
       onCancelLoad={() => setShowLoadConflict(false)}
       gameSessions={gameSessions}
+      competitions={competitions}
     />
   );
 
@@ -531,6 +637,18 @@ export default function App() {
               }}
             >
               🗓️ Encontros
+            </button>
+            <button
+              type="button"
+              onClick={() => { setCurrentView('competitions'); setIsMenuOpen(false); }}
+              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+              style={{
+                backgroundColor: currentView === 'competitions' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)'
+              }}
+              aria-current={currentView === 'competitions' ? 'page' : undefined}
+            >
+              🏆 Competições
             </button>
             <button
               type="button"
@@ -785,6 +903,7 @@ export default function App() {
             <GameSessionsView
               sessions={gameSessions.sessions}
               document={gameSessions}
+              competitionsDocument={competitions}
               players={players}
               cacheInvalid={Boolean(localCacheError)}
               cacheError={localCacheError}
@@ -794,8 +913,25 @@ export default function App() {
             />
           )}
 
+          {currentView === 'competitions' && (
+            <CompetitionsView
+              competitions={competitions.competitions}
+              document={competitions}
+              players={players}
+              cacheInvalid={Boolean(localCompetitionsCacheError)}
+              cacheError={localCompetitionsCacheError}
+              onCreateCompetition={handleCreateCompetition}
+              onApplyOperation={requestCompetitionsOperation}
+              syncPanel={gistSyncPanel}
+            />
+          )}
+
           {currentView === 'performance' && (
-            <PerformanceHub document={gameSessions} roster={players} />
+            <PerformanceHub
+              document={gameSessions}
+              roster={players}
+              competitionsDocument={competitions}
+            />
           )}
 
           {/* 4. HISTORY VIEW */}
@@ -887,6 +1023,59 @@ export default function App() {
             <button
               type="button"
               onClick={handleCancelDiscardInvalidCache}
+              className="w-full font-bold py-3 rounded-xl border cursor-pointer"
+              style={{
+                backgroundColor: 'var(--bg-subtle)',
+                borderColor: 'var(--border-color)',
+                color: 'var(--text-main)',
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showInvalidCompetitionsCacheConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)' }}
+          onClick={handleCancelDiscardInvalidCompetitionsCache}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="invalid-competitions-cache-title"
+            aria-describedby="invalid-competitions-cache-description"
+            className="w-full max-w-md rounded-xl border p-4 space-y-3 shadow-2xl"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-color)',
+              color: 'var(--text-main)',
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="invalid-competitions-cache-title" className="font-bold text-base">
+              Cache local inválido
+            </h3>
+            <p
+              id="invalid-competitions-cache-description"
+              className="text-sm whitespace-pre-line"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              {INVALID_COMPETITIONS_CACHE_CONFIRMATION_MESSAGE}
+            </p>
+            <button
+              type="button"
+              onClick={handleConfirmDiscardInvalidCompetitionsCache}
+              className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer"
+              style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+            >
+              Descartar cache inválido e continuar
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelDiscardInvalidCompetitionsCache}
               className="w-full font-bold py-3 rounded-xl border cursor-pointer"
               style={{
                 backgroundColor: 'var(--bg-subtle)',

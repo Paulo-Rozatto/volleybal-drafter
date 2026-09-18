@@ -1,6 +1,8 @@
 import { serializeGameSessionsDocument } from './gameSessionsDocument.js';
+import { serializeCompetitionsDocument } from './competitionsDocument.js';
 
 export const GAME_SESSIONS_SIZE_WARNING_BYTES = 750 * 1024;
+export const COMPETITIONS_SIZE_WARNING_BYTES = 750 * 1024;
 
 export function utf8TextSize(serializedText) {
   if (typeof serializedText !== 'string') {
@@ -11,6 +13,10 @@ export function utf8TextSize(serializedText) {
 
 export function gameSessionsPatchUtf8Size(gameSessions) {
   return utf8TextSize(serializeGameSessionsDocument(gameSessions));
+}
+
+export function competitionsPatchUtf8Size(competitions) {
+  return utf8TextSize(serializeCompetitionsDocument(competitions));
 }
 
 export function formatFileSize(bytes) {

@@ -1,10 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 import {
   formatFileSize,
+  COMPETITIONS_SIZE_WARNING_BYTES,
   GAME_SESSIONS_SIZE_WARNING_BYTES,
+  competitionsPatchUtf8Size,
   gameSessionsPatchUtf8Size,
 } from './persistence/fileSize.js';
 import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
+import { createEmptyCompetitionDocument } from './persistence/competitionsDocument.js';
 
 export default function GistSyncPanel({
   password,
@@ -17,11 +20,14 @@ export default function GistSyncPanel({
   syncStatus,
   localCacheError,
   localWriteError,
+  localCompetitionsCacheError,
+  localCompetitionsWriteError,
   showLoadConflict,
   onKeepLocalChanges,
   onUseRemoteData,
   onCancelLoad,
   gameSessions,
+  competitions,
 }) {
   const loadButtonRef = useRef(null);
   const cancelButtonRef = useRef(null);
@@ -29,7 +35,11 @@ export default function GistSyncPanel({
   const sizeBytes = gameSessionsPatchUtf8Size(
     gameSessions ?? createEmptyGameSessionsDocument()
   );
+  const competitionsSizeBytes = competitionsPatchUtf8Size(
+    competitions ?? createEmptyCompetitionDocument()
+  );
   const showSizeWarning = sizeBytes >= GAME_SESSIONS_SIZE_WARNING_BYTES;
+  const showCompetitionsSizeWarning = competitionsSizeBytes >= COMPETITIONS_SIZE_WARNING_BYTES;
 
   useEffect(() => {
     if (showLoadConflict) {
@@ -92,10 +102,18 @@ export default function GistSyncPanel({
       <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
         Encontros: {formatFileSize(sizeBytes)}
       </p>
+      <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+        Competições: {formatFileSize(competitionsSizeBytes)}
+      </p>
 
       {showSizeWarning && (
         <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
           O arquivo de encontros está grande. Considere arquivar encontros antigos.
+        </p>
+      )}
+      {showCompetitionsSizeWarning && (
+        <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
+          O arquivo de competições está grande. Considere arquivar competições antigas.
         </p>
       )}
 
@@ -108,6 +126,18 @@ export default function GistSyncPanel({
       {localWriteError && (
         <p className="text-xs font-semibold text-red-500">
           Erro ao salvar encontros no cache local: {localWriteError}
+        </p>
+      )}
+
+      {localCompetitionsCacheError && (
+        <p className="text-xs font-semibold text-red-500">
+          Erro no cache local de competições: {localCompetitionsCacheError}
+        </p>
+      )}
+
+      {localCompetitionsWriteError && (
+        <p className="text-xs font-semibold text-red-500">
+          Erro ao salvar competições no cache local: {localCompetitionsWriteError}
         </p>
       )}
 

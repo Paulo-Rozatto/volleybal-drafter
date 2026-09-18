@@ -8,6 +8,8 @@ import {
 } from '../teamGameSessions.js';
 import {
   ANALYSIS_SCORE_ERROR_CODES,
+  MATCH_SOURCE_COMPETITION,
+  MATCH_SOURCE_SESSION,
   buildPartnershipRepeatLookup,
   buildPlayerPerformanceIndex,
   formatPerformanceModality,
@@ -20,6 +22,16 @@ import {
   getPlayerPerformanceRanking,
   listPerformancePlayers,
 } from './playerPerformance.js';
+import {
+  applyCompetitionMatchResult,
+  cloneCompetition,
+  createDraftCompetition,
+  createEmptyCompetitionDocument,
+  generateCompetitionBracket,
+  listCompetitionMatches,
+  listCompetitionRounds,
+  setDraftCompetitionTeams,
+} from './competition.js';
 
 const ISO = '2026-09-12T18:00:00.000Z';
 const LATER = '2026-09-12T20:00:00.000Z';
@@ -170,8 +182,8 @@ function sixesSession({
   });
 }
 
-function indexOf(document, currentRoster = roster) {
-  const result = buildPlayerPerformanceIndex(document, currentRoster);
+function indexOf(document, currentRoster = roster, options) {
+  const result = buildPlayerPerformanceIndex(document, currentRoster, options);
   expect(result.ok).toBe(true);
   return result.index;
 }
@@ -1231,6 +1243,9 @@ describe('histórico de partidas', () => {
 
     expect(wins).toHaveLength(1);
     expect(wins[0]).toMatchObject({
+      sourceType: 'session',
+      sourceId: 'win-day',
+      sourceName: 'Encontro win-day',
       sessionId: 'win-day',
       sessionName: 'Encontro win-day',
       sessionDate: '2026-08-31',
@@ -1660,5 +1675,372 @@ describe('lookup compacto de parcerias', () => {
     expect(getPlayerPartnerPerformance(index, 'andre', { partnerId: 'paulo' })).toEqual(andrePauloBefore);
     expect(index.includedMatches).toBe(3);
     expect(index.skippedPendingMatches).toBe(1);
+  });
+});
+
+function sequentialIds(prefix) {
+  let count = 0;
+  return () => `${prefix}-${(count += 1)}`;
+}
+
+function competitionsOf(...competitions) {
+  return { schemaVersion: 2, competitions };
+}
+
+function draftCompetitionWithTeams({
+  idPrefix = 'comp',
+  name = 'Clash de Sexta',
+  date = '2026-09-10',
+  teams,
+} = {}) {
+  const ids = sequentialIds(idPrefix);
+  const draft = createDraftCompetition(
+    { name, date, format: { teamSize: 2 } },
+    { idGenerator: ids, now: () => new Date('2026-09-10T12:00:00.000Z') }
+  );
+  const withTeams = setDraftCompetitionTeams(draft, teams, { idGenerator: ids });
+  expect(withTeams.ok).toBe(true);
+  const generated = generateCompetitionBracket(withTeams.competition, { idGenerator: ids });
+  expect(generated.ok).toBe(true);
+  return generated.competition;
+}
+
+function playCompetitionMatch(competition, matchId, scoreA, scoreB, playedDate) {
+  const result = applyCompetitionMatchResult(competition, matchId, {
+    scoreA,
+    scoreB,
+    playedDate,
+  });
+  expect(result.ok).toBe(true);
+  return result.competition;
+}
+
+function twoTeamCompetition({
+  name = 'Clash de Sexta',
+  date = '2026-09-10',
+  playedDate = '2026-09-18',
+  lineupA = namesOf(['andre', 'ana']),
+  lineupB = namesOf(['bruno', 'carla']),
+  scoreA = 21,
+  scoreB = 15,
+  play = true,
+  idPrefix = 'clash',
+} = {}) {
+  const generated = draftCompetitionWithTeams({
+    idPrefix,
+    name,
+    date,
+    teams: [
+      { id: `${idPrefix}-alpha`, members: lineupA },
+      { id: `${idPrefix}-beta`, members: lineupB },
+    ],
+  });
+  if (!play) return generated;
+  const match = listCompetitionMatches(generated)[0];
+  return playCompetitionMatch(generated, match.id, scoreA, scoreB, playedDate);
+}
+
+function threeTeamCompetition({ playSemi = false, semiPlayedDate = '2026-09-18' } = {}) {
+  const generated = draftCompetitionWithTeams({
+    idPrefix: 'bye',
+    name: 'Open com BYE',
+    teams: [
+      { id: 'bye-seed', members: namesOf(['diego', 'erika']) },
+      { id: 'bye-sf-a', members: namesOf(['andre', 'ana']) },
+      { id: 'bye-sf-b', members: namesOf(['bruno', 'carla']) },
+    ],
+  });
+  if (!playSemi) return generated;
+  const semi = listCompetitionRounds(generated)[0].matches[0];
+  return playCompetitionMatch(generated, semi.id, 21, 12, semiPlayedDate);
+}
+
+function fourTeamStagedCompetition() {
+  const generated = draftCompetitionWithTeams({
+    idPrefix: 'open',
+    name: 'Open de Setembro',
+    date: '2026-09-10',
+    teams: [
+      { id: 'seed-1', members: namesOf(['andre', 'ana']) },
+      { id: 'seed-2', members: namesOf(['bruno', 'carla']) },
+      { id: 'seed-3', members: namesOf(['diego', 'erika']) },
+      { id: 'seed-4', members: namesOf(['fabio', 'gabi']) },
+    ],
+  });
+  const [sf1, sf2] = listCompetitionRounds(generated)[0].matches;
+  const afterSf1 = playCompetitionMatch(generated, sf1.id, 21, 10, '2026-09-18');
+  const afterSf2 = playCompetitionMatch(afterSf1, sf2.id, 21, 18, '2026-09-18');
+  const final = listCompetitionRounds(afterSf2)[1].matches[0];
+  return playCompetitionMatch(afterSf2, final.id, 21, 19, '2026-09-21');
+}
+
+describe('desempenho com partidas de competição', () => {
+  const emptySessions = documentOf();
+
+  it('omite competições quando o terceiro argumento não é passado', () => {
+    const sessions = documentOf(doublesSession());
+    const competitions = competitionsOf(twoTeamCompetition());
+    const without = buildPlayerPerformanceIndex(sessions, roster);
+    const withEmpty = buildPlayerPerformanceIndex(sessions, roster, {
+      competitionsDocument: createEmptyCompetitionDocument(),
+    });
+    const withCompetitions = buildPlayerPerformanceIndex(sessions, roster, {
+      competitionsDocument: competitions,
+    });
+
+    expect(without.ok).toBe(true);
+    expect(withEmpty.ok).toBe(true);
+    expect(without.index.includedMatches).toBe(1);
+    expect(withEmpty.index.includedMatches).toBe(1);
+    expect(withCompetitions.index.includedMatches).toBe(2);
+    expect(getPlayerPerformance(without.index, 'andre').matches).toBe(1);
+    expect(getPlayerPerformance(withCompetitions.index, 'andre').matches).toBe(2);
+  });
+
+  it('agrega uma partida isolada de competição com vitória, derrota, pontos, médias, saldo e parceiros', () => {
+    const index = indexOf(emptySessions, roster, {
+      competitionsDocument: competitionsOf(twoTeamCompetition()),
+    });
+    expect(index).toMatchObject({
+      includedMatches: 1,
+      skippedPendingMatches: 0,
+      skippedInvalidMatches: 0,
+    });
+
+    expect(getPlayerPerformance(index, 'andre')).toMatchObject({
+      matches: 1,
+      wins: 1,
+      losses: 0,
+      winRate: 1,
+      pointsFor: 21,
+      averagePointsFor: 21,
+      pointsAgainst: 15,
+      averagePointsAgainst: 15,
+      pointDifference: 6,
+    });
+    expect(getPlayerPerformance(index, 'bruno')).toMatchObject({
+      matches: 1,
+      wins: 0,
+      losses: 1,
+      winRate: 0,
+      pointsFor: 15,
+      averagePointsFor: 15,
+      pointsAgainst: 21,
+      averagePointsAgainst: 21,
+      pointDifference: -6,
+    });
+    expect(getPlayerPartnerPerformance(index, 'andre').map((item) => item.partnerId)).toEqual(['ana']);
+    expect(getPlayerPerformance(index, 'andre', { partnerId: 'ana' })).toMatchObject({
+      matches: 1,
+      wins: 1,
+      pointsFor: 21,
+      pointsAgainst: 15,
+    });
+    expect(getBestPartner(index, 'andre').partnerId).toBe('ana');
+  });
+
+  it('combina encontro e competição sem duplicar a mesma partida', () => {
+    const sessions = documentOf(
+      doublesSession({
+        name: 'Sábado na Arena',
+        scoreA: 21,
+        scoreB: 18,
+      })
+    );
+    const competitions = competitionsOf(twoTeamCompetition());
+    const index = indexOf(sessions, roster, { competitionsDocument: competitions });
+    expect(index.includedMatches).toBe(2);
+
+    const history = getPlayerMatchHistory(index, 'andre');
+    expect(history).toHaveLength(2);
+    expect(history.map((item) => item.sourceType).sort()).toEqual([
+      MATCH_SOURCE_COMPETITION,
+      MATCH_SOURCE_SESSION,
+    ]);
+    expect(new Set(history.map((item) => `${item.sourceType}:${item.sourceId}:${item.matchId}`)).size).toBe(
+      2
+    );
+    expect(sessions.sessions).toHaveLength(1);
+    expect(competitions.competitions).toHaveLength(1);
+
+    expect(getPlayerPerformance(index, 'andre')).toMatchObject({
+      matches: 2,
+      wins: 2,
+      losses: 0,
+      pointsFor: 42,
+      averagePointsFor: 21,
+      pointsAgainst: 33,
+      averagePointsAgainst: 16.5,
+      pointDifference: 9,
+    });
+    expect(getPlayerPerformance(index, 'andre', { partnerId: 'ana' })).toMatchObject({
+      matches: 2,
+      wins: 2,
+    });
+  });
+
+  it('identifica a origem no histórico detalhado e preserva o snapshot dos nomes', () => {
+    const sessions = documentOf(
+      doublesSession({
+        name: 'Sábado na Arena',
+        lineupA: [member('andre', 'André do Encontro'), member('ana', 'Ana')],
+      })
+    );
+    const competitions = competitionsOf(
+      twoTeamCompetition({
+        lineupA: [member('andre', 'André da Competição'), member('ana', 'Ana')],
+      })
+    );
+    const index = indexOf(sessions, roster, { competitionsDocument: competitions });
+    const history = getPlayerMatchHistory(index, 'andre');
+    const sessionMatch = history.find((item) => item.sourceType === MATCH_SOURCE_SESSION);
+    const competitionMatch = history.find((item) => item.sourceType === MATCH_SOURCE_COMPETITION);
+
+    expect(sessionMatch).toMatchObject({
+      sourceType: MATCH_SOURCE_SESSION,
+      sourceId: 'session-2x2',
+      sourceName: 'Sábado na Arena',
+      sessionDate: '2026-09-12',
+      roundLabel: null,
+    });
+    expect(sessionMatch.teammates.map((player) => player.playerName)).toEqual(['André do Encontro', 'Ana']);
+
+    expect(competitionMatch).toMatchObject({
+      sourceType: MATCH_SOURCE_COMPETITION,
+      sourceName: 'Clash de Sexta',
+      sessionDate: '2026-09-18',
+      roundLabel: 'Final',
+    });
+    expect(competitionMatch.sourceId).toBeTruthy();
+    expect(competitionMatch.teammates.map((player) => player.playerName)).toEqual([
+      'André da Competição',
+      'Ana',
+    ]);
+    expect(Object.isFrozen(competitionMatch)).toBe(true);
+  });
+
+  it('filtra o ranking pela playedDate da partida, não pela data inicial da competição', () => {
+    const index = indexOf(emptySessions, roster, {
+      competitionsDocument: competitionsOf(fourTeamStagedCompetition()),
+    });
+    expect(index.includedMatches).toBe(3);
+
+    const fromTwentieth = getPlayerPerformanceRanking(index, {
+      startDate: '2026-09-20',
+      playerIds: ['andre', 'bruno', 'fabio'],
+      sortBy: 'wins',
+    });
+    expect(fromTwentieth.find((row) => row.playerId === 'andre')).toMatchObject({
+      matches: 1,
+      wins: 1,
+      pointsFor: 21,
+      pointsAgainst: 19,
+    });
+    expect(fromTwentieth.find((row) => row.playerId === 'bruno')).toMatchObject({
+      matches: 1,
+      wins: 0,
+      losses: 1,
+    });
+    expect(fromTwentieth.find((row) => row.playerId === 'fabio')).toMatchObject({
+      matches: 0,
+      wins: 0,
+    });
+
+    const onlyEighteenth = getPlayerPerformanceRanking(index, {
+      startDate: '2026-09-18',
+      endDate: '2026-09-18',
+      playerIds: ['andre'],
+      sortBy: 'wins',
+    });
+    expect(onlyEighteenth[0]).toMatchObject({
+      matches: 1,
+      wins: 1,
+      pointsFor: 21,
+      pointsAgainst: 10,
+    });
+  });
+
+  it('filtra ranking e histórico apenas por encontros ou apenas por competições', () => {
+    const sessions = documentOf(doublesSession({ name: 'Sábado na Arena' }));
+    const index = indexOf(sessions, roster, {
+      competitionsDocument: competitionsOf(twoTeamCompetition()),
+    });
+
+    const all = getPlayerPerformanceRanking(index, { playerIds: ['andre'], sortBy: 'wins' });
+    const sessionsOnly = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre'],
+      sourceType: MATCH_SOURCE_SESSION,
+      sortBy: 'wins',
+    });
+    const competitionsOnly = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre'],
+      sourceType: MATCH_SOURCE_COMPETITION,
+      sortBy: 'wins',
+    });
+
+    expect(all[0].matches).toBe(2);
+    expect(sessionsOnly[0]).toMatchObject({ matches: 1, pointsFor: 21, pointsAgainst: 18 });
+    expect(competitionsOnly[0]).toMatchObject({ matches: 1, pointsFor: 21, pointsAgainst: 15 });
+
+    expect(getPlayerMatchHistory(index, 'andre', { sourceType: MATCH_SOURCE_SESSION })).toHaveLength(1);
+    expect(getPlayerMatchHistory(index, 'andre', { sourceType: MATCH_SOURCE_COMPETITION })[0]).toMatchObject({
+      sourceType: MATCH_SOURCE_COMPETITION,
+      sourceName: 'Clash de Sexta',
+    });
+    expect(() => getPlayerPerformanceRanking(index, { sourceType: 'gist' })).toThrow(
+      /filtro de origem é inválido/
+    );
+  });
+
+  it('ignora BYE e partida pendente de competição', () => {
+    const pending = indexOf(emptySessions, roster, {
+      competitionsDocument: competitionsOf(twoTeamCompetition({ play: false })),
+    });
+    expect(pending).toMatchObject({
+      includedMatches: 0,
+      skippedPendingMatches: 1,
+      skippedInvalidMatches: 0,
+    });
+    expect(getPlayerPerformance(pending, 'andre').matches).toBe(0);
+    expect(getPlayerMatchHistory(pending, 'andre')).toEqual([]);
+
+    const withBye = indexOf(emptySessions, roster, {
+      competitionsDocument: competitionsOf(threeTeamCompetition({ playSemi: true })),
+    });
+    expect(listCompetitionMatches(threeTeamCompetition()).length).toBe(2);
+    expect(withBye).toMatchObject({
+      includedMatches: 1,
+      skippedPendingMatches: 1,
+      skippedInvalidMatches: 0,
+    });
+    expect(getPlayerPerformance(withBye, 'andre')).toMatchObject({ matches: 1, wins: 1, pointsFor: 21 });
+    expect(getPlayerPerformance(withBye, 'diego').matches).toBe(0);
+  });
+
+  it('diagnostica placar inválido de competição com as mesmas regras de encontro', () => {
+    const generated = twoTeamCompetition({ play: false });
+    const invalid = cloneCompetition(generated);
+    invalid.stages[0].rounds[0].matches[0].scoreA = 21;
+    invalid.stages[0].rounds[0].matches[0].scoreB = 21;
+    invalid.stages[0].rounds[0].matches[0].playedDate = '2026-09-18';
+
+    const result = buildPlayerPerformanceIndex(emptySessions, roster, {
+      competitionsDocument: competitionsOf(invalid),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.index).toMatchObject({
+      includedMatches: 0,
+      skippedPendingMatches: 0,
+      skippedInvalidMatches: 1,
+    });
+  });
+
+  it('rejeita competição estruturalmente inválida sem agregado parcial', () => {
+    const result = buildPlayerPerformanceIndex(documentOf(doublesSession()), roster, {
+      competitionsDocument: { schemaVersion: 9, competitions: [] },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.index).toBeNull();
+    expect(result.errors[0].code).toBe('SCHEMA_VERSION_UNSUPPORTED');
   });
 });

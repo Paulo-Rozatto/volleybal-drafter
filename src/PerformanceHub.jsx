@@ -9,7 +9,7 @@ import {
   nextPerformanceTab,
 } from './performancePresentation.js';
 
-export default function PerformanceHub({ document, roster = [] }) {
+export default function PerformanceHub({ document, roster = [], competitionsDocument = null }) {
   const [tab, setTab] = useState(PERFORMANCE_PLAYER_TAB);
   const showPlayer = tab === PERFORMANCE_PLAYER_TAB;
 
@@ -44,9 +44,17 @@ export default function PerformanceHub({ document, roster = [] }) {
         </button>
       </div>
       {showPlayer ? (
-        <PlayerPerformanceView document={document} roster={roster} />
+        <PlayerPerformanceView
+          document={document}
+          roster={roster}
+          competitionsDocument={competitionsDocument}
+        />
       ) : (
-        <PlayerRankingView document={document} roster={roster} />
+        <PlayerRankingView
+          document={document}
+          roster={roster}
+          competitionsDocument={competitionsDocument}
+        />
       )}
     </div>
   );

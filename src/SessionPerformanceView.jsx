@@ -69,10 +69,15 @@ function cellBackground(matches, maxMatches, selected) {
   return `color-mix(in srgb, var(--primary) ${Math.round(12 + heat * 28)}%, var(--bg-surface))`;
 }
 
-export default function SessionPerformanceView({ document, roster = [], sessionId }) {
+export default function SessionPerformanceView({
+  document,
+  roster = [],
+  competitionsDocument = null,
+  sessionId,
+}) {
   const built = useMemo(
-    () => buildPlayerPerformanceIndex(document, roster),
-    [document, roster]
+    () => buildPlayerPerformanceIndex(document, roster, { competitionsDocument }),
+    [document, roster, competitionsDocument]
   );
   const cohort = useMemo(
     () => listSessionParticipants(document, roster, sessionId),

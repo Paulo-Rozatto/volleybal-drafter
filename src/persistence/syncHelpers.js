@@ -1,9 +1,15 @@
-import { GAME_SESSIONS_SCHEMA_VERSION, GIST_PENDING_CHANGES_STORAGE_KEY } from './constants.js';
+import {
+  COMPETITION_SCHEMA_VERSION,
+  GAME_SESSIONS_SCHEMA_VERSION,
+  GIST_PENDING_CHANGES_STORAGE_KEY,
+} from './constants.js';
 import {
   collectLegacyPairFields,
   createEmptyGameSessionsDocument,
 } from './gameSessionsDocument.js';
+import { createEmptyCompetitionDocument } from './competitionsDocument.js';
 import { loadGameSessionsRecord, saveGameSessionsDocument } from './gameSessionsStorage.js';
+import { loadCompetitionsRecord, saveCompetitionsDocument } from './competitionsStorage.js';
 import { GIST_REVISION_CONFLICT } from '../gistRevision.js';
 
 export const GIST_LOAD_STRATEGY = {
@@ -14,7 +20,7 @@ export const GIST_LOAD_STRATEGY = {
 };
 
 export const GIST_SESSIONS_MIGRATED_MESSAGE =
-  'Os encontros foram migrados para o novo formato. Salve no Gist para concluir a atualização.';
+  'Os dados foram migrados para o novo formato. Salve no Gist para concluir a atualização.';
 
 export const GIST_KEEP_LOCAL_MESSAGE =
   'Gist carregado. As alterações locais foram mantidas. Salvar substituirá os arquivos remotos.';
@@ -120,6 +126,87 @@ export function persistLocalGameSessions(document, storage) {
   }
 }
 
+export function readLocalCompetitions(storage) {
+  let store;
+  try {
+    store = resolveStorage(storage);
+  } catch (error) {
+    return {
+      document: createEmptyCompetitionDocument(),
+      error: error.message || 'Cache local de competições inválido.',
+      sourceVersion: null,
+      migrated: false,
+      writeError: null,
+    };
+  }
+
+  try {
+    const loaded = loadCompetitionsRecord(store);
+    let writeError = null;
+    if (loaded.migrated) {
+      try {
+        saveCompetitionsDocument(loaded.document, store);
+      } catch (error) {
+        writeError = error.message || 'Não foi possível salvar o cache local de competições.';
+      }
+      markPendingGistChanges(store);
+    }
+    return {
+      document: loaded.document,
+      error: null,
+      sourceVersion: loaded.sourceVersion,
+      migrated: Boolean(loaded.migrated),
+      writeError,
+    };
+  } catch (error) {
+    return {
+      document: createEmptyCompetitionDocument(),
+      error: error.message || 'Cache local de competições inválido.',
+      sourceVersion: null,
+      migrated: false,
+      writeError: null,
+    };
+  }
+}
+
+export function nextCompetitionsDocument(current, next) {
+  const incoming = typeof next === 'function' ? next(current) : next;
+
+  if (incoming == null || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    throw new Error('A atualização do documento de competições precisa ser um objeto.');
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(incoming, 'schemaVersion') &&
+    incoming.schemaVersion !== COMPETITION_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      `Versão de schema de competições não suportada: ${String(incoming.schemaVersion)}.`
+    );
+  }
+
+  if (!Array.isArray(incoming.competitions)) {
+    throw new Error('O documento de competições precisa ter uma lista de competições.');
+  }
+
+  return {
+    schemaVersion: COMPETITION_SCHEMA_VERSION,
+    competitions: [...incoming.competitions],
+  };
+}
+
+export function persistLocalCompetitions(document, storage) {
+  try {
+    saveCompetitionsDocument(document, storage);
+    return { ok: true, error: null };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error.message || 'Não foi possível salvar o cache local de competições.',
+    };
+  }
+}
+
 export function getGistGateMessage({ gistLoaded, hasPendingGistChanges }) {
   if (!gistLoaded) return 'Carregue o Gist antes de salvar';
   if (hasPendingGistChanges) return 'Alterações não salvas no Gist';
@@ -196,14 +283,17 @@ export function applySuccessfulGistLoad({
   strategy,
   localPlayers,
   localGameSessions,
+  localCompetitions,
   remotePlayers,
   remoteGameSessions,
+  remoteCompetitions,
   remoteMigrated = false,
 }) {
   if (strategy === GIST_LOAD_STRATEGY.KEEP_LOCAL) {
     return {
       players: localPlayers,
       gameSessions: localGameSessions,
+      competitions: localCompetitions,
       replaceLocal: false,
       gistLoaded: true,
       hasPendingGistChanges: true,
@@ -221,6 +311,7 @@ export function applySuccessfulGistLoad({
   return {
     players: remotePlayers,
     gameSessions: remoteGameSessions,
+    competitions: remoteCompetitions,
     replaceLocal: true,
     gistLoaded: true,
     hasPendingGistChanges: pendingBecauseMigrated,
@@ -228,10 +319,17 @@ export function applySuccessfulGistLoad({
   };
 }
 
-export function applyGistLoadFailure({ error, hasPendingGistChanges, localPlayers, localGameSessions }) {
+export function applyGistLoadFailure({
+  error,
+  hasPendingGistChanges,
+  localPlayers,
+  localGameSessions,
+  localCompetitions,
+}) {
   return {
     players: localPlayers,
     gameSessions: localGameSessions,
+    competitions: localCompetitions,
     replaceLocal: false,
     hasPendingGistChanges,
     syncStatus: `Erro ao carregar: ${error?.message || error}`,

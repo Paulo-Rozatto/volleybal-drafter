@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { createEmptyGameSessionsDocument, serializeGameSessionsDocument } from './gameSessionsDocument.js';
 import {
   formatFileSize,
+  COMPETITIONS_SIZE_WARNING_BYTES,
   GAME_SESSIONS_SIZE_WARNING_BYTES,
+  competitionsPatchUtf8Size,
   gameSessionsPatchUtf8Size,
   utf8TextSize,
 } from './fileSize.js';
+import { createEmptyCompetitionDocument, serializeCompetitionsDocument } from './competitionsDocument.js';
 import { appendDraftTeamSession } from '../teamGameSessions.js';
 
 function nestedAccentDocument() {
@@ -93,5 +96,14 @@ describe('formatFileSize', () => {
   it('trata valores inválidos como zero', () => {
     expect(formatFileSize(Number.NaN)).toBe('0 B');
     expect(formatFileSize(-10)).toBe('0 B');
+  });
+});
+
+describe('competitionsPatchUtf8Size', () => {
+  it('mede o JSON pretty-print enviado no PATCH', () => {
+    const document = createEmptyCompetitionDocument();
+    const serialized = serializeCompetitionsDocument(document);
+    expect(competitionsPatchUtf8Size(document)).toBe(utf8TextSize(serialized));
+    expect(competitionsPatchUtf8Size(document)).toBeLessThan(COMPETITIONS_SIZE_WARNING_BYTES);
   });
 });

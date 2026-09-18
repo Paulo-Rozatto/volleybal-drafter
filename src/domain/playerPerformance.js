@@ -1,27 +1,39 @@
-import { isMatchCompleted, isMatchPending } from './sessionValidation.js';
 import { MAX_TEAM_SIZE, validateV2Document } from './teamSession.js';
+import { validateCompetitionDocument } from './competition.js';
+import {
+  ANALYZABLE_MATCH_INCLUDED,
+  ANALYZABLE_MATCH_PENDING,
+  MATCH_SOURCE_TYPES,
+  combinePerformanceMatchSources,
+} from './performanceMatches.js';
+
+export { MATCH_SOURCE_COMPETITION, MATCH_SOURCE_SESSION, MATCH_SOURCE_TYPES } from './performanceMatches.js';
 
 /**
  * Fundação pura de desempenho.
  *
- * Construção: O(S + M × L²), onde S é o número de encontros, M o de partidas e L ≤ 6
- * o tamanho de cada lineup. Cada partida válida gera até L participações e L×(L−1)
- * relações dirigidas de parceria.
+ * Construção: O(S + C + M × L²), onde S é o número de encontros, C o de competições,
+ * M o de partidas analisáveis e L ≤ 6 o tamanho de cada lineup. Encontros e competições
+ * são adaptados para a mesma representação antes da agregação. Cada partida válida gera
+ * até L participações e L×(L−1) relações dirigidas de parceria.
  *
  * Consultas: O(P) para listar ou ranquear os parceiros de um jogador, sem percorrer
  * o documento novamente. Histórico e ranking leem as aparições já indexadas.
  *
- * Placar versus estrutura: `validateV2Document` continua rejeitando qualquer placar
- * inválido. A análise ignora somente os códigos de `ANALYSIS_SCORE_ERROR_CODES` e
- * classifica a partida com `isMatchPending` / `isMatchCompleted`. Qualquer outro
- * erro — inclusive `FINALIZE_INCOMPLETE` — rejeita o documento sem agregado parcial.
+ * Placar versus estrutura: `validateV2Document` e `validateCompetitionDocument`
+ * continuam rejeitando qualquer placar inválido. A análise ignora somente os
+ * códigos de `ANALYSIS_SCORE_ERROR_CODES` e classifica a partida com
+ * `isMatchPending` / `isMatchCompleted`. Qualquer outro erro — inclusive
+ * `FINALIZE_INCOMPLETE` e `COMPETITION_PLAYED_DATE_REQUIRED` — rejeita o
+ * documento sem agregado parcial.
  *
  * Jogador ausente do índice: métricas zeradas, `winRate = 0` e `playerName` vazio
  * se não houver snapshot; `getBestPartner` devolve `null`.
  *
  * Snapshot de nome histórico: na ausência do jogador no elenco atual, usa-se o
- * playerName mais recente segundo (1) date do encontro, (2) updatedAt, (3) createdAt,
- * (4) sessionIndex, roundIndex, matchIndex, sideIndex e memberIndex.
+ * playerName mais recente segundo (1) data da origem (encontro ou playedDate),
+ * (2) updatedAt, (3) createdAt, (4) sourceIndex, roundIndex, matchIndex, sideIndex
+ * e memberIndex.
  */
 
 export const ANALYSIS_SCORE_ERROR_CODES = Object.freeze([
@@ -51,6 +63,7 @@ export const RANKING_SORT_FIELDS = Object.freeze([
 ]);
 const RANKING_SORT_FIELD_SET = new Set(RANKING_SORT_FIELDS);
 const MATCH_RESULT_SET = new Set(MATCH_HISTORY_RESULTS);
+const MATCH_SOURCE_TYPE_SET = new Set(MATCH_SOURCE_TYPES);
 
 const internals = new WeakMap();
 const NAME_COLLATOR = new Intl.Collator('pt-BR', { sensitivity: 'base' });
@@ -171,12 +184,21 @@ function assertResultFilter(value) {
   return value;
 }
 
+function assertSourceTypeFilter(value) {
+  if (value == null || value === '' || value === 'all') return null;
+  if (!MATCH_SOURCE_TYPE_SET.has(value)) {
+    throw new TypeError('O filtro de origem é inválido.');
+  }
+  return value;
+}
+
 function assertHistoryFilters(filters) {
   const base = assertQueryFilters(filters);
   const source = filters == null ? {} : filters;
   return {
     ...base,
     result: assertResultFilter(optionalFilterValue(source, 'result')),
+    sourceType: assertSourceTypeFilter(optionalFilterValue(source, 'sourceType')),
     startDate: assertSessionDateFilter(
       optionalFilterValue(source, 'startDate'),
       'O filtro de data inicial é inválido.'
@@ -375,14 +397,11 @@ function freezeLineup(members) {
   );
 }
 
-function sessionNameOf(session) {
-  return typeof session?.name === 'string' && session.name.trim() !== '' ? session.name : null;
-}
-
 function appearanceMatchesFilters(appearance, filters) {
   if (!matchesLineupSize(appearance.lineupSize, filters.lineupSize)) return false;
   if (filters.partnerId != null && !appearance.partnerIds.includes(filters.partnerId)) return false;
   if (filters.result != null && appearance.result !== filters.result) return false;
+  if (filters.sourceType != null && appearance.sourceType !== filters.sourceType) return false;
   const date = String(appearance.sessionDate ?? '');
   if (filters.startDate != null && date < filters.startDate) return false;
   if (filters.endDate != null && date > filters.endDate) return false;
@@ -402,11 +421,15 @@ function publicMatchAppearance(appearance) {
   return Object.freeze({
     playerId: appearance.playerId,
     playerName: appearance.playerName,
+    sourceType: appearance.sourceType,
+    sourceId: appearance.sourceId,
+    sourceName: appearance.sourceName,
     sessionId: appearance.sessionId,
     sessionName: appearance.sessionName,
     sessionDate: appearance.sessionDate,
     roundId: appearance.roundId,
     roundNumber: appearance.roundNumber,
+    roundLabel: appearance.roundLabel,
     matchId: appearance.matchId,
     teammates: appearance.teammates,
     opponents: appearance.opponents,
@@ -427,12 +450,7 @@ function recordAppearance(record, appearance) {
 function createMatchAppearance({
   playerId,
   playerName,
-  session,
-  sessionIndex,
-  round,
-  roundIndex,
-  match,
-  matchIndex,
+  analyzableMatch,
   teammates,
   opponents,
   pointsFor,
@@ -440,24 +458,29 @@ function createMatchAppearance({
   won,
 }) {
   const partners = Object.freeze(teammates.filter((member) => member.playerId !== playerId));
+  const sourceName = analyzableMatch?.sourceName ?? null;
   return Object.freeze({
     playerId,
     playerName,
-    sessionId: session?.id ?? null,
-    sessionName: sessionNameOf(session),
-    sessionDate: session?.date ?? null,
-    sessionIndex,
-    roundId: round?.id ?? null,
-    roundNumber: Number.isInteger(round?.number) ? round.number : roundIndex + 1,
-    roundIndex,
-    matchId: match?.id ?? null,
-    matchIndex,
+    sourceType: analyzableMatch?.sourceType ?? null,
+    sourceId: analyzableMatch?.sourceId ?? null,
+    sourceName,
+    sessionId: analyzableMatch?.sourceId ?? null,
+    sessionName: sourceName,
+    sessionDate: analyzableMatch?.date ?? null,
+    sessionIndex: analyzableMatch?.sourceIndex ?? 0,
+    roundId: analyzableMatch?.roundId ?? null,
+    roundNumber: analyzableMatch?.roundNumber ?? 1,
+    roundLabel: analyzableMatch?.roundLabel ?? null,
+    roundIndex: analyzableMatch?.roundIndex ?? 0,
+    matchId: analyzableMatch?.matchId ?? null,
+    matchIndex: analyzableMatch?.matchIndex ?? 0,
     teammates,
     opponents,
     partners,
     partnerIds: Object.freeze(partners.map((member) => member.playerId)),
-    scoreA: match?.scoreA,
-    scoreB: match?.scoreB,
+    scoreA: analyzableMatch?.scoreA,
+    scoreB: analyzableMatch?.scoreB,
     pointsFor,
     pointsAgainst,
     result: won ? 'win' : 'loss',
@@ -547,137 +570,145 @@ function listScopedPartners(state, playerId, { lineupSize, partnerId }) {
     .filter(Boolean);
 }
 
+function normalizeIndexOptions(options) {
+  if (options == null) {
+    return { competitionsDocument: null };
+  }
+  if (!isPlainObject(options)) {
+    throw new TypeError('As opções de desempenho são inválidas.');
+  }
+  return {
+    competitionsDocument: Object.prototype.hasOwnProperty.call(options, 'competitionsDocument')
+      ? options.competitionsDocument
+      : null,
+  };
+}
+
+function ingestAnalyzableMatch(state, analyzableMatch) {
+  const recencyBase = {
+    date: analyzableMatch?.date ?? null,
+    updatedAt: analyzableMatch?.sourceUpdatedAt,
+    createdAt: analyzableMatch?.sourceCreatedAt,
+    sessionIndex: analyzableMatch?.sourceIndex ?? 0,
+    roundIndex: analyzableMatch?.roundIndex ?? 0,
+    matchIndex: analyzableMatch?.matchIndex ?? 0,
+  };
+  rememberGroupNames(state.history, analyzableMatch?.lineupA, { ...recencyBase, sideIndex: 0 });
+  rememberGroupNames(state.history, analyzableMatch?.lineupB, { ...recencyBase, sideIndex: 1 });
+
+  if (analyzableMatch?.status === ANALYZABLE_MATCH_PENDING) {
+    state.skippedPendingMatches += 1;
+    return;
+  }
+  if (analyzableMatch?.status !== ANALYZABLE_MATCH_INCLUDED) {
+    state.skippedInvalidMatches += 1;
+    return;
+  }
+
+  state.includedMatches += 1;
+  const sideLineups = [freezeLineup(analyzableMatch.lineupA), freezeLineup(analyzableMatch.lineupB)];
+  const sides = [
+    {
+      members: sideLineups[0],
+      pointsFor: analyzableMatch.scoreA,
+      pointsAgainst: analyzableMatch.scoreB,
+    },
+    {
+      members: sideLineups[1],
+      pointsFor: analyzableMatch.scoreB,
+      pointsAgainst: analyzableMatch.scoreA,
+    },
+  ];
+
+  for (let sideIndex = 0; sideIndex < sides.length; sideIndex += 1) {
+    const side = sides[sideIndex];
+    const opponents = sides[1 - sideIndex].members;
+    const lineupSize = side.members.length;
+    const won = side.pointsFor > side.pointsAgainst;
+    const ids = side.members.map((member) => member.playerId);
+
+    for (let index = 0; index < ids.length; index += 1) {
+      const playerId = ids[index];
+      const record = ensurePlayer(state.players, playerId);
+      applySideStats(record, lineupSize, won, side.pointsFor, side.pointsAgainst);
+      recordAppearance(
+        record,
+        createMatchAppearance({
+          playerId,
+          playerName: side.members[index].playerName,
+          analyzableMatch,
+          teammates: side.members,
+          opponents,
+          pointsFor: side.pointsFor,
+          pointsAgainst: side.pointsAgainst,
+          won,
+        })
+      );
+      for (let partnerIndex = 0; partnerIndex < ids.length; partnerIndex += 1) {
+        if (partnerIndex === index) continue;
+        const partner = ensurePartner(record, ids[partnerIndex]);
+        applySideStats(partner, lineupSize, won, side.pointsFor, side.pointsAgainst);
+      }
+    }
+  }
+}
+
 /**
- * Constrói um índice imutável de desempenho a partir de um documento V2.
- * Não muta `document` nem `roster` e não persiste agregados.
- * Todas as sessões entram: a coorte de um encontro só filtra quem é exibido.
+ * Constrói um índice imutável de desempenho a partir de encontros e, opcionalmente, competições.
+ * Não muta os documentos nem `roster` e não persiste agregados.
+ * Todas as origens entram: a coorte de um encontro só filtra quem é exibido.
  *
  * @param {unknown} document
  * @param {Array<{ id?: string, name?: string }> | null} [roster]
+ * @param {{ competitionsDocument?: unknown }} [options]
  */
-export function buildPlayerPerformanceIndex(document, roster = []) {
-  const validation = validateV2Document(document);
-  if (!validation.ok) {
-    const fatal = structuralErrors(validation.errors);
-    if (fatal.length > 0) return fail(fatal);
+export function buildPlayerPerformanceIndex(document, roster = [], options = {}) {
+  const { competitionsDocument } = normalizeIndexOptions(options);
+  const fatal = [];
+
+  const sessionValidation = validateV2Document(document);
+  if (!sessionValidation.ok) {
+    fatal.push(...structuralErrors(sessionValidation.errors));
   }
+
+  if (competitionsDocument != null) {
+    const competitionValidation = validateCompetitionDocument(competitionsDocument);
+    if (!competitionValidation.ok) {
+      fatal.push(...structuralErrors(competitionValidation.errors));
+    }
+  }
+
+  if (fatal.length > 0) return fail(fatal);
 
   const rosterById = new Map(
     (Array.isArray(roster) ? roster : [])
       .filter((player) => typeof player?.id === 'string' && player.id.trim())
       .map((player) => [player.id, player])
   );
-  const players = new Map();
-  const history = new Map();
-  let includedMatches = 0;
-  let skippedPendingMatches = 0;
-  let skippedInvalidMatches = 0;
+  const state = {
+    players: new Map(),
+    history: new Map(),
+    includedMatches: 0,
+    skippedPendingMatches: 0,
+    skippedInvalidMatches: 0,
+  };
 
-  (document.sessions ?? []).forEach((session, sessionIndex) => {
-    const sessionRecency = {
-      date: session?.date,
-      updatedAt: session?.updatedAt,
-      createdAt: session?.createdAt,
-      sessionIndex,
-    };
-
-    (session?.teams ?? []).forEach((team, teamIndex) => {
-      rememberGroupNames(history, team?.members, {
-        ...sessionRecency,
-        roundIndex: -2,
-        matchIndex: -2,
-        sideIndex: teamIndex,
-      });
-    });
-
-    (session?.rounds ?? []).forEach((round, roundIndex) => {
-      (round?.matches ?? []).forEach((match, matchIndex) => {
-        rememberGroupNames(history, match?.lineupA, {
-          ...sessionRecency,
-          roundIndex,
-          matchIndex,
-          sideIndex: 0,
-        });
-        rememberGroupNames(history, match?.lineupB, {
-          ...sessionRecency,
-          roundIndex,
-          matchIndex,
-          sideIndex: 1,
-        });
-
-        if (isMatchPending(match)) {
-          skippedPendingMatches += 1;
-          return;
-        }
-
-        if (!isMatchCompleted(match)) {
-          skippedInvalidMatches += 1;
-          return;
-        }
-
-        includedMatches += 1;
-        const sideLineups = [freezeLineup(match.lineupA), freezeLineup(match.lineupB)];
-        const sides = [
-          {
-            members: sideLineups[0],
-            pointsFor: match.scoreA,
-            pointsAgainst: match.scoreB,
-          },
-          {
-            members: sideLineups[1],
-            pointsFor: match.scoreB,
-            pointsAgainst: match.scoreA,
-          },
-        ];
-
-        for (let sideIndex = 0; sideIndex < sides.length; sideIndex += 1) {
-          const side = sides[sideIndex];
-          const opponents = sides[1 - sideIndex].members;
-          const lineupSize = side.members.length;
-          const won = side.pointsFor > side.pointsAgainst;
-          const ids = side.members.map((member) => member.playerId);
-
-          for (let index = 0; index < ids.length; index += 1) {
-            const playerId = ids[index];
-            const record = ensurePlayer(players, playerId);
-            applySideStats(record, lineupSize, won, side.pointsFor, side.pointsAgainst);
-            recordAppearance(
-              record,
-              createMatchAppearance({
-                playerId,
-                playerName: side.members[index].playerName,
-                session,
-                sessionIndex,
-                round,
-                roundIndex,
-                match,
-                matchIndex,
-                teammates: side.members,
-                opponents,
-                pointsFor: side.pointsFor,
-                pointsAgainst: side.pointsAgainst,
-                won,
-              })
-            );
-            for (let partnerIndex = 0; partnerIndex < ids.length; partnerIndex += 1) {
-              if (partnerIndex === index) continue;
-              const partner = ensurePartner(record, ids[partnerIndex]);
-              applySideStats(partner, lineupSize, won, side.pointsFor, side.pointsAgainst);
-            }
-          }
-        }
-      });
-    });
+  const sources = combinePerformanceMatchSources(document, competitionsDocument);
+  sources.nameSnapshots.forEach((snapshot) => {
+    rememberGroupNames(state.history, snapshot.members, snapshot.recency);
+  });
+  sources.matches.forEach((match) => {
+    ingestAnalyzableMatch(state, match);
   });
 
   const index = Object.freeze({
-    includedMatches,
-    skippedPendingMatches,
-    skippedInvalidMatches,
+    includedMatches: state.includedMatches,
+    skippedPendingMatches: state.skippedPendingMatches,
+    skippedInvalidMatches: state.skippedInvalidMatches,
   });
   internals.set(index, {
-    players,
-    history,
+    players: state.players,
+    history: state.history,
     rosterById,
   });
   return okIndex(index);
@@ -789,7 +820,7 @@ function listRecordAppearances(state, playerId, filters) {
  *
  * @param {object} index
  * @param {string} playerId
- * @param {{ lineupSize?: number | null, partnerId?: string | null, result?: 'win' | 'loss' | null, startDate?: string | null, endDate?: string | null }} [filters]
+ * @param {{ lineupSize?: number | null, partnerId?: string | null, result?: 'win' | 'loss' | null, sourceType?: 'session' | 'competition' | null, startDate?: string | null, endDate?: string | null }} [filters]
  */
 export function getPlayerMatchHistory(index, playerId, filters) {
   const state = requireIndex(index);
@@ -895,12 +926,13 @@ function assertRankingOptions(options) {
  * `playerIds` limita quem aparece; as métricas de cada um usam todas as partidas válidas no recorte.
  *
  * @param {object} index
- * @param {{ lineupSize?: number | null, startDate?: string | null, endDate?: string | null, playerIds?: string[] | null, sortBy?: string, sortDirection?: 'asc' | 'desc' }} [options]
+ * @param {{ lineupSize?: number | null, sourceType?: 'session' | 'competition' | null, startDate?: string | null, endDate?: string | null, playerIds?: string[] | null, sortBy?: string, sortDirection?: 'asc' | 'desc' }} [options]
  */
 export function getPlayerPerformanceRanking(index, options) {
   const state = requireIndex(index);
   const {
     lineupSize,
+    sourceType,
     startDate,
     endDate,
     playerIds,
@@ -911,6 +943,7 @@ export function getPlayerPerformanceRanking(index, options) {
     lineupSize,
     partnerId: null,
     result: null,
+    sourceType,
     startDate,
     endDate,
   };

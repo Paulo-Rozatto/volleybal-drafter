@@ -67,6 +67,7 @@ function pluralize(count, singular, plural) {
 export default function GameSessionDetail({
   session,
   document = null,
+  competitionsDocument = null,
   players = [],
   syncPanel,
   onBack,
@@ -112,8 +113,8 @@ export default function GameSessionDetail({
   const maxCourts = Math.max(1, Math.floor(Math.max(formatTeamCount, 2) / 2));
   const selectedCourtCount = Math.min(Math.max(courtCount, 1), maxCourts);
   const partnershipIndex = useMemo(
-    () => buildPlayerPerformanceIndex(document, players),
-    [document, players]
+    () => buildPlayerPerformanceIndex(document, players, { competitionsDocument }),
+    [document, players, competitionsDocument]
   );
   const partnershipRepeats = useMemo(
     () =>
@@ -356,6 +357,7 @@ export default function GameSessionDetail({
       {!showGames && (
         <SessionPerformanceView
           document={document}
+          competitionsDocument={competitionsDocument}
           roster={players}
           sessionId={session.id}
         />

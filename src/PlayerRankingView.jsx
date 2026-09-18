@@ -14,6 +14,7 @@ import {
   formatPointsAverage,
   formatWinRatePercent,
   rankingSortOptions,
+  rankingSourceFilterOptions,
   resolveRankingPlayerIds,
 } from './performancePresentation.js';
 
@@ -32,10 +33,10 @@ const controlStyle = {
 const focusClass =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2';
 
-export default function PlayerRankingView({ document, roster = [] }) {
+export default function PlayerRankingView({ document, roster = [], competitionsDocument = null }) {
   const built = useMemo(
-    () => buildPlayerPerformanceIndex(document, roster),
-    [document, roster]
+    () => buildPlayerPerformanceIndex(document, roster, { competitionsDocument }),
+    [document, roster, competitionsDocument]
   );
   const players = useMemo(
     () => (built.ok ? listPerformancePlayers(built.index) : []),
@@ -45,23 +46,26 @@ export default function PlayerRankingView({ document, roster = [] }) {
   const [search, setSearch] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [sourceType, setSourceType] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [sortBy, setSortBy] = useState('wins');
   const [sortDirection, setSortDirection] = useState('desc');
 
   const visiblePlayers = filterPlayersBySearch(players, search);
   const sortOptions = rankingSortOptions();
+  const sourceOptions = rankingSourceFilterOptions();
 
   const rows = useMemo(() => {
     if (!built.ok) return [];
     return getPlayerPerformanceRanking(built.index, {
       startDate: startDate || null,
       endDate: endDate || null,
+      sourceType: sourceType || null,
       playerIds: resolveRankingPlayerIds(selectedIds, players),
       sortBy,
       sortDirection,
     });
-  }, [built, startDate, endDate, selectedIds, players, sortBy, sortDirection]);
+  }, [built, startDate, endDate, sourceType, selectedIds, players, sortBy, sortDirection]);
 
   const diagnostics = built.ok ? formatHistoryDiagnostics(built.index) : null;
 
@@ -103,7 +107,7 @@ export default function PlayerRankingView({ document, roster = [] }) {
       </div>
 
       <div className="space-y-3 rounded-xl border p-3" style={surfaceStyle}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-sm font-bold" htmlFor="ranking-start-date">
               Data inicial
@@ -129,6 +133,24 @@ export default function PlayerRankingView({ document, roster = [] }) {
               className={`mt-1 w-full border rounded-lg p-2 text-sm ${focusClass}`}
               style={controlStyle}
             />
+          </div>
+          <div>
+            <label className="block text-sm font-bold" htmlFor="ranking-source">
+              Origem
+            </label>
+            <select
+              id="ranking-source"
+              value={sourceType}
+              onChange={(event) => setSourceType(event.target.value)}
+              className={`mt-1 w-full border rounded-lg p-2 text-sm font-semibold ${focusClass}`}
+              style={controlStyle}
+            >
+              {sourceOptions.map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
