@@ -22,6 +22,10 @@ const etapa4Sql = readFileSync(
   join(root, 'supabase/migrations/20260921180000_cloud_groups.sql'),
   'utf8'
 );
+const etapa5Sql = readFileSync(
+  join(root, 'supabase/migrations/20260921200000_group_performance.sql'),
+  'utf8'
+);
 
 async function asUser(db, userId, run) {
   await db.exec('begin');
@@ -68,6 +72,7 @@ describe('cloud sessions RLS', () => {
     await db.exec(etapa2Sql);
     await db.exec(etapa3Sql);
     await db.exec(etapa4Sql);
+    await db.exec(etapa5Sql);
 
     ownerA = crypto.randomUUID();
     memberA = crypto.randomUUID();

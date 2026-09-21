@@ -5,9 +5,9 @@ alwaysApply: true
 
 # Associação cloud e roadmap
 
-Roadmap congelado: 3.5 validada no hospedado → 4 grupos → 5 ranking no grupo → 6 competições cloud → 7 migração Gist → 8 desligar Gist.
+Roadmap congelado: 4 grupos validada no hospedado → 5 ranking no grupo (código local; não `db push` até revisão) → 6 competições cloud → 7 migração Gist → 8 desligar Gist.
 
-A etapa 3.5 passou. Identidade da etapa 3 permanece congelada. Não unifique Gist. Sem ranking mundial público. Sem ranking de grupo (etapa 5). Sem competições cloud (etapa 6).
+Identidade da etapa 3 permanece congelada. Não unifique Gist. Sem ranking mundial público. Sem competições cloud (etapa 6).
 
 Três relações distintas — nunca colapsar:
 
@@ -17,4 +17,4 @@ Três relações distintas — nunca colapsar:
 
 Não copie `group_members` automaticamente para `session_members` nem para `session_players`. Encontro avulso continua válido (`sessions.group_id` nulo). Entrar no grupo não abre os encontros do grupo.
 
-`get_my_performance_matches()` é só o player vinculado ao `auth.uid()`. Ranking de grupo usa read model do grupo, nunca N chamadas dessa RPC.
+`get_my_performance_matches()` é só o player vinculado ao `auth.uid()`. Ranking de grupo usa uma leitura `get_group_performance_matches(group_id)` sanitizada, nunca N chamadas da RPC pessoal. Métricas ficam no JS. Leaderboard = `group_members` com player vinculado; convidados podem aparecer nas partidas, não no ranking.

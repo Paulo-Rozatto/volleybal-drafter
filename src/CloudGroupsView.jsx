@@ -231,6 +231,7 @@ export default function CloudGroupsView({
   if (openGroupId) {
     return (
       <CloudGroupOpenPanel
+        key={openGroupId}
         groupLoading={groupLoading}
         groupError={groupError}
         group={group}

@@ -80,6 +80,7 @@ describe('cloud group panel', () => {
     expect(detail).toContain('Promover a admin');
     expect(detail).toContain('Rebaixar a membro');
     expect(detail).toContain('Novo encontro neste grupo');
+    expect(detail).toContain('Ranking');
     expect(detail).not.toContain('Carregando grupo');
   });
 

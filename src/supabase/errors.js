@@ -50,6 +50,7 @@ export const CLOUD_RPC_ERROR_MESSAGES = Object.freeze({
   GROUP_LAST_OWNER: 'O grupo precisa continuar com um organizador.',
   GROUP_MEMBER_NOT_FOUND: 'Essa pessoa não pertence ao grupo.',
   GROUP_ID_IMMUTABLE: 'O encontro não pode mudar de grupo depois de criado.',
+  GROUP_ACCESS_DENIED: 'Você não participa deste grupo.',
   JOIN_CODE_GENERATION_FAILED: 'Não foi possível gerar um código de convite. Tente de novo.',
 });
 

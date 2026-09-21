@@ -231,7 +231,7 @@ describe('adapter cloud de desempenho', () => {
 
 describe('CloudProfileView', () => {
   it('copia o histórico antes de inverter e não muta o array do domínio', () => {
-    const view = readFileSync(new URL('../CloudProfileView.jsx', import.meta.url), 'utf8');
+    const view = readFileSync(new URL('../CloudPerformanceSections.jsx', import.meta.url), 'utf8');
     expect(view).toContain('[...history].reverse()');
     expect(view).not.toMatch(/getPlayerMatchHistory\([^)]*\)\.reverse\(/);
   });

@@ -7,12 +7,8 @@ import {
 } from './domain/playerPerformance.js';
 import {
   formatHistoryDiagnostics,
-  formatMatchHistoryDate,
-  formatMatchHistoryResult,
-  formatMatchHistoryScoreline,
-  formatMatchHistorySource,
-  formatWinRatePercent,
 } from './performancePresentation.js';
+import { CloudPerformanceSections } from './CloudPerformanceSections.jsx';
 import { buildCloudPlayerPerformanceIndex } from './supabase/cloudPerformance.js';
 import {
   approveCloudPlayerLinkClaim,
@@ -30,17 +26,6 @@ const surfaceStyle = {
   backgroundColor: 'var(--bg-surface)',
   borderColor: 'var(--border-color)',
 };
-
-function StatCard({ label, value }) {
-  return (
-    <div className="rounded-xl border p-3" style={surfaceStyle}>
-      <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-        {label}
-      </p>
-      <p className="mt-1 text-lg font-black">{value}</p>
-    </div>
-  );
-}
 
 export default function CloudProfileView({ user }) {
   const [ownPlayers, setOwnPlayers] = useState([]);
@@ -103,7 +88,6 @@ export default function CloudProfileView({ user }) {
     built?.ok && linked?.id ? getHardestOpponents(built.index, linked.id).slice(0, 3) : [];
   const history =
     built?.ok && linked?.id ? getPlayerMatchHistory(built.index, linked.id) : [];
-  const recentHistory = [...history].reverse();
   const diagnostics = built?.ok ? formatHistoryDiagnostics(built.index) : null;
 
   async function run(action) {
@@ -272,78 +256,15 @@ export default function CloudProfileView({ user }) {
               {(built?.errors ?? []).map((item) => item.message).join(' ') ||
                 'Não foi possível calcular o desempenho.'}
             </p>
-          ) : summary && summary.matches === 0 ? (
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Ainda não há partidas válidas neste perfil.
-            </p>
-          ) : summary ? (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                <StatCard label="Jogos" value={summary.matches} />
-                <StatCard label="Vitórias" value={summary.wins} />
-                <StatCard label="Derrotas" value={summary.losses} />
-                <StatCard
-                  label="Aproveitamento"
-                  value={formatWinRatePercent(summary.winRate, summary.matches)}
-                />
-                <StatCard label="Pontos pró" value={summary.pointsFor} />
-                <StatCard label="Pontos contra" value={summary.pointsAgainst} />
-              </div>
-              {bestPartner ? (
-                <p className="text-sm">
-                  Melhor parceiro: {bestPartner.partnerName} ({bestPartner.wins}V/{bestPartner.losses}D)
-                </p>
-              ) : null}
-              {hardestOpponents.length > 0 ? (
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-                    Adversários mais difíceis
-                  </p>
-                  <ul className="text-sm space-y-1">
-                    {hardestOpponents.map((opponent) => (
-                      <li key={opponent.opponentId}>
-                        {opponent.opponentName} ({opponent.wins}V/{opponent.losses}D)
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-              <div className="space-y-2">
-                <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-                  Histórico recente
-                </p>
-                {recentHistory.length === 0 ? (
-                  <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                    Nenhuma partida neste recorte.
-                  </p>
-                ) : (
-                  <ol className="space-y-2">
-                    {recentHistory.map((match) => (
-                      <li
-                        key={`${match.sourceType}:${match.sourceId}:${match.roundId}:${match.matchId}`}
-                        className="rounded-lg border p-2 space-y-1"
-                        style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-app)' }}
-                      >
-                        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-                          {formatMatchHistoryDate(match.sessionDate)}
-                        </p>
-                        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-                          {formatMatchHistorySource(match)}
-                        </p>
-                        <p className="text-sm font-bold">{formatMatchHistoryScoreline(match)}</p>
-                        <p className="text-xs font-semibold">{formatMatchHistoryResult(match.result)}</p>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-              {diagnostics ? (
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {diagnostics.includedLabel}; {diagnostics.pendingLabel}; {diagnostics.invalidLabel}
-                </p>
-              ) : null}
-            </>
-          ) : null}
+          ) : (
+            <CloudPerformanceSections
+              summary={summary}
+              bestPartner={bestPartner}
+              hardestOpponents={hardestOpponents}
+              history={history}
+              diagnostics={diagnostics}
+            />
+          )}
         </section>
       ) : null}
 

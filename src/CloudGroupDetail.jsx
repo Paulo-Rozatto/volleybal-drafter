@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import CloudGroupRanking from './CloudGroupRanking.jsx';
 import CloudSessionCreateForm from './CloudSessionCreateForm.jsx';
 import {
   canManageGroup,
@@ -96,6 +97,8 @@ export default function CloudGroupDetail({
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [section, setSection] = useState('grupo');
+  const [rankingUserId, setRankingUserId] = useState(null);
   const [name, setName] = useState(group.name);
   const [description, setDescription] = useState(group.description ?? '');
   const manage = canManageGroup(group.myRole);
@@ -143,6 +146,42 @@ export default function CloudGroupDetail({
         ← Grupos
       </button>
 
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setSection('grupo')}
+          className="text-sm font-bold px-3 py-1 rounded-lg cursor-pointer"
+          style={{
+            backgroundColor: section === 'grupo' ? 'var(--primary)' : 'var(--bg-subtle)',
+            color: section === 'grupo' ? 'var(--text-inverse)' : 'var(--text-main)',
+          }}
+        >
+          Grupo
+        </button>
+        <button
+          type="button"
+          onClick={() => setSection('ranking')}
+          className="text-sm font-bold px-3 py-1 rounded-lg cursor-pointer"
+          style={{
+            backgroundColor: section === 'ranking' ? 'var(--primary)' : 'var(--bg-subtle)',
+            color: section === 'ranking' ? 'var(--text-inverse)' : 'var(--text-main)',
+          }}
+        >
+          Ranking
+        </button>
+      </div>
+
+      {section === 'ranking' ? (
+        <CloudGroupRanking
+          key={group.id}
+          groupId={group.id}
+          selectedUserId={rankingUserId}
+          onSelectUser={setRankingUserId}
+        />
+      ) : null}
+
+      {section === 'grupo' ? (
+      <>
       <div
         className="p-4 rounded-xl border space-y-2"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
@@ -279,9 +318,17 @@ export default function CloudGroupDetail({
           const canRemoveMember = group.myRole === 'owner' || member.role === 'member';
           return (
             <div key={member.userId} className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setRankingUserId(member.userId);
+                  setSection('ranking');
+                }}
+                className="text-sm text-left font-semibold cursor-pointer"
+                style={{ color: 'var(--primary)' }}
+              >
                 {member.displayName || member.userId} · {groupRoleLabel(member.role)}
-              </p>
+              </button>
               {canEditMember ? (
                 <div className="flex flex-wrap gap-2">
                   {member.role === 'member' ? (
@@ -372,6 +419,8 @@ export default function CloudGroupDetail({
           </button>
         ))}
       </section>
+      </>
+      ) : null}
 
       {status ? (
         <p
