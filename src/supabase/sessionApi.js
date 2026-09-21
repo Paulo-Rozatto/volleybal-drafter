@@ -27,7 +27,7 @@ export async function listCloudSessions() {
 
   const { data, error: queryError } = await supabase
     .from('sessions')
-    .select('id, name, date, status, join_code, team_size, team_count, structure_version, created_at, updated_at')
+    .select('id, name, date, status, join_code, team_size, team_count, structure_version, group_id, created_at, updated_at')
     .order('date', { ascending: false });
 
   if (queryError) return { ...fail(queryError), sessions: [] };
@@ -115,7 +115,7 @@ export async function loadCloudSession(sessionId, myUserId) {
   }
 }
 
-export async function createCloudSession({ date, name, teamSize, teamCount, createdBy }) {
+export async function createCloudSession({ date, name, teamSize, teamCount, createdBy, groupId = null }) {
   const { supabase, error } = requireClient();
   if (error) return { ...error, session: null };
 
@@ -128,6 +128,7 @@ export async function createCloudSession({ date, name, teamSize, teamCount, crea
       team_size: Number(teamSize),
       team_count: Number(teamCount),
       status: 'draft',
+      group_id: groupId || null,
     })
     .select('*')
     .single();

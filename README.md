@@ -91,10 +91,11 @@ A etapa 3 adiciona identidade do jogador (criar/vincular/reivindicar) e o desemp
 
 1. Copie `.env.example` para `.env`.
 2. Preencha `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` (chave **anon**, nunca `service_role`).
-3. No projeto Supabase, rode **as três** migrations em `supabase/migrations/` (SQL Editor, na ordem dos timestamps, ou `supabase db push`):
+3. No projeto Supabase, rode **as quatro** migrations em `supabase/migrations/` (SQL Editor, na ordem dos timestamps, ou `supabase db push`):
    - `20260921120000_cloud_sessions.sql`
    - `20260921140000_cloud_sessions_etapa2.sql`
    - `20260921160000_player_identity_performance.sql`
+   - `20260921180000_cloud_groups.sql`
 4. Authentication → URL Configuration → Redirect URLs:
 
 ```text
@@ -118,11 +119,12 @@ https://paulo-rozatto.github.io/volleybal-drafter/**
    - `public.match_players`
    - `public.match_events`
 
-Se a etapa 1 e a etapa 2 já estavam aplicadas, rode só a migration da etapa 3. Não há backfill de Gist.
+Se as etapas 1–3 já estavam aplicadas, rode só `20260921180000_cloud_groups.sql`. Não há backfill de Gist.
 
-O login **não** é exigido para sorteio, elenco Gist, encontros Gist, competições ou desempenho local. A conta vale para **Encontros online**.
+O login **não** é exigido para sorteio, elenco Gist, encontros Gist, competições ou desempenho local. A conta vale para **Encontros online** e **Grupos**.
 
-Convite: `#/join/CODIGO` (já logado) ou `?join=CODIGO` no redirect do magic link. O hash do Auth substitui `#/join/...`, então o código pendente fica em `sessionStorage` e na query.
+Convite de encontro: `#/join/CODIGO` (já logado) ou `?join=CODIGO` no redirect do magic link.
+Convite de grupo: `#/group/join/CODIGO` ou `?groupJoin=CODIGO`. Os dois códigos ficam em chaves distintas do `sessionStorage` e **não** se misturam.
 
 Estrutura (times, rodadas, elenco, escalação, finalizar) usa `structure_version`. Placar usa `matches.version`, independente. Depois de finalizado, só organizador/admin corrigem placar; limpar continua proibido.
 
@@ -130,9 +132,33 @@ Identidade: `link_player` só vale para jogador que **você criou**. `create_and
 
 A `anon key` é a chave pública do cliente; a segurança vem do RLS. A `service_role` **nunca** entra no Vite nem no browser.
 
+### Etapa 4 — Grupos
+
+Grupo é uma comunidade (`Vôlei Quinta`, `Turma UFJF`). Não é o elenco da pelada.
+
+Três relações distintas:
+
+- `group_members` — usuários da comunidade
+- `session_members` — quem tem acesso àquele encontro
+- `session_players` — jogadores que podem jogar naquele encontro
+
+Entrar no grupo **não** copia ninguém para `session_members` nem para `session_players`. Entrar no encontro **não** entra no grupo. Identidade user ↔ player continua a da etapa 3.
+
+`sessions.group_id` é opcional. `null` = encontro avulso (todos os encontros já existentes). Preenchido = encontro daquele grupo. Qualquer `group_member` pode criar um encontro no grupo; só o criador vira `session` owner. Os outros entram pelo convite da sessão. A listagem no grupo só mostra sessões que o RLS atual já deixa o usuário ler.
+
+Papéis do grupo: owner, admin, member. Owner/admin editam nome, rotacionam código, promovem member → admin e rebaixam admin → member. Admin não altera owner. O criador permanece owner nesta etapa (sem transferência). Member pode sair; o último owner não.
+
+Roteiro manual:
+
+1. André cria o grupo, vê-se Owner, copia o código, cria um encontro no grupo.
+2. Paulo entra no grupo pelo código, vê-se Membro, **não** vê o encontro até entrar pelo mecanismo da sessão.
+3. Paulo entra no encontro pelo código da sessão. Identidade/player dele continua independente da membership do grupo.
+
+Ranking dentro do grupo é a etapa 5. Competições cloud, etapa 6. Gist permanece.
+
 ### Validação hospedada (etapa 3.5)
 
-Não avance schema de grupos até este circuito passar no projeto hospedado.
+Circuito já validado no projeto hospedado (Auth, RLS, RPC, Realtime). A etapa 4 adiciona a migration de grupos acima; não rode as migrations antigas de novo.
 
 1. Preencha `.env` (já copiado de `.env.example`; o arquivo está no `.gitignore`) com a URL e a **anon key** reais. Placeholder do example não conta como configurado.
 2. Rode as três migrations no SQL Editor, na ordem dos timestamps.

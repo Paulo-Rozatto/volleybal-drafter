@@ -38,13 +38,25 @@ export const CLOUD_RPC_ERROR_MESSAGES = Object.freeze({
   PLAYER_CLAIM_FORBIDDEN: 'Só quem criou o jogador pode decidir o pedido.',
   PLAYER_CLAIM_NOT_FOUND: 'Pedido de vínculo não encontrado.',
   PLAYER_CLAIM_NOT_PENDING: 'Este pedido já foi decidido.',
+  GROUP_NAME_REQUIRED: 'Informe um nome para o grupo.',
+  GROUP_NOT_FOUND: 'Grupo não encontrado.',
+  GROUP_JOIN_CODE_NOT_FOUND: 'Não encontramos um grupo com esse código.',
+  GROUP_JOIN_CODE_ROTATE_FORBIDDEN: 'Só o organizador ou um admin pode trocar o código do grupo.',
+  GROUP_JOIN_CODE_ROTATE_REQUIRED: 'O código do grupo só muda pela função de convite.',
+  GROUP_FORBIDDEN: 'Você não pode alterar este grupo.',
+  GROUP_ROLE_INVALID: 'Papel de grupo inválido.',
+  GROUP_ROLE_FORBIDDEN: 'Você não pode alterar esse papel.',
+  GROUP_OWNER_IMMUTABLE: 'O organizador do grupo não pode ser alterado nesta etapa.',
+  GROUP_LAST_OWNER: 'O grupo precisa continuar com um organizador.',
+  GROUP_MEMBER_NOT_FOUND: 'Essa pessoa não pertence ao grupo.',
+  GROUP_ID_IMMUTABLE: 'O encontro não pode mudar de grupo depois de criado.',
+  JOIN_CODE_GENERATION_FAILED: 'Não foi possível gerar um código de convite. Tente de novo.',
 });
 
 export function rpcErrorCode(error) {
   const message = String(error?.message ?? error ?? '');
-  const match = message.match(
-    /(AUTH_REQUIRED|JOIN_CODE_INVALID|JOIN_CODE_NOT_FOUND|JOIN_CODE_ROTATE_FORBIDDEN|MATCH_NOT_FOUND|SCORE_FORBIDDEN|SCORE_CLEAR_FORBIDDEN|SCORE_PARTIAL|SCORE_NEGATIVE|SCORE_TIE|SCORE_VERSION_CONFLICT|USE_SET_MATCH_SCORE|USE_LINK_PLAYER|CREATED_BY_IMMUTABLE|PLAYER_NOT_FOUND|PLAYER_ALREADY_LINKED|USER_ALREADY_LINKED|PLAYER_LINK_REQUIRES_OWNERSHIP|STRUCTURE_VERSION_CONFLICT|STRUCTURE_FORBIDDEN|SESSION_FINISHED|SESSION_NOT_DRAFT|SESSION_NOT_IN_PROGRESS|TEAMS_LOCKED|PLAYER_NOT_IN_SESSION|FINALIZE_NO_MATCHES|FINALIZE_INCOMPLETE|SESSION_NOT_FOUND|INVALID_PLAN|PLAYER_ARCHIVED|PLAYER_IN_TEAM|USE_STRUCTURE_RPC|STATUS_IMMUTABLE|PLAYER_NOT_LINKED|PLAYER_NAME_REQUIRED|PLAYER_CLAIM_NOT_VISIBLE|PLAYER_CLAIM_DUPLICATE|PLAYER_CLAIM_FORBIDDEN|PLAYER_CLAIM_NOT_FOUND|PLAYER_CLAIM_NOT_PENDING)/
-  );
+  const codes = Object.keys(CLOUD_RPC_ERROR_MESSAGES).sort((left, right) => right.length - left.length);
+  const match = message.match(new RegExp(`(${codes.join('|')})`));
   return match?.[1] ?? null;
 }
 

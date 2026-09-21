@@ -5,16 +5,16 @@ alwaysApply: true
 
 # Associação cloud e roadmap
 
-Roadmap congelado: 3.5 validação hospedada → 4 grupos → 5 ranking no grupo → 6 competições cloud → 7 migração Gist → 8 desligar Gist.
+Roadmap congelado: 3.5 validada no hospedado → 4 grupos → 5 ranking no grupo → 6 competições cloud → 7 migração Gist → 8 desligar Gist.
 
-Não acrescente schema de grupos até a etapa 3.5 passar no Supabase hospedado (Auth + RLS + RPC + Realtime). Identidade da etapa 3 está congelada. Não unifique Gist. Sem ranking mundial público.
+A etapa 3.5 passou. Identidade da etapa 3 permanece congelada. Não unifique Gist. Sem ranking mundial público. Sem ranking de grupo (etapa 5). Sem competições cloud (etapa 6).
 
 Três relações distintas — nunca colapsar:
 
-- `group_members`: pertencem à comunidade (etapa 4)
+- `group_members`: pertencem à comunidade
 - `session_members`: têm acesso àquele encontro
 - `session_players`: jogam naquele encontro
 
-Não copie `group_members` automaticamente para `session_members`. Encontro avulso continua válido (`sessions.group_id` nulo).
+Não copie `group_members` automaticamente para `session_members` nem para `session_players`. Encontro avulso continua válido (`sessions.group_id` nulo). Entrar no grupo não abre os encontros do grupo.
 
 `get_my_performance_matches()` é só o player vinculado ao `auth.uid()`. Ranking de grupo usa read model do grupo, nunca N chamadas dessa RPC.

@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import AuthPanel from './AuthPanel.jsx';
 import CloudProfileView from './CloudProfileView.jsx';
 import CloudSessionDetail from './CloudSessionDetail.jsx';
+import CloudSessionCreateForm from './CloudSessionCreateForm.jsx';
 import {
-  createdCloudSessionId,
   fetchOpenCloudSession,
   shouldApplySessionLoad,
 } from './cloudSessionPanel.js';
-import { localDateString } from './teamGameSessions.js';
-import { createCloudSession, listCloudSessions, loadCloudSession } from './supabase/sessionApi.js';
+import { listCloudSessions, loadCloudSession } from './supabase/sessionApi.js';
 import useCloudSessionRealtime from './hooks/useCloudSessionRealtime.js';
 
 export function CloudSessionOpenPanel({
@@ -83,14 +82,7 @@ export default function CloudSessionsView({
   const [session, setSession] = useState(null);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState(null);
-  const [form, setForm] = useState(() => ({
-    date: localDateString(),
-    name: '',
-    teamSize: 2,
-    teamCount: 2,
-  }));
   const [status, setStatus] = useState('');
-  const [busy, setBusy] = useState(false);
   const userId = user?.id ?? null;
   const openIdRef = useRef(openSessionId);
 
@@ -222,102 +214,14 @@ export default function CloudSessionsView({
       <AuthPanel configured={configured} ready={ready} user={user} />
       {user ? <CloudProfileView user={user} /> : null}
 
-      <form
-        className="p-4 rounded-xl border space-y-3"
-        style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-        onSubmit={async (event) => {
-          event.preventDefault();
-          setBusy(true);
-          setStatus('');
-          try {
-            const created = await createCloudSession({
-              ...form,
-              createdBy: user.id,
-            });
-            if (!created.ok) {
-              setStatus(created.error?.message || 'Não foi possível criar o encontro.');
-              return;
-            }
-            const sessionId = createdCloudSessionId(created);
-            if (!sessionId) {
-              setStatus('O encontro foi criado, mas o identificador não voltou no resultado.');
-              return;
-            }
-            await refreshList();
-            onOpenSession?.(sessionId);
-          } catch (error) {
-            setStatus(error?.message || 'Não foi possível criar o encontro.');
-          } finally {
-            setBusy(false);
-          }
+      <CloudSessionCreateForm
+        user={user}
+        heading="Novo encontro avulso"
+        onCreated={async (sessionId) => {
+          await refreshList();
+          onOpenSession?.(sessionId);
         }}
-      >
-        <h3 className="font-bold text-sm">Novo encontro</h3>
-        <input
-          type="date"
-          value={form.date}
-          onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
-          className="w-full border p-2 rounded text-sm outline-none"
-          style={{
-            backgroundColor: 'var(--bg-app)',
-            color: 'var(--text-main)',
-            borderColor: 'var(--border-color)',
-          }}
-        />
-        <input
-          value={form.name}
-          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-          placeholder="Nome (opcional)"
-          className="w-full border p-2 rounded text-sm outline-none"
-          style={{
-            backgroundColor: 'var(--bg-app)',
-            color: 'var(--text-main)',
-            borderColor: 'var(--border-color)',
-          }}
-        />
-        <div className="flex gap-2">
-          <select
-            value={form.teamSize}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, teamSize: Number(event.target.value) }))
-            }
-            className="flex-1 border p-2 rounded text-sm outline-none"
-            style={{
-              backgroundColor: 'var(--bg-app)',
-              color: 'var(--text-main)',
-              borderColor: 'var(--border-color)',
-            }}
-          >
-            {[2, 3, 4, 5, 6].map((size) => (
-              <option key={size} value={size}>
-                {size}x{size}
-              </option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min="2"
-            value={form.teamCount}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, teamCount: Number(event.target.value) }))
-            }
-            className="w-24 border p-2 rounded text-sm outline-none"
-            style={{
-              backgroundColor: 'var(--bg-app)',
-              color: 'var(--text-main)',
-              borderColor: 'var(--border-color)',
-            }}
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full font-bold py-3 rounded-xl cursor-pointer disabled:opacity-50"
-          style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
-        >
-          Criar encontro
-        </button>
-      </form>
+      />
 
       <div className="space-y-2">
         {sessions.length === 0 ? (

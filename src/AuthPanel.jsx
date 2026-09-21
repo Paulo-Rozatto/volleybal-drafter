@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { signInWithMagicLink, signOut } from './supabase/auth.js';
-import { rememberPendingJoinCode } from './supabase/joinCode.js';
+import { rememberPendingGroupJoinCode, rememberPendingJoinCode } from './supabase/joinCode.js';
 
 export default function AuthPanel({
   configured,
   ready,
   user,
   pendingJoinCode,
+  pendingGroupJoinCode,
   onSignedOut,
 }) {
   const [email, setEmail] = useState('');
@@ -73,7 +74,11 @@ export default function AuthPanel({
         setBusy(true);
         setStatus('');
         if (pendingJoinCode) rememberPendingJoinCode(pendingJoinCode);
-        const result = await signInWithMagicLink(email, { joinCode: pendingJoinCode });
+        if (pendingGroupJoinCode) rememberPendingGroupJoinCode(pendingGroupJoinCode);
+        const result = await signInWithMagicLink(email, {
+          joinCode: pendingGroupJoinCode ? undefined : pendingJoinCode,
+          groupJoinCode: pendingGroupJoinCode,
+        });
         setBusy(false);
         setStatus(
           result.ok
@@ -90,6 +95,11 @@ export default function AuthPanel({
       {pendingJoinCode ? (
         <p className="text-sm font-semibold">
           Depois do login você entra no encontro {pendingJoinCode}.
+        </p>
+      ) : null}
+      {pendingGroupJoinCode ? (
+        <p className="text-sm font-semibold">
+          Depois do login você entra no grupo {pendingGroupJoinCode}.
         </p>
       ) : null}
       <input

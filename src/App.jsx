@@ -5,13 +5,18 @@ import CompetitionsView from './CompetitionsView.jsx';
 import PerformanceHub from './PerformanceHub.jsx';
 import GistSyncPanel from './GistSyncPanel';
 import CloudSessionsView from './CloudSessionsView.jsx';
+import CloudGroupsView from './CloudGroupsView.jsx';
 import JoinSessionView from './JoinSessionView.jsx';
+import JoinGroupView from './JoinGroupView.jsx';
 import useAuth from './hooks/useAuth.js';
 import {
+  clearPendingGroupJoinCode,
   clearPendingJoinCode,
+  parseGroupJoinHash,
   parseJoinHash,
+  rememberPendingGroupJoinCode,
   rememberPendingJoinCode,
-  resolveIncomingJoinCode,
+  resolveIncomingJoinIntent,
 } from './supabase/joinCode.js';
 import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
@@ -59,16 +64,25 @@ const INITIAL_ROSTER = [];
 
 export default function App() {
   // --- Core Navigation & Drawer States ---
-  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance', 'cloud', 'join'
+  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance', 'cloud', 'join', 'groups', 'groupJoin'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const auth = useAuth();
   const [cloudSessionId, setCloudSessionId] = useState(null);
-  const [pendingJoinCode, setPendingJoinCode] = useState(() =>
-    resolveIncomingJoinCode({
+  const [cloudGroupId, setCloudGroupId] = useState(null);
+  const [pendingJoinCode, setPendingJoinCode] = useState(() => {
+    const intent = resolveIncomingJoinIntent({
       hash: globalThis.location?.hash ?? '',
       search: globalThis.location?.search ?? '',
-    })
-  );
+    });
+    return intent.type === 'session' ? intent.code : null;
+  });
+  const [pendingGroupJoinCode, setPendingGroupJoinCode] = useState(() => {
+    const intent = resolveIncomingJoinIntent({
+      hash: globalThis.location?.hash ?? '',
+      search: globalThis.location?.search ?? '',
+    });
+    return intent.type === 'group' ? intent.code : null;
+  });
 
   // --- Players & History States ---
   const [players, setPlayers] = useState(() => {
@@ -141,17 +155,28 @@ export default function App() {
   });
 
   useEffect(() => {
-    const incoming = resolveIncomingJoinCode({
+    const intent = resolveIncomingJoinIntent({
       hash: globalThis.location?.hash ?? '',
       search: globalThis.location?.search ?? '',
     });
-    if (incoming) {
-      rememberPendingJoinCode(incoming);
-      setPendingJoinCode(incoming);
+    if (intent.type === 'group') {
+      rememberPendingGroupJoinCode(intent.code);
+      setPendingGroupJoinCode(intent.code);
+      setCurrentView('groupJoin');
+    } else if (intent.type === 'session') {
+      rememberPendingJoinCode(intent.code);
+      setPendingJoinCode(intent.code);
       setCurrentView('join');
     }
 
     const onHashChange = () => {
+      const groupCode = parseGroupJoinHash(globalThis.location?.hash ?? '');
+      if (groupCode) {
+        rememberPendingGroupJoinCode(groupCode);
+        setPendingGroupJoinCode(groupCode);
+        setCurrentView('groupJoin');
+        return;
+      }
       const code = parseJoinHash(globalThis.location?.hash ?? '');
       if (!code) return;
       rememberPendingJoinCode(code);
@@ -170,6 +195,17 @@ export default function App() {
     const url = new URL(globalThis.location.href);
     url.searchParams.delete('join');
     if (url.hash.startsWith('#/join/')) url.hash = '';
+    globalThis.history?.replaceState?.({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  const handleJoinedCloudGroup = useCallback((groupId) => {
+    clearPendingGroupJoinCode();
+    setPendingGroupJoinCode(null);
+    setCloudGroupId(groupId);
+    setCurrentView('groups');
+    const url = new URL(globalThis.location.href);
+    url.searchParams.delete('groupJoin');
+    if (url.hash.startsWith('#/group/join/')) url.hash = '';
     globalThis.history?.replaceState?.({}, '', `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
@@ -702,6 +738,18 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={() => { setCurrentView('groups'); setIsMenuOpen(false); }}
+              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+              style={{
+                backgroundColor: currentView === 'groups' || currentView === 'groupJoin' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)'
+              }}
+              aria-current={currentView === 'groups' || currentView === 'groupJoin' ? 'page' : undefined}
+            >
+              🏠 Grupos
+            </button>
+            <button
+              type="button"
               onClick={() => { setCurrentView('competitions'); setIsMenuOpen(false); }}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
@@ -985,6 +1033,16 @@ export default function App() {
             />
           )}
 
+          {currentView === 'groupJoin' && (
+            <JoinGroupView
+              joinCode={pendingGroupJoinCode}
+              configured={auth.configured}
+              ready={auth.ready}
+              user={auth.user}
+              onJoined={handleJoinedCloudGroup}
+            />
+          )}
+
           {currentView === 'cloud' && (
             <CloudSessionsView
               configured={auth.configured}
@@ -993,6 +1051,21 @@ export default function App() {
               pendingJoinCode={pendingJoinCode}
               openSessionId={cloudSessionId}
               onOpenSession={setCloudSessionId}
+            />
+          )}
+
+          {currentView === 'groups' && (
+            <CloudGroupsView
+              configured={auth.configured}
+              ready={auth.ready}
+              user={auth.user}
+              pendingGroupJoinCode={pendingGroupJoinCode}
+              openGroupId={cloudGroupId}
+              onOpenGroup={setCloudGroupId}
+              onOpenSession={(sessionId) => {
+                setCloudSessionId(sessionId);
+                setCurrentView('cloud');
+              }}
             />
           )}
 

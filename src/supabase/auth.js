@@ -21,7 +21,7 @@ export function subscribeAuth(onSession) {
   };
 }
 
-export async function signInWithMagicLink(email, { joinCode, origin, base } = {}) {
+export async function signInWithMagicLink(email, { joinCode, groupJoinCode, origin, base } = {}) {
   const supabase = getSupabaseClient();
   if (!supabase) {
     return { ok: false, error: { code: 'SUPABASE_NOT_CONFIGURED', message: 'Supabase não está configurado.' } };
@@ -31,6 +31,7 @@ export async function signInWithMagicLink(email, { joinCode, origin, base } = {}
     origin: origin ?? globalThis.location?.origin,
     base: base ?? import.meta.env?.BASE_URL ?? '/',
     joinCode,
+    groupJoinCode,
   });
 
   const { error } = await supabase.auth.signInWithOtp({
@@ -42,7 +43,12 @@ export async function signInWithMagicLink(email, { joinCode, origin, base } = {}
     return { ok: false, error: { code: 'AUTH_OTP_FAILED', message: error.message } };
   }
 
-  return { ok: true, emailRedirectTo, joinCode: joinCode ? normalizeJoinCode(joinCode) : null };
+  return {
+    ok: true,
+    emailRedirectTo,
+    joinCode: joinCode ? normalizeJoinCode(joinCode) : null,
+    groupJoinCode: groupJoinCode ? normalizeJoinCode(groupJoinCode) : null,
+  };
 }
 
 export async function signOut() {

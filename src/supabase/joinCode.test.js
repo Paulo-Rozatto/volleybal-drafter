@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PENDING_GROUP_JOIN_CODE_KEY,
   PENDING_JOIN_CODE_KEY,
   buildAuthRedirectTo,
+  cloudGroupJoinPath,
   cloudJoinPath,
   isCanonicalJoinCode,
   normalizeJoinCode,
+  parseGroupJoinHash,
+  parseGroupJoinSearch,
   parseJoinHash,
   parseJoinSearch,
+  rememberPendingGroupJoinCode,
   rememberPendingJoinCode,
   resolveIncomingJoinCode,
+  resolveIncomingJoinIntent,
 } from './joinCode.js';
 
 function memoryStorage(initial = {}) {
@@ -60,6 +66,42 @@ describe('joinCode', () => {
     ).toBe('XY23KMNP');
   });
 
+  it('não mistura código de grupo com código de encontro', () => {
+    expect(parseJoinHash('#/group/join/ab23cd56')).toBeNull();
+    expect(parseGroupJoinHash('#/join/ab23cd56')).toBeNull();
+    expect(parseGroupJoinHash('#/group/join/ab23cd56')).toBe('AB23CD56');
+    expect(parseGroupJoinSearch('?groupJoin=ab23cd56')).toBe('AB23CD56');
+    expect(parseJoinSearch('?groupJoin=ab23cd56')).toBeNull();
+    expect(cloudGroupJoinPath('ab23cd56')).toBe('#/group/join/AB23CD56');
+
+    const storage = memoryStorage();
+    rememberPendingJoinCode('ab23cd56', storage);
+    rememberPendingGroupJoinCode('xy23kmnp', storage);
+    expect(storage.getItem(PENDING_JOIN_CODE_KEY)).toBe('AB23CD56');
+    expect(storage.getItem(PENDING_GROUP_JOIN_CODE_KEY)).toBe('XY23KMNP');
+    expect(
+      resolveIncomingJoinIntent({
+        hash: '#/join/ab23cd56',
+        search: '',
+        storage,
+      })
+    ).toEqual({ type: 'session', code: 'AB23CD56' });
+    expect(
+      resolveIncomingJoinIntent({
+        hash: '#/group/join/xy23kmnp',
+        search: '',
+        storage,
+      })
+    ).toEqual({ type: 'group', code: 'XY23KMNP' });
+    expect(
+      resolveIncomingJoinIntent({
+        hash: '#access_token=secret',
+        search: '?groupJoin=xy23kmnp',
+        storage,
+      }).type
+    ).toBe('group');
+  });
+
   it('monta redirectTo com base do GitHub Pages e query join', () => {
     expect(
       buildAuthRedirectTo({
@@ -69,5 +111,12 @@ describe('joinCode', () => {
       })
     ).toBe('https://paulo-rozatto.github.io/volleybal-drafter/?join=AB23CD56');
     expect(cloudJoinPath('ab23cd56')).toBe('#/join/AB23CD56');
+    expect(
+      buildAuthRedirectTo({
+        origin: 'https://paulo-rozatto.github.io',
+        base: '/volleybal-drafter/',
+        groupJoinCode: 'xy23kmnp',
+      })
+    ).toBe('https://paulo-rozatto.github.io/volleybal-drafter/?groupJoin=XY23KMNP');
   });
 });

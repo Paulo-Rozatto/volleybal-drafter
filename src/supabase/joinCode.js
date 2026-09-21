@@ -1,6 +1,7 @@
 const JOIN_CODE_PATTERN = /^[A-HJ-NP-Z2-9]{8}$/;
 
 export const PENDING_JOIN_CODE_KEY = 'volleyPendingJoinCode';
+export const PENDING_GROUP_JOIN_CODE_KEY = 'volleyPendingGroupJoinCode';
 
 export function normalizeJoinCode(value) {
   return String(value ?? '')
@@ -52,17 +53,80 @@ export function resolveIncomingJoinCode({
   return parseJoinSearch(search) || parseJoinHash(hash) || readPendingJoinCode(storage);
 }
 
+export function parseGroupJoinHash(hash) {
+  const match = String(hash ?? '').match(/^#\/group\/join\/([A-Za-z0-9]+)/i);
+  return match ? normalizeJoinCode(match[1]) : null;
+}
+
+export function parseGroupJoinSearch(search) {
+  const query = String(search ?? '');
+  const params = new URLSearchParams(query.startsWith('?') ? query.slice(1) : query);
+  const raw = params.get('groupJoin');
+  return raw ? normalizeJoinCode(raw) : null;
+}
+
+export function rememberPendingGroupJoinCode(code, storage = globalThis.sessionStorage) {
+  const normalized = normalizeJoinCode(code);
+  if (!normalized) {
+    storage?.removeItem?.(PENDING_GROUP_JOIN_CODE_KEY);
+    return null;
+  }
+  storage?.setItem?.(PENDING_GROUP_JOIN_CODE_KEY, normalized);
+  return normalized;
+}
+
+export function readPendingGroupJoinCode(storage = globalThis.sessionStorage) {
+  const raw = storage?.getItem?.(PENDING_GROUP_JOIN_CODE_KEY);
+  return raw ? normalizeJoinCode(raw) : null;
+}
+
+export function clearPendingGroupJoinCode(storage = globalThis.sessionStorage) {
+  storage?.removeItem?.(PENDING_GROUP_JOIN_CODE_KEY);
+}
+
+export function resolveIncomingGroupJoinCode({
+  hash = '',
+  search = '',
+  storage = globalThis.sessionStorage,
+} = {}) {
+  return parseGroupJoinSearch(search) || parseGroupJoinHash(hash) || readPendingGroupJoinCode(storage);
+}
+
+export function resolveIncomingJoinIntent({
+  hash = '',
+  search = '',
+  storage = globalThis.sessionStorage,
+} = {}) {
+  const groupFromUrl = parseGroupJoinSearch(search) || parseGroupJoinHash(hash);
+  const sessionFromUrl = parseJoinSearch(search) || parseJoinHash(hash);
+  if (groupFromUrl) return { type: 'group', code: groupFromUrl };
+  if (sessionFromUrl) return { type: 'session', code: sessionFromUrl };
+
+  const groupStored = readPendingGroupJoinCode(storage);
+  if (groupStored) return { type: 'group', code: groupStored };
+  const sessionStored = readPendingJoinCode(storage);
+  if (sessionStored) return { type: 'session', code: sessionStored };
+  return { type: null, code: null };
+}
+
 export function buildAuthRedirectTo({
   origin,
   base = '/',
   joinCode,
+  groupJoinCode,
 } = {}) {
   const url = new URL(base, `${origin}/`);
-  const normalized = joinCode ? normalizeJoinCode(joinCode) : '';
-  if (normalized) url.searchParams.set('join', normalized);
+  const normalizedJoin = joinCode ? normalizeJoinCode(joinCode) : '';
+  const normalizedGroup = groupJoinCode ? normalizeJoinCode(groupJoinCode) : '';
+  if (normalizedJoin) url.searchParams.set('join', normalizedJoin);
+  if (normalizedGroup) url.searchParams.set('groupJoin', normalizedGroup);
   return url.toString();
 }
 
 export function cloudJoinPath(joinCode) {
   return `#/join/${normalizeJoinCode(joinCode)}`;
+}
+
+export function cloudGroupJoinPath(joinCode) {
+  return `#/group/join/${normalizeJoinCode(joinCode)}`;
 }

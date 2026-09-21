@@ -103,6 +103,7 @@ describe('cloud session mappers', () => {
     expect(session.rounds).toEqual([]);
     expect(session.players).toEqual([]);
     expect(session.myRole).toBe('owner');
+    expect(session.groupId).toBeNull();
   });
 });
 

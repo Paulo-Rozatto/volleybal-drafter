@@ -151,6 +151,7 @@ export function mapCloudSession({
     date: session.date,
     status: session.status,
     joinCode: session.join_code,
+    groupId: session.group_id ?? null,
     format: {
       teamSize: session.team_size,
       teamCount: session.team_count,
