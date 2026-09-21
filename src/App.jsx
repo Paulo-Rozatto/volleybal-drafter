@@ -1,9 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import PlayerList from './PlayerList';
 import GameSessionsView from './GameSessionsView';
 import CompetitionsView from './CompetitionsView.jsx';
 import PerformanceHub from './PerformanceHub.jsx';
 import GistSyncPanel from './GistSyncPanel';
+import CloudSessionsView from './CloudSessionsView.jsx';
+import JoinSessionView from './JoinSessionView.jsx';
+import useAuth from './hooks/useAuth.js';
+import {
+  clearPendingJoinCode,
+  parseJoinHash,
+  rememberPendingJoinCode,
+  resolveIncomingJoinCode,
+} from './supabase/joinCode.js';
 import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
 import { decryptToken } from './cryptoUtils';
 import { appendDraftTeamSession } from './teamGameSessions.js';
@@ -50,8 +59,16 @@ const INITIAL_ROSTER = [];
 
 export default function App() {
   // --- Core Navigation & Drawer States ---
-  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance'
+  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance', 'cloud', 'join'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const auth = useAuth();
+  const [cloudSessionId, setCloudSessionId] = useState(null);
+  const [pendingJoinCode, setPendingJoinCode] = useState(() =>
+    resolveIncomingJoinCode({
+      hash: globalThis.location?.hash ?? '',
+      search: globalThis.location?.search ?? '',
+    })
+  );
 
   // --- Players & History States ---
   const [players, setPlayers] = useState(() => {
@@ -122,6 +139,39 @@ export default function App() {
     hasPassword: Boolean(appPassword),
     hasRevision: Boolean(gistRevision),
   });
+
+  useEffect(() => {
+    const incoming = resolveIncomingJoinCode({
+      hash: globalThis.location?.hash ?? '',
+      search: globalThis.location?.search ?? '',
+    });
+    if (incoming) {
+      rememberPendingJoinCode(incoming);
+      setPendingJoinCode(incoming);
+      setCurrentView('join');
+    }
+
+    const onHashChange = () => {
+      const code = parseJoinHash(globalThis.location?.hash ?? '');
+      if (!code) return;
+      rememberPendingJoinCode(code);
+      setPendingJoinCode(code);
+      setCurrentView('join');
+    };
+    globalThis.addEventListener?.('hashchange', onHashChange);
+    return () => globalThis.removeEventListener?.('hashchange', onHashChange);
+  }, []);
+
+  const handleJoinedCloudSession = useCallback((sessionId) => {
+    clearPendingJoinCode();
+    setPendingJoinCode(null);
+    setCloudSessionId(sessionId);
+    setCurrentView('cloud');
+    const url = new URL(globalThis.location.href);
+    url.searchParams.delete('join');
+    if (url.hash.startsWith('#/join/')) url.hash = '';
+    globalThis.history?.replaceState?.({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   // LocalStorage Persistence
   useEffect(() => {
@@ -640,6 +690,18 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={() => { setCurrentView('cloud'); setIsMenuOpen(false); }}
+              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+              style={{
+                backgroundColor: currentView === 'cloud' || currentView === 'join' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)'
+              }}
+              aria-current={currentView === 'cloud' || currentView === 'join' ? 'page' : undefined}
+            >
+              ☁️ Encontros online
+            </button>
+            <button
+              type="button"
               onClick={() => { setCurrentView('competitions'); setIsMenuOpen(false); }}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
@@ -910,6 +972,27 @@ export default function App() {
               onCreateSession={handleCreateGameSession}
               onApplyOperation={requestGameSessionsOperation}
               syncPanel={gistSyncPanel}
+            />
+          )}
+
+          {currentView === 'join' && (
+            <JoinSessionView
+              joinCode={pendingJoinCode}
+              configured={auth.configured}
+              ready={auth.ready}
+              user={auth.user}
+              onJoined={handleJoinedCloudSession}
+            />
+          )}
+
+          {currentView === 'cloud' && (
+            <CloudSessionsView
+              configured={auth.configured}
+              ready={auth.ready}
+              user={auth.user}
+              pendingJoinCode={pendingJoinCode}
+              openSessionId={cloudSessionId}
+              onOpenSession={setCloudSessionId}
             />
           )}
 

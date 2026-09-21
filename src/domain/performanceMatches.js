@@ -8,7 +8,7 @@ export const ANALYZABLE_MATCH_INCLUDED = 'included';
 export const ANALYZABLE_MATCH_PENDING = 'pending';
 export const ANALYZABLE_MATCH_INVALID = 'invalid';
 
-function classifyMatch(match) {
+export function classifyPerformanceMatch(match) {
   if (isMatchPending(match)) return ANALYZABLE_MATCH_PENDING;
   if (!isMatchCompleted(match)) return ANALYZABLE_MATCH_INVALID;
   return ANALYZABLE_MATCH_INCLUDED;
@@ -24,6 +24,51 @@ function roundNumberOf(round, roundIndex) {
 
 function freezeAnalyzableMatch(match) {
   return Object.freeze(match);
+}
+
+export function createAnalyzableMatch({
+  sourceType,
+  sourceId,
+  sourceName,
+  date,
+  sourceUpdatedAt,
+  sourceCreatedAt,
+  sourceIndex,
+  matchId,
+  roundId,
+  roundNumber,
+  roundLabel,
+  roundIndex,
+  matchIndex,
+  cycleNumber = null,
+  lineupA,
+  lineupB,
+  scoreA,
+  scoreB,
+  originKey = null,
+} = {}) {
+  return freezeAnalyzableMatch({
+    status: classifyPerformanceMatch({ scoreA, scoreB }),
+    sourceType,
+    sourceId: sourceId ?? null,
+    sourceName: trimmedName(sourceName),
+    date: date ?? null,
+    sourceUpdatedAt,
+    sourceCreatedAt,
+    sourceIndex,
+    matchId: matchId ?? null,
+    roundId: roundId ?? null,
+    roundNumber,
+    roundLabel: trimmedName(roundLabel),
+    roundIndex,
+    matchIndex,
+    cycleNumber: cycleNumber ?? null,
+    lineupA,
+    lineupB,
+    scoreA,
+    scoreB,
+    originKey: originKey ?? null,
+  });
 }
 
 function teamNameSnapshots(teams, recencyBase) {
@@ -56,8 +101,7 @@ export function listSessionPerformanceMatches(document) {
     (session?.rounds ?? []).forEach((round, roundIndex) => {
       (round?.matches ?? []).forEach((match, matchIndex) => {
         matches.push(
-          freezeAnalyzableMatch({
-            status: classifyMatch(match),
+          createAnalyzableMatch({
             sourceType: MATCH_SOURCE_SESSION,
             sourceId: session?.id ?? null,
             sourceName: trimmedName(session?.name),
@@ -71,6 +115,7 @@ export function listSessionPerformanceMatches(document) {
             roundLabel: trimmedName(round?.name),
             roundIndex,
             matchIndex,
+            cycleNumber: round?.cycleNumber ?? null,
             lineupA: match?.lineupA,
             lineupB: match?.lineupB,
             scoreA: match?.scoreA,
@@ -106,8 +151,7 @@ export function listCompetitionPerformanceMatches(document, { sourceIndexOffset 
         (round?.matches ?? []).forEach((match, matchIndex) => {
           const playedDate = typeof match?.playedDate === 'string' ? match.playedDate : null;
           matches.push(
-            freezeAnalyzableMatch({
-              status: classifyMatch(match),
+            createAnalyzableMatch({
               sourceType: MATCH_SOURCE_COMPETITION,
               sourceId: competition?.id ?? null,
               sourceName: trimmedName(competition?.name),

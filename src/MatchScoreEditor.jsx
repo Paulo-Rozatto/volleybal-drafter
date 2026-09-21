@@ -32,6 +32,7 @@ export default function MatchScoreEditor({
   const [draftA, setDraftA] = useState('');
   const [draftB, setDraftB] = useState('');
   const [error, setError] = useState(null);
+  const [conflict, setConflict] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
 
   const pending = isMatchPending(match);
@@ -52,44 +53,66 @@ export default function MatchScoreEditor({
     setDraftA(scoreDraftValue(match?.scoreA));
     setDraftB(scoreDraftValue(match?.scoreB));
     setError(null);
+    setConflict(null);
     setEditing(true);
   };
 
   const closeEditor = () => {
     setEditing(false);
     setError(null);
+    setConflict(null);
     setDraftA('');
     setDraftB('');
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const { scoreA, scoreB } = scoreFieldsToValues(draftA, draftB);
-    const result = onSave?.(scoreA, scoreB);
-    if (result?.ok) {
-      closeEditor();
-      return;
+    try {
+      const result = await onSave?.(scoreA, scoreB);
+      if (result?.ok) {
+        closeEditor();
+        return;
+      }
+      if (result?.errors?.[0]?.code === 'SCORE_VERSION_CONFLICT') {
+        setConflict({
+          current: result.conflict,
+          attempted: { scoreA, scoreB },
+        });
+        setError(null);
+        return;
+      }
+      setError(messageForScoreErrors(result?.errors));
+    } catch (saveError) {
+      setError(saveError?.message || 'Não foi possível salvar o placar.');
     }
-    setError(messageForScoreErrors(result?.errors));
   };
 
-  const requestClear = () => {
-    const preview = onClear?.({ clearConfirmed: false });
-    if (preview?.errors?.[0]?.code === 'CLEAR_SCORE_CONFIRMATION_REQUIRED') {
-      setConfirmClear(true);
-      setError(null);
-      return;
+  const requestClear = async () => {
+    try {
+      const preview = await onClear?.({ clearConfirmed: false });
+      if (preview?.errors?.[0]?.code === 'CLEAR_SCORE_CONFIRMATION_REQUIRED') {
+        setConfirmClear(true);
+        setError(null);
+        return;
+      }
+      if (!preview?.ok) setError(messageForScoreErrors(preview?.errors));
+    } catch (clearError) {
+      setError(clearError?.message || 'Não foi possível limpar o placar.');
     }
-    if (!preview?.ok) setError(messageForScoreErrors(preview?.errors));
   };
 
-  const confirmClearScore = () => {
-    const result = onClear?.({ clearConfirmed: true });
-    if (result?.ok) {
-      setConfirmClear(false);
-      closeEditor();
-      return;
+  const confirmClearScore = async () => {
+    try {
+      const result = await onClear?.({ clearConfirmed: true });
+      if (result?.ok) {
+        setConfirmClear(false);
+        closeEditor();
+        return;
+      }
+      setError(messageForScoreErrors(result?.errors));
+    } catch (clearError) {
+      setError(clearError?.message || 'Não foi possível limpar o placar.');
     }
-    setError(messageForScoreErrors(result?.errors));
   };
 
   return (
@@ -143,6 +166,54 @@ export default function MatchScoreEditor({
             />
           </div>
           {error && <p className="text-xs font-semibold text-red-500">{error}</p>}
+          {conflict?.current && (
+            <div className="rounded-lg border p-2 space-y-2" style={{ borderColor: 'var(--border-color)' }}>
+              <p className="text-xs font-semibold">Este placar foi alterado por outra pessoa.</p>
+              <p className="text-xs">
+                Atual: {conflict.current.scoreA} × {conflict.current.scoreB}
+              </p>
+              <p className="text-xs">
+                Seu valor: {conflict.attempted.scoreA} × {conflict.attempted.scoreB}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="flex-1 font-bold py-2 rounded-lg text-xs cursor-pointer"
+                  style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
+                  onClick={() => {
+                    setConflict(null);
+                    closeEditor();
+                    onSave?.(conflict.current.scoreA, conflict.current.scoreB, { useCurrent: true });
+                  }}
+                >
+                  Usar atual
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 font-bold py-2 rounded-lg text-xs cursor-pointer"
+                  style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+                  onClick={async () => {
+                    const result = await onSave?.(
+                      conflict.attempted.scoreA,
+                      conflict.attempted.scoreB,
+                      { expectedVersion: conflict.current.version }
+                    );
+                    if (result?.ok) closeEditor();
+                    else if (result?.errors?.[0]?.code === 'SCORE_VERSION_CONFLICT') {
+                      setConflict({
+                        current: result.conflict,
+                        attempted: conflict.attempted,
+                      });
+                    } else {
+                      setError(messageForScoreErrors(result?.errors));
+                    }
+                  }}
+                >
+                  Tentar substituir
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row gap-2">
             <button
               type="button"

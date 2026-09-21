@@ -6,7 +6,9 @@ import {
   ANALYZABLE_MATCH_PENDING,
   MATCH_SOURCE_COMPETITION,
   MATCH_SOURCE_SESSION,
+  classifyPerformanceMatch,
   combinePerformanceMatchSources,
+  createAnalyzableMatch,
   listCompetitionPerformanceMatches,
   listSessionPerformanceMatches,
 } from './performanceMatches.js';
@@ -199,5 +201,28 @@ describe('adaptadores de partidas analisáveis', () => {
     });
     expect(listed.matches).toHaveLength(1);
     expect(listed.matches[0].status).toBe(ANALYZABLE_MATCH_PENDING);
+  });
+});
+
+describe('classifyPerformanceMatch e createAnalyzableMatch', () => {
+  it('compartilha included, pending e invalid entre factory e adapters', () => {
+    expect(classifyPerformanceMatch({ scoreA: 21, scoreB: 18 })).toBe(ANALYZABLE_MATCH_INCLUDED);
+    expect(classifyPerformanceMatch({ scoreA: null, scoreB: null })).toBe(ANALYZABLE_MATCH_PENDING);
+    expect(classifyPerformanceMatch({ scoreA: 21, scoreB: 21 })).toBe(ANALYZABLE_MATCH_INVALID);
+    expect(classifyPerformanceMatch({ scoreA: 21, scoreB: null })).toBe(ANALYZABLE_MATCH_INVALID);
+
+    expect(createAnalyzableMatch({ scoreA: 21, scoreB: 18 }).status).toBe(ANALYZABLE_MATCH_INCLUDED);
+    expect(createAnalyzableMatch({ scoreA: null, scoreB: null }).status).toBe(
+      ANALYZABLE_MATCH_PENDING
+    );
+    expect(createAnalyzableMatch({ scoreA: 21, scoreB: 21 }).status).toBe(ANALYZABLE_MATCH_INVALID);
+    expect(
+      createAnalyzableMatch({
+        sourceType: MATCH_SOURCE_SESSION,
+        cycleNumber: 2,
+        scoreA: 21,
+        scoreB: 18,
+      }).cycleNumber
+    ).toBe(2);
   });
 });

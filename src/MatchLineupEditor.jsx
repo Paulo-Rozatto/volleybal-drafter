@@ -133,8 +133,8 @@ export default function MatchLineupEditor({
     setError(null);
   };
 
-  const handleSave = () => {
-    const result = onSave?.(idsA, idsB);
+  const handleSave = async () => {
+    const result = await onSave?.(idsA, idsB);
     if (result?.ok) {
       closeEditor();
       return;

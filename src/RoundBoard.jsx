@@ -66,7 +66,9 @@ export default function RoundBoard({
                       teamSize={teamSize}
                       canEdit={canEditScores}
                       canClear={canClearScores}
-                      onSave={(scoreA, scoreB) => onSaveScore?.(round.id, match.id, scoreA, scoreB)}
+                      onSave={(scoreA, scoreB, options) =>
+                        onSaveScore?.(round.id, match.id, scoreA, scoreB, options)
+                      }
                       onClear={(options) => onClearScore?.(round.id, match.id, options)}
                     />
                   </div>

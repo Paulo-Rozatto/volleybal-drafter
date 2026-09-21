@@ -113,12 +113,13 @@ export default function TeamBuilder({
     setSelected((current) => toggleSelectedPlayer(current, player, teamSize));
   };
 
-  const applyResult = (result, { resetOnSuccess } = { resetOnSuccess: true }) => {
-    if (result?.errors?.[0]?.code === 'INVALID_CACHE_CONFIRMATION_REQUIRED') {
+  const applyResult = async (result, { resetOnSuccess } = { resetOnSuccess: true }) => {
+    const resolved = await result;
+    if (resolved?.errors?.[0]?.code === 'INVALID_CACHE_CONFIRMATION_REQUIRED') {
       return false;
     }
-    if (!result?.ok) {
-      setError(result?.errors?.[0]?.message || `Não foi possível atualizar ${doubles ? 'a dupla' : 'o time'}.`);
+    if (!resolved?.ok) {
+      setError(resolved?.errors?.[0]?.message || `Não foi possível atualizar ${doubles ? 'a dupla' : 'o time'}.`);
       return false;
     }
     if (resetOnSuccess) resetSelection();
@@ -127,11 +128,11 @@ export default function TeamBuilder({
     return true;
   };
 
-  const submitMembers = (memberIds) => {
+  const submitMembers = async (memberIds) => {
     const result = editingTeamId
       ? onUpdateTeam?.(editingTeamId, memberIds)
       : onAddTeam?.(memberIds);
-    applyResult(result);
+    await applyResult(result);
   };
 
   const handleSubmit = ({ emptyConfirmed = false } = {}) => {

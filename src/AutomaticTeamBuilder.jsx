@@ -66,8 +66,8 @@ export default function AutomaticTeamBuilder({
     );
   };
 
-  const applyGeneratedTeams = (teams, replaceConfirmed) => {
-    const result = onReplaceTeams?.(teams, { replaceConfirmed });
+  const applyGeneratedTeams = async (teams, replaceConfirmed) => {
+    const result = await onReplaceTeams?.(teams, { replaceConfirmed });
     if (result?.errors?.[0]?.code === 'REPLACE_CONFIRMATION_REQUIRED') {
       setPendingTeams(teams);
       setError(null);

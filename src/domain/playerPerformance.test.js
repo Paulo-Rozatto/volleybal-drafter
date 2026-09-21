@@ -6,12 +6,14 @@ import {
   setTeamSessionMatchLineups,
   setTeamSessionMatchScore,
 } from '../teamGameSessions.js';
+import { listSessionPerformanceMatches } from './performanceMatches.js';
 import {
   ANALYSIS_SCORE_ERROR_CODES,
   MATCH_SOURCE_COMPETITION,
   MATCH_SOURCE_SESSION,
   buildPartnershipRepeatLookup,
   buildPlayerPerformanceIndex,
+  buildPlayerPerformanceIndexFromMatches,
   formatPerformanceModality,
   RANKING_SORT_FIELDS,
   getBestPartner,
@@ -2500,5 +2502,57 @@ describe('desempenho com partidas de competição', () => {
     expect(result.ok).toBe(false);
     expect(result.index).toBeNull();
     expect(result.errors[0].code).toBe('SCHEMA_VERSION_UNSUPPORTED');
+  });
+});
+
+describe('buildPlayerPerformanceIndexFromMatches', () => {
+  it('preserva o contrato { ok, errors, index } e rejeita entrada básica inválida', () => {
+    expect(buildPlayerPerformanceIndexFromMatches({ matches: [], roster: [] })).toEqual({
+      ok: true,
+      errors: [],
+      index: {
+        includedMatches: 0,
+        skippedPendingMatches: 0,
+        skippedInvalidMatches: 0,
+      },
+    });
+    expect(buildPlayerPerformanceIndexFromMatches(null).ok).toBe(false);
+    expect(buildPlayerPerformanceIndexFromMatches([]).errors[0].code).toBe(
+      'PERFORMANCE_INPUT_INVALID'
+    );
+    expect(buildPlayerPerformanceIndexFromMatches({ matches: {} }).errors[0].code).toBe(
+      'PERFORMANCE_MATCHES_INVALID'
+    );
+    expect(buildPlayerPerformanceIndexFromMatches({ roster: {} }).errors[0].code).toBe(
+      'PERFORMANCE_ROSTER_INVALID'
+    );
+    expect(buildPlayerPerformanceIndexFromMatches({ matches: [null] }).errors[0].code).toBe(
+      'PERFORMANCE_MATCH_INVALID'
+    );
+  });
+
+  it('não valida documento V2 e reutiliza a ingestão do wrapper', () => {
+    const document = documentOf(
+      doublesSession({ id: 'valid' }),
+      doublesSession({ id: 'pending', scoreA: null, scoreB: null }),
+      doublesSession({ id: 'tie', scoreA: 21, scoreB: 21 })
+    );
+    const wrapper = buildPlayerPerformanceIndex(document, roster);
+    const fromMatches = buildPlayerPerformanceIndexFromMatches({
+      ...listSessionPerformanceMatches(document),
+      roster,
+    });
+    expect(wrapper.ok).toBe(true);
+    expect(fromMatches.ok).toBe(true);
+    expect(fromMatches.index).toEqual(wrapper.index);
+    expect(getPlayerPerformance(fromMatches.index, 'andre')).toEqual(
+      getPlayerPerformance(wrapper.index, 'andre')
+    );
+    expect(getPlayerMatchHistory(fromMatches.index, 'andre')).toEqual(
+      getPlayerMatchHistory(wrapper.index, 'andre')
+    );
+    expect(getPlayerMatchHistory(fromMatches.index, 'andre')[0]).toMatchObject({
+      cycleNumber: null,
+    });
   });
 });

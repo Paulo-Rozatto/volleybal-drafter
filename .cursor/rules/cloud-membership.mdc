@@ -1,0 +1,20 @@
+---
+description: Invariantes de associação cloud e roadmap congelado do PaDre
+alwaysApply: true
+---
+
+# Associação cloud e roadmap
+
+Roadmap congelado: 3.5 validação hospedada → 4 grupos → 5 ranking no grupo → 6 competições cloud → 7 migração Gist → 8 desligar Gist.
+
+Não acrescente schema de grupos até a etapa 3.5 passar no Supabase hospedado (Auth + RLS + RPC + Realtime). Identidade da etapa 3 está congelada. Não unifique Gist. Sem ranking mundial público.
+
+Três relações distintas — nunca colapsar:
+
+- `group_members`: pertencem à comunidade (etapa 4)
+- `session_members`: têm acesso àquele encontro
+- `session_players`: jogam naquele encontro
+
+Não copie `group_members` automaticamente para `session_members`. Encontro avulso continua válido (`sessions.group_id` nulo).
+
+`get_my_performance_matches()` é só o player vinculado ao `auth.uid()`. Ranking de grupo usa read model do grupo, nunca N chamadas dessa RPC.

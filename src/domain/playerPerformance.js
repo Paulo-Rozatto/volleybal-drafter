@@ -455,6 +455,7 @@ function publicMatchAppearance(appearance) {
     roundNumber: appearance.roundNumber,
     roundLabel: appearance.roundLabel,
     matchId: appearance.matchId,
+    cycleNumber: appearance.cycleNumber ?? null,
     teammates: appearance.teammates,
     opponents: appearance.opponents,
     partners: appearance.partners,
@@ -500,6 +501,7 @@ function createMatchAppearance({
     roundIndex: analyzableMatch?.roundIndex ?? 0,
     matchId: analyzableMatch?.matchId ?? null,
     matchIndex: analyzableMatch?.matchIndex ?? 0,
+    cycleNumber: analyzableMatch?.cycleNumber ?? null,
     teammates,
     opponents,
     partners,
@@ -742,6 +744,74 @@ function ingestAnalyzableMatch(state, analyzableMatch) {
   }
 }
 
+function finishPerformanceIndex(state, rosterById) {
+  const index = Object.freeze({
+    includedMatches: state.includedMatches,
+    skippedPendingMatches: state.skippedPendingMatches,
+    skippedInvalidMatches: state.skippedInvalidMatches,
+  });
+  internals.set(index, {
+    players: state.players,
+    history: state.history,
+    rosterById,
+  });
+  return okIndex(index);
+}
+
+/**
+ * Constrói o índice a partir de partidas já normalizadas (analyzable matches).
+ * Não valida documento V2. Não calcula estatísticas além da ingestão existente.
+ *
+ * @param {{ matches?: unknown, nameSnapshots?: unknown, roster?: unknown }} [input]
+ */
+export function buildPlayerPerformanceIndexFromMatches(input = {}) {
+  if (!isPlainObject(input)) {
+    return fail([error('PERFORMANCE_INPUT_INVALID', 'A entrada de desempenho é inválida.')]);
+  }
+
+  const { matches = [], nameSnapshots = [], roster = [] } = input;
+  const fatal = [];
+  if (!Array.isArray(matches)) {
+    fatal.push(error('PERFORMANCE_MATCHES_INVALID', 'A lista de partidas de desempenho é inválida.'));
+  }
+  if (!Array.isArray(nameSnapshots)) {
+    fatal.push(
+      error('PERFORMANCE_SNAPSHOTS_INVALID', 'A lista de snapshots de desempenho é inválida.')
+    );
+  }
+  if (!Array.isArray(roster)) {
+    fatal.push(error('PERFORMANCE_ROSTER_INVALID', 'O elenco de desempenho é inválido.'));
+  }
+  if (fatal.length > 0) return fail(fatal);
+
+  const invalidMatch = matches.some((match) => !isPlainObject(match));
+  if (invalidMatch) {
+    return fail([error('PERFORMANCE_MATCH_INVALID', 'Há uma partida de desempenho inválida.')]);
+  }
+
+  const rosterById = new Map(
+    roster
+      .filter((player) => typeof player?.id === 'string' && player.id.trim())
+      .map((player) => [player.id, player])
+  );
+  const state = {
+    players: new Map(),
+    history: new Map(),
+    includedMatches: 0,
+    skippedPendingMatches: 0,
+    skippedInvalidMatches: 0,
+  };
+
+  nameSnapshots.forEach((snapshot) => {
+    rememberGroupNames(state.history, snapshot?.members, snapshot?.recency ?? {});
+  });
+  matches.forEach((match) => {
+    ingestAnalyzableMatch(state, match);
+  });
+
+  return finishPerformanceIndex(state, rosterById);
+}
+
 /**
  * Constrói um índice imutável de desempenho a partir de encontros e, opcionalmente, competições.
  * Não muta os documentos nem `roster` e não persiste agregados.
@@ -769,38 +839,12 @@ export function buildPlayerPerformanceIndex(document, roster = [], options = {})
 
   if (fatal.length > 0) return fail(fatal);
 
-  const rosterById = new Map(
-    (Array.isArray(roster) ? roster : [])
-      .filter((player) => typeof player?.id === 'string' && player.id.trim())
-      .map((player) => [player.id, player])
-  );
-  const state = {
-    players: new Map(),
-    history: new Map(),
-    includedMatches: 0,
-    skippedPendingMatches: 0,
-    skippedInvalidMatches: 0,
-  };
-
   const sources = combinePerformanceMatchSources(document, competitionsDocument);
-  sources.nameSnapshots.forEach((snapshot) => {
-    rememberGroupNames(state.history, snapshot.members, snapshot.recency);
+  return buildPlayerPerformanceIndexFromMatches({
+    matches: sources.matches,
+    nameSnapshots: sources.nameSnapshots,
+    roster,
   });
-  sources.matches.forEach((match) => {
-    ingestAnalyzableMatch(state, match);
-  });
-
-  const index = Object.freeze({
-    includedMatches: state.includedMatches,
-    skippedPendingMatches: state.skippedPendingMatches,
-    skippedInvalidMatches: state.skippedInvalidMatches,
-  });
-  internals.set(index, {
-    players: state.players,
-    history: state.history,
-    rosterById,
-  });
-  return okIndex(index);
 }
 
 /**
