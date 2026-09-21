@@ -8,8 +8,12 @@ export const ALL_PARTNERS_LABEL = 'Todos os parceiros';
 export const HISTORICAL_PLAYER_LABEL = 'Histórico';
 export const BEST_PARTNER_RANKING_NOTE =
   'Classificação por aproveitamento, sem mínimo de jogos.';
+export const HARDEST_OPPONENTS_NOTE =
+  'Menor aproveitamento primeiro; em empate, mais jogos, depois pior saldo e mais derrotas.';
 export const NO_PARTNERS_IN_SCOPE_MESSAGE =
   'Ainda não há partidas com parceiros neste recorte.';
+export const NO_OPPONENTS_IN_SCOPE_MESSAGE =
+  'Ainda não há partidas contra adversários neste recorte.';
 export const PERFORMANCE_INTRO =
   'Qualquer partida com placar válido de encontros ou competições entra no cálculo. BYEs e partidas pendentes não contam.';
 export const MODALITY_RULE_NOTE =
@@ -153,6 +157,10 @@ export function resolvePartnerFilter(selectedPartnerId, partners) {
 
 export function keepDomainPartnerOrder(partners) {
   return Object.freeze([...(partners ?? [])]);
+}
+
+export function keepDomainOpponentOrder(opponents) {
+  return Object.freeze([...(opponents ?? [])]);
 }
 
 export function summaryQueryFilters(lineupSize, partnerId) {

@@ -19,6 +19,7 @@ import {
   formatPointsAverage,
   formatRecordLine,
   formatWinRatePercent,
+  keepDomainOpponentOrder,
   keepDomainPartnerOrder,
   modalityFilterOptions,
   modalitySectionTitle,
@@ -281,6 +282,12 @@ describe('filtros de parceiro e ranking', () => {
     ];
     expect(keepDomainPartnerOrder(ranked).map((item) => item.partnerId)).toEqual(['zulu', 'ana']);
     expect(sortPartnersForFilter(ranked).map((item) => item.partnerId)).toEqual(['ana', 'zulu']);
+    expect(
+      keepDomainOpponentOrder([
+        { opponentId: 'paulo', opponentName: 'Paulo' },
+        { opponentId: 'lucas', opponentName: 'Lucas' },
+      ]).map((item) => item.opponentId)
+    ).toEqual(['paulo', 'lucas']);
   });
 
   it('consulta de melhor parceiro ignora o filtro de parceiro e respeita modalidade', () => {
@@ -459,10 +466,15 @@ describe('histórico de partidas e ranking', () => {
     expect(rankingView).toContain('formatPointsAverage');
     expect(rankingView).toContain('Origem');
     expect(rankingView).toContain('ranking-source');
+    expect(rankingView).toContain('Modalidade');
+    expect(rankingView).toContain('ranking-modality');
+    expect(rankingView).toContain('listPerformanceModalities');
     expect(rankingView).not.toMatch(/toFixed\(/);
     const playerView = readFileSync(new URL('./PlayerPerformanceView.jsx', import.meta.url), 'utf8');
     expect(playerView).toContain('formatMatchHistorySource');
     expect(playerView).toContain('formatMatchHistoryPhase');
+    expect(playerView).toContain('Adversários mais difíceis');
+    expect(playerView).toContain('getHardestOpponents');
     const players = [{ playerId: 'andre' }, { playerId: 'paulo' }];
     expect(resolveRankingPlayerIds([], players)).toBeNull();
     expect(resolveRankingPlayerIds(['andre', 'missing'], players)).toEqual(['andre']);

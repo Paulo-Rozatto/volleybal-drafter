@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   buildPlayerPerformanceIndex,
   getPlayerPerformanceRanking,
+  listPerformanceModalities,
   listPerformancePlayers,
 } from './domain/playerPerformance.js';
 import {
@@ -13,6 +14,7 @@ import {
   formatPointDifference,
   formatPointsAverage,
   formatWinRatePercent,
+  modalityFilterOptions,
   rankingSortOptions,
   rankingSourceFilterOptions,
   resolveRankingPlayerIds,
@@ -47,6 +49,7 @@ export default function PlayerRankingView({ document, roster = [], competitionsD
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [sourceType, setSourceType] = useState('');
+  const [lineupSize, setLineupSize] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [sortBy, setSortBy] = useState('wins');
   const [sortDirection, setSortDirection] = useState('desc');
@@ -54,6 +57,7 @@ export default function PlayerRankingView({ document, roster = [], competitionsD
   const visiblePlayers = filterPlayersBySearch(players, search);
   const sortOptions = rankingSortOptions();
   const sourceOptions = rankingSourceFilterOptions();
+  const modalityOptions = modalityFilterOptions(built.ok ? listPerformanceModalities(built.index) : []);
 
   const rows = useMemo(() => {
     if (!built.ok) return [];
@@ -61,11 +65,12 @@ export default function PlayerRankingView({ document, roster = [], competitionsD
       startDate: startDate || null,
       endDate: endDate || null,
       sourceType: sourceType || null,
+      lineupSize,
       playerIds: resolveRankingPlayerIds(selectedIds, players),
       sortBy,
       sortDirection,
     });
-  }, [built, startDate, endDate, sourceType, selectedIds, players, sortBy, sortDirection]);
+  }, [built, startDate, endDate, sourceType, lineupSize, selectedIds, players, sortBy, sortDirection]);
 
   const diagnostics = built.ok ? formatHistoryDiagnostics(built.index) : null;
 
@@ -107,7 +112,7 @@ export default function PlayerRankingView({ document, roster = [], competitionsD
       </div>
 
       <div className="space-y-3 rounded-xl border p-3" style={surfaceStyle}>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label className="block text-sm font-bold" htmlFor="ranking-start-date">
               Data inicial
@@ -147,6 +152,29 @@ export default function PlayerRankingView({ document, roster = [], competitionsD
             >
               {sourceOptions.map((option) => (
                 <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-bold" htmlFor="ranking-modality">
+              Modalidade
+            </label>
+            <select
+              id="ranking-modality"
+              value={lineupSize == null ? '' : String(lineupSize)}
+              onChange={(event) =>
+                setLineupSize(event.target.value === '' ? null : Number(event.target.value))
+              }
+              className={`mt-1 w-full border rounded-lg p-2 text-sm font-semibold ${focusClass}`}
+              style={controlStyle}
+            >
+              {modalityOptions.map((option) => (
+                <option
+                  key={option.value == null ? 'all' : option.value}
+                  value={option.value == null ? '' : String(option.value)}
+                >
                   {option.label}
                 </option>
               ))}

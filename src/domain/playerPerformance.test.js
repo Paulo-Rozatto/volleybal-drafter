@@ -15,11 +15,15 @@ import {
   formatPerformanceModality,
   RANKING_SORT_FIELDS,
   getBestPartner,
+  getHardestOpponents,
   getPlayerMatchHistory,
+  getPlayerOpponentMatchHistory,
+  getPlayerOpponentPerformance,
   getPlayerPartnerMatchHistory,
   getPlayerPartnerPerformance,
   getPlayerPerformance,
   getPlayerPerformanceRanking,
+  listPerformanceModalities,
   listPerformancePlayers,
 } from './playerPerformance.js';
 import {
@@ -1013,6 +1017,12 @@ describe('contrato das consultas', () => {
         'O filtro de parceiro é inválido.'
       );
     }
+    for (const opponentId of ['', '   ', 0]) {
+      expect(() => getPlayerOpponentPerformance(index, 'andre', { opponentId })).toThrow(TypeError);
+      expect(() => getPlayerOpponentPerformance(index, 'andre', { opponentId })).toThrow(
+        'O filtro de adversário é inválido.'
+      );
+    }
     expect(() => getBestPartner(index, 'andre', [])).toThrow('Os filtros de desempenho são inválidos.');
   });
 
@@ -1306,6 +1316,356 @@ describe('histórico de partidas', () => {
         endDate: '2026-09-01',
       }).map((item) => item.sessionId)
     ).toEqual(['win-day', 'loss-day']);
+  });
+});
+
+describe('adversários', () => {
+  const andreAna = [member('andre', 'André'), member('ana', 'Ana')];
+  const pauloJoao = [member('paulo', 'Paulo'), member('joao', 'João')];
+  const lucasPedro = [member('lucas', 'Lucas'), member('pedro', 'Pedro')];
+  const opponentRoster = [
+    ...roster,
+    { id: 'paulo', name: 'Paulo' },
+    { id: 'joao', name: 'João' },
+    { id: 'lucas', name: 'Lucas' },
+    { id: 'pedro', name: 'Pedro' },
+  ];
+
+  it('gera uma relação por adversário do lado oposto em 2x2, sem o próprio lado', () => {
+    const index = indexOf(
+      documentOf(
+        pairingSession({
+          id: 'd1',
+          date: '2026-09-12',
+          lineupA: andreAna,
+          lineupB: pauloJoao,
+          scoreA: 21,
+          scoreB: 18,
+        })
+      ),
+      opponentRoster
+    );
+
+    const andre = getPlayerOpponentPerformance(index, 'andre');
+    expect(andre.map((item) => item.opponentId).sort()).toEqual(['joao', 'paulo']);
+    expect(andre.map((item) => item.opponentId)).not.toContain('ana');
+    expect(andre.map((item) => item.opponentId)).not.toContain('andre');
+    expect(getPlayerPerformance(index, 'andre').matches).toBe(1);
+    expect(getPlayerPartnerPerformance(index, 'andre').map((item) => item.partnerId)).toEqual(['ana']);
+
+    expect(getPlayerOpponentPerformance(index, 'andre', { opponentId: 'paulo' })[0]).toMatchObject({
+      playerId: 'andre',
+      opponentId: 'paulo',
+      opponentName: 'Paulo',
+      matches: 1,
+      wins: 1,
+      losses: 0,
+      winRate: 1,
+      pointsFor: 21,
+      pointsAgainst: 18,
+      averagePointsFor: 21,
+      averagePointsAgainst: 18,
+      pointDifference: 3,
+      modalities: [2],
+    });
+    expect(getPlayerOpponentPerformance(index, 'paulo', { opponentId: 'andre' })[0]).toMatchObject({
+      matches: 1,
+      wins: 0,
+      losses: 1,
+      winRate: 0,
+      pointsFor: 18,
+      pointsAgainst: 21,
+      pointDifference: -3,
+    });
+  });
+
+  it('acumula várias partidas e parceiros diferentes no mesmo adversário', () => {
+    const index = indexOf(
+      documentOf(
+        pairingSession({
+          id: 'a',
+          date: '2026-09-01',
+          lineupA: andreAna,
+          lineupB: pauloJoao,
+          scoreA: 21,
+          scoreB: 18,
+        }),
+        pairingSession({
+          id: 'b',
+          date: '2026-09-02',
+          lineupA: [member('andre', 'André'), member('bruno', 'Bruno')],
+          lineupB: [member('paulo', 'Paulo'), member('lucas', 'Lucas')],
+          scoreA: 10,
+          scoreB: 21,
+        })
+      ),
+      opponentRoster
+    );
+
+    expect(getPlayerOpponentPerformance(index, 'andre', { opponentId: 'paulo' })[0]).toMatchObject({
+      matches: 2,
+      wins: 1,
+      losses: 1,
+      winRate: 0.5,
+      pointsFor: 31,
+      pointsAgainst: 39,
+      averagePointsFor: 15.5,
+      averagePointsAgainst: 19.5,
+      pointDifference: -8,
+    });
+  });
+
+  it('filtra por modalidade, origem e data no histórico contra o adversário', () => {
+    const triples = session({
+      id: 'triples',
+      date: '2026-09-10',
+      name: 'Trios',
+      format: { teamSize: 3, teamCount: 2 },
+      teams: [
+        team('t1', namesOf(['andre', 'ana', 'bruno'])),
+        team('t2', namesOf(['paulo', 'joao', 'lucas'])),
+      ],
+      rounds: [
+        {
+          id: 'triples-r1',
+          number: 1,
+          matches: [
+            matchShape({
+              id: 'triples-m1',
+              lineupA: namesOf(['andre', 'ana', 'bruno']),
+              lineupB: namesOf(['paulo', 'joao', 'lucas']),
+              scoreA: 21,
+              scoreB: 12,
+            }),
+          ],
+        },
+      ],
+    });
+    const index = indexOf(
+      documentOf(
+        pairingSession({
+          id: 'early-2x2',
+          date: '2026-08-30',
+          lineupA: andreAna,
+          lineupB: pauloJoao,
+          scoreA: 8,
+          scoreB: 21,
+        }),
+        pairingSession({
+          id: 'late-2x2',
+          date: '2026-09-12',
+          lineupA: andreAna,
+          lineupB: pauloJoao,
+          scoreA: 21,
+          scoreB: 19,
+        }),
+        triples
+      ),
+      opponentRoster,
+      {
+        competitionsDocument: competitionsOf(
+          twoTeamCompetition({
+            lineupA: andreAna,
+            lineupB: [member('paulo', 'Paulo'), member('carla', 'Carla')],
+          })
+        ),
+      }
+    );
+
+    expect(getPlayerOpponentPerformance(index, 'andre', { lineupSize: 2, opponentId: 'paulo' })[0].matches).toBe(3);
+    expect(getPlayerOpponentPerformance(index, 'andre', { lineupSize: 3, opponentId: 'paulo' })[0].matches).toBe(1);
+
+    const vsPaulo = getPlayerOpponentMatchHistory(index, 'andre', 'paulo');
+    expect(vsPaulo.map((item) => item.sourceType).sort()).toEqual([
+      MATCH_SOURCE_COMPETITION,
+      MATCH_SOURCE_SESSION,
+      MATCH_SOURCE_SESSION,
+      MATCH_SOURCE_SESSION,
+    ]);
+    expect(vsPaulo.every((item) => !Object.hasOwn(item, 'opponentIds'))).toBe(true);
+
+    expect(
+      getPlayerOpponentMatchHistory(index, 'andre', 'paulo', { lineupSize: 2, startDate: '2026-09-01' }).map(
+        (item) => item.sessionDate
+      )
+    ).toEqual(['2026-09-12', '2026-09-18']);
+    expect(
+      getPlayerOpponentMatchHistory(index, 'andre', 'paulo', { sourceType: MATCH_SOURCE_COMPETITION })
+    ).toHaveLength(1);
+    expect(
+      getPlayerOpponentMatchHistory(index, 'andre', 'paulo', { result: 'loss' }).map((item) => item.sessionId)
+    ).toEqual(['early-2x2']);
+  });
+
+  it('não conta BYE nem partida pendente', () => {
+    const pending = pairingSession({
+      id: 'pending-opp',
+      date: '2026-09-02',
+      lineupA: andreAna,
+      lineupB: pauloJoao,
+      scoreA: null,
+      scoreB: null,
+    });
+    const index = indexOf(documentOf(pending), opponentRoster, {
+      competitionsDocument: competitionsOf(threeTeamCompetition({ playSemi: true })),
+    });
+    expect(getPlayerOpponentMatchHistory(index, 'andre', 'paulo')).toEqual([]);
+    expect(getPlayerOpponentPerformance(index, 'diego')).toEqual([]);
+    expect(getPlayerOpponentPerformance(index, 'andre').some((item) => item.opponentId === 'bruno')).toBe(true);
+  });
+
+  it('usa snapshot histórico do opponentName quando o jogador saiu do elenco', () => {
+    const older = pairingSession({
+      id: 'old-opp',
+      date: '2026-09-10',
+      lineupA: andreAna,
+      lineupB: [member('ghost', 'Rival Antigo'), member('paulo', 'Paulo')],
+      scoreA: 21,
+      scoreB: 10,
+    });
+    const newer = pairingSession({
+      id: 'new-opp',
+      date: '2026-09-12',
+      lineupA: andreAna,
+      lineupB: [member('ghost', 'Rival Recente'), member('paulo', 'Paulo')],
+      scoreA: 15,
+      scoreB: 21,
+    });
+    const index = indexOf(documentOf(older, newer), roster.filter((player) => player.id !== 'ghost'));
+    expect(getPlayerOpponentPerformance(index, 'andre').find((item) => item.opponentId === 'ghost').opponentName).toBe(
+      'Rival Recente'
+    );
+  });
+
+  it('ordena adversários mais difíceis por winRate, jogos, saldo e id', () => {
+    const mixed = indexOf(
+      documentOf(
+        pairingSession({
+          id: 'p1',
+          date: '2026-09-01',
+          lineupA: andreAna,
+          lineupB: pauloJoao,
+          scoreA: 10,
+          scoreB: 21,
+        }),
+        pairingSession({
+          id: 'p2',
+          date: '2026-09-02',
+          lineupA: andreAna,
+          lineupB: [member('paulo', 'Paulo'), member('bruno', 'Bruno')],
+          scoreA: 12,
+          scoreB: 21,
+        }),
+        pairingSession({
+          id: 'l1',
+          date: '2026-09-03',
+          lineupA: andreAna,
+          lineupB: lucasPedro,
+          scoreA: 10,
+          scoreB: 21,
+        }),
+        pairingSession({
+          id: 'l2',
+          date: '2026-09-04',
+          lineupA: andreAna,
+          lineupB: [member('lucas', 'Lucas'), member('bruno', 'Bruno')],
+          scoreA: 21,
+          scoreB: 18,
+        })
+      ),
+      opponentRoster
+    );
+    const hardest = getHardestOpponents(mixed, 'andre');
+    expect(hardest.map((item) => item.opponentId)).toEqual(
+      getPlayerOpponentPerformance(mixed, 'andre').map((item) => item.opponentId)
+    );
+    expect(hardest.find((item) => item.opponentId === 'paulo').winRate).toBe(0);
+    expect(hardest.find((item) => item.opponentId === 'lucas').winRate).toBe(0.5);
+    expect(hardest.findIndex((item) => item.opponentId === 'paulo')).toBeLessThan(
+      hardest.findIndex((item) => item.opponentId === 'lucas')
+    );
+
+    const sameRateMoreMatches = indexOf(
+      documentOf(
+        pairingSession({
+          id: 'm1',
+          date: '2026-09-01',
+          lineupA: andreAna,
+          lineupB: pauloJoao,
+          scoreA: 10,
+          scoreB: 21,
+        }),
+        pairingSession({
+          id: 'm2',
+          date: '2026-09-02',
+          lineupA: andreAna,
+          lineupB: [member('paulo', 'Paulo'), member('bruno', 'Bruno')],
+          scoreA: 10,
+          scoreB: 21,
+        }),
+        pairingSession({
+          id: 'm3',
+          date: '2026-09-03',
+          lineupA: andreAna,
+          lineupB: lucasPedro,
+          scoreA: 10,
+          scoreB: 21,
+        })
+      ),
+      opponentRoster
+    );
+    expect(getHardestOpponents(sameRateMoreMatches, 'andre')[0].opponentId).toBe('paulo');
+    expect(getHardestOpponents(sameRateMoreMatches, 'andre')[0].matches).toBe(2);
+    expect(getHardestOpponents(sameRateMoreMatches, 'andre')[0].losses).toBe(2);
+
+    const worseDiffFirst = indexOf(
+      documentOf(
+        pairingSession({
+          id: 'd-p',
+          date: '2026-09-01',
+          lineupA: andreAna,
+          lineupB: pauloJoao,
+          scoreA: 10,
+          scoreB: 21,
+        }),
+        pairingSession({
+          id: 'd-l',
+          date: '2026-09-02',
+          lineupA: andreAna,
+          lineupB: lucasPedro,
+          scoreA: 10,
+          scoreB: 12,
+        })
+      ),
+      opponentRoster
+    );
+    const ordered = getHardestOpponents(worseDiffFirst, 'andre');
+    expect(ordered.findIndex((item) => item.opponentId === 'paulo')).toBeLessThan(
+      ordered.findIndex((item) => item.opponentId === 'lucas')
+    );
+    expect(ordered.find((item) => item.opponentId === 'paulo').pointDifference).toBeLessThan(
+      ordered.find((item) => item.opponentId === 'lucas').pointDifference
+    );
+
+    const named = indexOf(
+      documentOf(
+        pairingSession({
+          id: 'n1',
+          date: '2026-09-01',
+          lineupA: andreAna,
+          lineupB: [member('b-id', 'Mesmo'), member('a-id', 'Mesmo')],
+          scoreA: 21,
+          scoreB: 18,
+        })
+      ),
+      [
+        { id: 'andre', name: 'André' },
+        { id: 'ana', name: 'Ana' },
+        { id: 'a-id', name: 'Mesmo' },
+        { id: 'b-id', name: 'Mesmo' },
+      ]
+    );
+    expect(getHardestOpponents(named, 'andre').map((item) => item.opponentId)).toEqual(['a-id', 'b-id']);
   });
 });
 
@@ -1609,6 +1969,104 @@ describe('ranking de jogadores', () => {
       sortDirection: 'asc',
     });
     expect(asc.map((row) => row.playerId)).toEqual(['bruno', 'ana']);
+  });
+
+  it('filtra por modalidade e combina com data, origem e seleção', () => {
+    const triples = session({
+      id: 'rank-3x3',
+      date: '2026-09-12',
+      name: 'Trios',
+      format: { teamSize: 3, teamCount: 2 },
+      teams: [
+        team('t1', namesOf(['andre', 'ana', 'bruno'])),
+        team('t2', namesOf(['diego', 'erika', 'fabio'])),
+      ],
+      rounds: [
+        {
+          id: 'rank-3x3-r1',
+          number: 1,
+          matches: [
+            matchShape({
+              id: 'rank-3x3-m1',
+              lineupA: namesOf(['andre', 'ana', 'bruno']),
+              lineupB: namesOf(['diego', 'erika', 'fabio']),
+              scoreA: 25,
+              scoreB: 10,
+            }),
+          ],
+        },
+      ],
+    });
+    const index = indexOf(
+      documentOf(rankingDocument().sessions[0], triples),
+      roster,
+      {
+        competitionsDocument: competitionsOf(
+          twoTeamCompetition({
+            lineupA: andre,
+            lineupB: bruno,
+            scoreA: 21,
+            scoreB: 19,
+          })
+        ),
+      }
+    );
+
+    expect(listPerformanceModalities(index)).toEqual([2, 3]);
+    expect(listPerformanceModalities(indexOf(documentOf()))).toEqual([]);
+
+    const all = getPlayerPerformanceRanking(index, { playerIds: ['andre'], sortBy: 'wins' });
+    expect(all[0].matches).toBe(3);
+    expect(all[0].pointsFor).toBe(21 + 25 + 21);
+
+    const onlyTwos = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre'],
+      lineupSize: 2,
+      sortBy: 'wins',
+    });
+    expect(onlyTwos[0]).toMatchObject({ matches: 2, wins: 2, pointsFor: 42, averagePointsFor: 21 });
+
+    const onlyTriples = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre'],
+      lineupSize: 3,
+      sortBy: 'wins',
+    });
+    expect(onlyTriples[0]).toMatchObject({ matches: 1, wins: 1, pointsFor: 25, averagePointsFor: 25 });
+
+    const twosFromSeptember = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre'],
+      lineupSize: 2,
+      startDate: '2026-09-01',
+      sortBy: 'wins',
+    });
+    expect(twosFromSeptember[0].matches).toBe(1);
+    expect(twosFromSeptember[0].pointsFor).toBe(21);
+
+    const sessionsOnly = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre'],
+      lineupSize: 2,
+      sourceType: MATCH_SOURCE_SESSION,
+      sortBy: 'wins',
+    });
+    expect(sessionsOnly[0].matches).toBe(1);
+
+    const selected = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre', 'diego'],
+      lineupSize: 3,
+      sortBy: 'wins',
+    });
+    expect(selected.map((row) => [row.playerId, row.matches, row.wins])).toEqual([
+      ['andre', 1, 1],
+      ['diego', 1, 0],
+    ]);
+
+    const byDiff = getPlayerPerformanceRanking(index, {
+      playerIds: ['andre', 'diego'],
+      lineupSize: 3,
+      sortBy: 'pointDifference',
+      sortDirection: 'desc',
+    });
+    expect(byDiff.map((row) => row.playerId)).toEqual(['andre', 'diego']);
   });
 });
 

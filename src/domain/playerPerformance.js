@@ -15,10 +15,14 @@ export { MATCH_SOURCE_COMPETITION, MATCH_SOURCE_SESSION, MATCH_SOURCE_TYPES } fr
  * Construção: O(S + C + M × L²), onde S é o número de encontros, C o de competições,
  * M o de partidas analisáveis e L ≤ 6 o tamanho de cada lineup. Encontros e competições
  * são adaptados para a mesma representação antes da agregação. Cada partida válida gera
- * até L participações e L×(L−1) relações dirigidas de parceria.
+ * até L participações, L×(L−1) relações dirigidas de parceria e L×L relações dirigidas
+ * de adversário (produto das lineups opostas).
  *
- * Consultas: O(P) para listar ou ranquear os parceiros de um jogador, sem percorrer
- * o documento novamente. Histórico e ranking leem as aparições já indexadas.
+ * Consultas: O(P) para listar ou ranquear os parceiros ou adversários de um jogador, sem
+ * percorrer o documento novamente. Histórico e ranking leem as aparições já indexadas.
+ *
+ * Adversários mais difíceis: winRate crescente, depois mais jogos, pior saldo, mais
+ * derrotas, nome e identificador. Não há score composto.
  *
  * Placar versus estrutura: `validateV2Document` e `validateCompetitionDocument`
  * continuam rejeitando qualquer placar inválido. A análise ignora somente os
@@ -165,6 +169,7 @@ function normalizeFilter(filters) {
   return {
     lineupSize: optionalFilterValue(filters, 'lineupSize'),
     partnerId: optionalFilterValue(filters, 'partnerId'),
+    opponentId: optionalFilterValue(filters, 'opponentId'),
   };
 }
 
@@ -212,7 +217,7 @@ function assertHistoryFilters(filters) {
 
 function assertQueryFilters(filters) {
   const normalized = normalizeFilter(filters);
-  const { lineupSize, partnerId } = normalized;
+  const { lineupSize, partnerId, opponentId } = normalized;
 
   if (lineupSize != null) {
     const supported =
@@ -230,9 +235,16 @@ function assertQueryFilters(filters) {
     }
   }
 
+  if (opponentId != null) {
+    if (typeof opponentId !== 'string' || opponentId.trim() === '') {
+      throw new TypeError('O filtro de adversário é inválido.');
+    }
+  }
+
   return {
     lineupSize: lineupSize ?? null,
     partnerId: partnerId ?? null,
+    opponentId: opponentId ?? null,
   };
 }
 
@@ -299,6 +311,7 @@ function ensurePlayer(players, playerId) {
       totals: createBucket(),
       byLineupSize: new Map(),
       partners: new Map(),
+      opponents: new Map(),
       appearances: [],
     };
     players.set(playerId, record);
@@ -315,16 +328,24 @@ function ensureSizeBucket(map, lineupSize) {
   return bucket;
 }
 
-function ensurePartner(record, partnerId) {
-  let partner = record.partners.get(partnerId);
-  if (!partner) {
-    partner = {
+function ensureRelation(map, relatedId) {
+  let related = map.get(relatedId);
+  if (!related) {
+    related = {
       totals: createBucket(),
       byLineupSize: new Map(),
     };
-    record.partners.set(partnerId, partner);
+    map.set(relatedId, related);
   }
-  return partner;
+  return related;
+}
+
+function ensurePartner(record, partnerId) {
+  return ensureRelation(record.partners, partnerId);
+}
+
+function ensureOpponent(record, opponentId) {
+  return ensureRelation(record.opponents, opponentId);
 }
 
 function applySideStats(record, lineupSize, won, pointsFor, pointsAgainst) {
@@ -400,6 +421,9 @@ function freezeLineup(members) {
 function appearanceMatchesFilters(appearance, filters) {
   if (!matchesLineupSize(appearance.lineupSize, filters.lineupSize)) return false;
   if (filters.partnerId != null && !appearance.partnerIds.includes(filters.partnerId)) return false;
+  if (filters.opponentId != null && !(appearance.opponentIds ?? []).includes(filters.opponentId)) {
+    return false;
+  }
   if (filters.result != null && appearance.result !== filters.result) return false;
   if (filters.sourceType != null && appearance.sourceType !== filters.sourceType) return false;
   const date = String(appearance.sessionDate ?? '');
@@ -458,6 +482,7 @@ function createMatchAppearance({
   won,
 }) {
   const partners = Object.freeze(teammates.filter((member) => member.playerId !== playerId));
+  const opponentIds = Object.freeze(opponents.map((member) => member.playerId));
   const sourceName = analyzableMatch?.sourceName ?? null;
   return Object.freeze({
     playerId,
@@ -479,6 +504,7 @@ function createMatchAppearance({
     opponents,
     partners,
     partnerIds: Object.freeze(partners.map((member) => member.playerId)),
+    opponentIds,
     scoreA: analyzableMatch?.scoreA,
     scoreB: analyzableMatch?.scoreB,
     pointsFor,
@@ -500,10 +526,34 @@ function comparePartners(left, right) {
   return String(left.partnerId).localeCompare(String(right.partnerId));
 }
 
+/**
+ * Adversários mais difíceis: menor aproveitamento primeiro; em empate, mais jogos,
+ * depois pior saldo, mais derrotas, nome e id.
+ */
+function compareOpponents(left, right) {
+  if (left.winRate !== right.winRate) return left.winRate - right.winRate;
+  if (right.matches !== left.matches) return right.matches - left.matches;
+  if (left.pointDifference !== right.pointDifference) {
+    return left.pointDifference - right.pointDifference;
+  }
+  if (right.losses !== left.losses) return right.losses - left.losses;
+  const byName = NAME_COLLATOR.compare(left.opponentName, right.opponentName);
+  if (byName !== 0) return byName;
+  return String(left.opponentId).localeCompare(String(right.opponentId));
+}
+
+function bucketForRelation(relation, lineupSize) {
+  if (!relation) return emptyBucket();
+  if (!isLineupSizeFilter(lineupSize)) return relation.totals;
+  return relation.byLineupSize.get(lineupSize) ?? emptyBucket();
+}
+
 function bucketForPartner(partner, lineupSize) {
-  if (!partner) return emptyBucket();
-  if (!isLineupSizeFilter(lineupSize)) return partner.totals;
-  return partner.byLineupSize.get(lineupSize) ?? emptyBucket();
+  return bucketForRelation(partner, lineupSize);
+}
+
+function bucketForOpponent(opponent, lineupSize) {
+  return bucketForRelation(opponent, lineupSize);
 }
 
 function playerBucket(record, { lineupSize, partnerId }) {
@@ -565,6 +615,40 @@ function listScopedPartners(state, playerId, { lineupSize, partnerId }) {
       return Object.freeze({
         ...metrics,
         modalities: modalitiesFromMap(partner.byLineupSize, lineupSize),
+      });
+    })
+    .filter(Boolean);
+}
+
+function opponentMetrics(state, playerId, opponentId, lineupSize) {
+  const record = state.players.get(playerId);
+  const opponent = record?.opponents.get(opponentId);
+  return metricsFromBucket(bucketForOpponent(opponent, lineupSize), {
+    playerId,
+    opponentId,
+    opponentName: resolveDisplayName(opponentId, state.rosterById, state.history),
+  });
+}
+
+function listScopedOpponents(state, playerId, { lineupSize, opponentId }) {
+  const record = state.players.get(playerId);
+  if (!record) return [];
+
+  const ids =
+    opponentId != null && opponentId !== ''
+      ? record.opponents.has(opponentId)
+        ? [opponentId]
+        : []
+      : [...record.opponents.keys()];
+
+  return ids
+    .map((id) => {
+      const metrics = opponentMetrics(state, playerId, id, lineupSize);
+      if (metrics.matches === 0) return null;
+      const opponent = record.opponents.get(id);
+      return Object.freeze({
+        ...metrics,
+        modalities: modalitiesFromMap(opponent.byLineupSize, lineupSize),
       });
     })
     .filter(Boolean);
@@ -648,6 +732,11 @@ function ingestAnalyzableMatch(state, analyzableMatch) {
         if (partnerIndex === index) continue;
         const partner = ensurePartner(record, ids[partnerIndex]);
         applySideStats(partner, lineupSize, won, side.pointsFor, side.pointsAgainst);
+      }
+      for (const opponent of opponents) {
+        if (opponent.playerId === playerId) continue;
+        const related = ensureOpponent(record, opponent.playerId);
+        applySideStats(related, lineupSize, won, side.pointsFor, side.pointsAgainst);
       }
     }
   }
@@ -762,6 +851,35 @@ export function getPlayerPartnerPerformance(index, playerId, filters) {
 }
 
 /**
+ * Relação jogador-versus-adversário a partir dos buckets indexados.
+ * Ordenação: adversários mais difíceis — winRate ASC, matches DESC,
+ * pointDifference ASC, losses DESC, nome ASC, id.
+ *
+ * @param {object} index
+ * @param {string} playerId
+ * @param {{ lineupSize?: number | null, opponentId?: string | null }} [filters]
+ */
+export function getPlayerOpponentPerformance(index, playerId, filters) {
+  const state = requireIndex(index);
+  assertPlayerId(playerId, 'O jogador do desempenho é inválido.');
+  const { lineupSize, opponentId } = assertQueryFilters(filters);
+  const scoped = listScopedOpponents(state, playerId, { lineupSize, opponentId });
+  scoped.sort(compareOpponents);
+  return Object.freeze(scoped);
+}
+
+/**
+ * Alias explícito da ordenação de adversários mais difíceis.
+ *
+ * @param {object} index
+ * @param {string} playerId
+ * @param {{ lineupSize?: number | null, opponentId?: string | null }} [filters]
+ */
+export function getHardestOpponents(index, playerId, filters) {
+  return getPlayerOpponentPerformance(index, playerId, filters);
+}
+
+/**
  * @param {object} index
  * @param {string} playerId
  * @param {{ lineupSize?: number | null, partnerId?: string | null }} [filters]
@@ -846,6 +964,25 @@ export function getPlayerPartnerMatchHistory(index, playerId, partnerId, filters
     throw new TypeError('Os filtros de desempenho são inválidos.');
   }
   return getPlayerMatchHistory(index, playerId, { ...source, partnerId });
+}
+
+/**
+ * Histórico de partidas em que o jogador enfrentou o adversário no lado oposto.
+ * Lê as aparições já indexadas.
+ *
+ * @param {object} index
+ * @param {string} playerId
+ * @param {string} opponentId
+ * @param {{ lineupSize?: number | null, result?: 'win' | 'loss' | null, sourceType?: 'session' | 'competition' | null, startDate?: string | null, endDate?: string | null }} [filters]
+ */
+export function getPlayerOpponentMatchHistory(index, playerId, opponentId, filters) {
+  assertPlayerId(playerId, 'O jogador do confronto é inválido.');
+  assertPlayerId(opponentId, 'O adversário do confronto é inválido.');
+  const source = filters == null ? {} : filters;
+  if (!isPlainObject(source)) {
+    throw new TypeError('Os filtros de desempenho são inválidos.');
+  }
+  return getPlayerMatchHistory(index, playerId, { ...source, opponentId });
 }
 
 function defaultRankingDirection(sortBy) {
@@ -971,6 +1108,24 @@ export function getPlayerPerformanceRanking(index, options) {
 
   rows.sort((left, right) => compareRankingRows(left, right, sortBy, sortDirection));
   return Object.freeze(rows);
+}
+
+/**
+ * União das modalidades (tamanhos de lineup) realmente presentes no histórico válido.
+ * Ordenada numericamente. Sem partidas, devolve lista vazia.
+ *
+ * @param {object} index
+ * @returns {readonly number[]}
+ */
+export function listPerformanceModalities(index) {
+  const state = requireIndex(index);
+  const sizes = new Set();
+  for (const record of state.players.values()) {
+    for (const size of record.byLineupSize.keys()) {
+      sizes.add(size);
+    }
+  }
+  return Object.freeze([...sizes].sort((left, right) => left - right));
 }
 
 /**

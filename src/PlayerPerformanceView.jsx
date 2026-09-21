@@ -3,6 +3,8 @@ import {
   buildPlayerPerformanceIndex,
   formatPerformanceModality,
   getBestPartner,
+  getHardestOpponents,
+  getPlayerOpponentMatchHistory,
   getPlayerPartnerMatchHistory,
   getPlayerPartnerPerformance,
   getPlayerPerformance,
@@ -11,8 +13,10 @@ import {
 import {
   ALL_PARTNERS_LABEL,
   BEST_PARTNER_RANKING_NOTE,
+  HARDEST_OPPONENTS_NOTE,
   HISTORICAL_PLAYER_LABEL,
   MATCH_HISTORY_EMPTY_MESSAGE,
+  NO_OPPONENTS_IN_SCOPE_MESSAGE,
   NO_PARTNERS_IN_SCOPE_MESSAGE,
   PERFORMANCE_INTRO,
   filterPlayersBySearch,
@@ -26,6 +30,7 @@ import {
   formatPointDifference,
   formatRecordLine,
   formatWinRatePercent,
+  keepDomainOpponentOrder,
   keepDomainPartnerOrder,
   modalityFilterOptions,
   modalitySectionTitle,
@@ -157,6 +162,27 @@ export default function PlayerPerformanceView({ document, roster = [], competiti
     }
     return next;
   }, [built, playerId, lineupSize, rankingPartners]);
+
+  const rankingOpponents = useMemo(() => {
+    if (!built.ok || !playerId) return [];
+    return keepDomainOpponentOrder(
+      getHardestOpponents(built.index, playerId, rankingQueryFilters(lineupSize))
+    );
+  }, [built, playerId, lineupSize]);
+
+  const opponentHistories = useMemo(() => {
+    if (!built.ok || !playerId) return new Map();
+    const next = new Map();
+    for (const opponent of rankingOpponents) {
+      next.set(
+        opponent.opponentId,
+        getPlayerOpponentMatchHistory(built.index, playerId, opponent.opponentId, {
+          lineupSize,
+        })
+      );
+    }
+    return next;
+  }, [built, playerId, lineupSize, rankingOpponents]);
 
   const partnerId = resolvePartnerFilter(
     playerId === scope.playerId ? scope.partnerId : null,
@@ -524,6 +550,78 @@ export default function PlayerPerformanceView({ document, roster = [], competiti
                       );
                     })}
                   </ol>
+                )}
+              </section>
+
+              <section className="space-y-2" aria-labelledby="performance-opponents-title">
+                <h3 id="performance-opponents-title" className="font-bold">
+                  Adversários mais difíceis
+                </h3>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {HARDEST_OPPONENTS_NOTE}
+                </p>
+                {rankingOpponents.length === 0 ? (
+                  <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                    {NO_OPPONENTS_IN_SCOPE_MESSAGE}
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[32rem] text-sm">
+                      <caption className="sr-only">Adversários mais difíceis</caption>
+                      <thead>
+                        <tr className="text-left" style={{ color: 'var(--text-muted)' }}>
+                          <th scope="col" className="py-2 pr-2 font-semibold">
+                            Adversário
+                          </th>
+                          <th scope="col" className="py-2 pr-2 font-semibold text-right">
+                            J
+                          </th>
+                          <th scope="col" className="py-2 pr-2 font-semibold text-right">
+                            V
+                          </th>
+                          <th scope="col" className="py-2 pr-2 font-semibold text-right">
+                            D
+                          </th>
+                          <th scope="col" className="py-2 pr-2 font-semibold text-right">
+                            %
+                          </th>
+                          <th scope="col" className="py-2 font-semibold text-right">
+                            Saldo
+                          </th>
+                        </tr>
+                      </thead>
+                      {rankingOpponents.map((opponent, index) => (
+                        <tbody key={opponent.opponentId}>
+                          <tr className="border-t" style={{ borderColor: 'var(--border-color)' }}>
+                            <th scope="row" className="py-2 pr-2 font-bold text-left">
+                              {index + 1}. {opponent.opponentName}
+                            </th>
+                            <td className="py-2 pr-2 text-right tabular-nums">{opponent.matches}</td>
+                            <td className="py-2 pr-2 text-right tabular-nums">{opponent.wins}</td>
+                            <td className="py-2 pr-2 text-right tabular-nums">{opponent.losses}</td>
+                            <td className="py-2 pr-2 text-right tabular-nums">
+                              {formatWinRatePercent(opponent.winRate, opponent.matches)}
+                            </td>
+                            <td className="py-2 text-right tabular-nums">
+                              {formatPointDifference(opponent.pointDifference)}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td colSpan={6} className="pb-3">
+                              <details>
+                                <summary className={`cursor-pointer text-sm font-bold ${focusClass}`}>
+                                  Histórico contra {opponent.opponentName}
+                                </summary>
+                                <div className="mt-2">
+                                  <MatchHistoryList matches={opponentHistories.get(opponent.opponentId)} />
+                                </div>
+                              </details>
+                            </td>
+                          </tr>
+                        </tbody>
+                      ))}
+                    </table>
+                  </div>
                 )}
               </section>
 
