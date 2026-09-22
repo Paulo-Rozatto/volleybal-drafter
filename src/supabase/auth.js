@@ -21,7 +21,10 @@ export function subscribeAuth(onSession) {
   };
 }
 
-export async function signInWithMagicLink(email, { joinCode, groupJoinCode, origin, base } = {}) {
+export async function signInWithMagicLink(
+  email,
+  { joinCode, groupJoinCode, competitionJoinCode, origin, base } = {}
+) {
   const supabase = getSupabaseClient();
   if (!supabase) {
     return { ok: false, error: { code: 'SUPABASE_NOT_CONFIGURED', message: 'Supabase não está configurado.' } };
@@ -32,6 +35,7 @@ export async function signInWithMagicLink(email, { joinCode, groupJoinCode, orig
     base: base ?? import.meta.env?.BASE_URL ?? '/',
     joinCode,
     groupJoinCode,
+    competitionJoinCode,
   });
 
   const { error } = await supabase.auth.signInWithOtp({
@@ -48,6 +52,7 @@ export async function signInWithMagicLink(email, { joinCode, groupJoinCode, orig
     emailRedirectTo,
     joinCode: joinCode ? normalizeJoinCode(joinCode) : null,
     groupJoinCode: groupJoinCode ? normalizeJoinCode(groupJoinCode) : null,
+    competitionJoinCode: competitionJoinCode ? normalizeJoinCode(competitionJoinCode) : null,
   };
 }
 

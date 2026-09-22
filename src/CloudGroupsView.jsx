@@ -14,6 +14,7 @@ import {
   listMyGroups,
   loadGroup,
 } from './supabase/groupApi.js';
+import { listGroupCloudCompetitions } from './supabase/competitionApi.js';
 import { isCanonicalJoinCode, normalizeJoinCode } from './supabase/joinCode.js';
 import { groupRoleLabel } from './supabase/groupMappers.js';
 
@@ -29,6 +30,7 @@ export default function CloudGroupsView({
   openGroupId,
   onOpenGroup,
   onOpenSession,
+  onOpenCompetition,
 }) {
   const [groups, setGroups] = useState([]);
   const [listLoading, setListLoading] = useState(false);
@@ -39,6 +41,9 @@ export default function CloudGroupsView({
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState(null);
+  const [competitions, setCompetitions] = useState([]);
+  const [competitionsLoading, setCompetitionsLoading] = useState(false);
+  const [competitionsError, setCompetitionsError] = useState(null);
   const [createName, setCreateName] = useState('');
   const [createDescription, setCreateDescription] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -93,6 +98,9 @@ export default function CloudGroupsView({
       setSessions([]);
       setSessionsError(null);
       setSessionsLoading(false);
+      setCompetitions([]);
+      setCompetitionsError(null);
+      setCompetitionsLoading(false);
       return;
     }
 
@@ -139,6 +147,26 @@ export default function CloudGroupsView({
     } finally {
       if (shouldApplyGroupLoad(groupId, openIdRef.current)) setSessionsLoading(false);
     }
+
+    setCompetitionsLoading(true);
+    setCompetitionsError(null);
+    try {
+      const listedCompetitions = await listGroupCloudCompetitions(groupId);
+      if (!shouldApplyGroupLoad(groupId, openIdRef.current)) return;
+      if (listedCompetitions.ok) {
+        setCompetitions(listedCompetitions.competitions);
+        setCompetitionsError(null);
+      } else {
+        setCompetitions([]);
+        setCompetitionsError(listedCompetitions.error?.message || 'Não foi possível listar as competições do grupo.');
+      }
+    } catch (error) {
+      if (!shouldApplyGroupLoad(groupId, openIdRef.current)) return;
+      setCompetitions([]);
+      setCompetitionsError(error?.message || 'Não foi possível listar as competições do grupo.');
+    } finally {
+      if (shouldApplyGroupLoad(groupId, openIdRef.current)) setCompetitionsLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -160,6 +188,9 @@ export default function CloudGroupsView({
       setSessions([]);
       setSessionsError(null);
       setSessionsLoading(false);
+      setCompetitions([]);
+      setCompetitionsError(null);
+      setCompetitionsLoading(false);
       return undefined;
     }
 
@@ -170,6 +201,12 @@ export default function CloudGroupsView({
     setSessions([]);
     setSessionsError(null);
     setSessionsLoading(true);
+    setCompetitions([]);
+    setCompetitionsError(null);
+    setCompetitionsLoading(true);
+    setCompetitions([]);
+    setCompetitionsError(null);
+    setCompetitionsLoading(true);
 
     (async () => {
       try {
@@ -207,6 +244,26 @@ export default function CloudGroupsView({
       } finally {
         if (!cancelled && shouldApplyGroupLoad(openGroupId, openIdRef.current)) setSessionsLoading(false);
       }
+
+      try {
+        const listedCompetitions = await listGroupCloudCompetitions(openGroupId);
+        if (cancelled || !shouldApplyGroupLoad(openGroupId, openIdRef.current)) return;
+        if (listedCompetitions.ok) {
+          setCompetitions(listedCompetitions.competitions);
+          setCompetitionsError(null);
+        } else {
+          setCompetitions([]);
+          setCompetitionsError(
+            listedCompetitions.error?.message || 'Não foi possível listar as competições do grupo.'
+          );
+        }
+      } catch (error) {
+        if (cancelled || !shouldApplyGroupLoad(openGroupId, openIdRef.current)) return;
+        setCompetitions([]);
+        setCompetitionsError(error?.message || 'Não foi possível listar as competições do grupo.');
+      } finally {
+        if (!cancelled && shouldApplyGroupLoad(openGroupId, openIdRef.current)) setCompetitionsLoading(false);
+      }
     })();
 
     return () => {
@@ -238,11 +295,15 @@ export default function CloudGroupsView({
         sessionsLoading={sessionsLoading}
         sessionsError={sessionsError}
         sessions={sessions}
+        competitionsLoading={competitionsLoading}
+        competitionsError={competitionsError}
+        competitions={competitions}
         user={user}
         onBack={() => onOpenGroup?.(null)}
         onRetry={() => refreshGroup(openGroupId)}
         onReload={() => refreshGroup(group?.id ?? openGroupId, { keepGroup: true })}
         onOpenSession={onOpenSession}
+        onOpenCompetition={onOpenCompetition}
         onLeftGroup={() => {
           onOpenGroup?.(null);
           refreshList();

@@ -4,6 +4,7 @@ import {
   ANALYZABLE_MATCH_INCLUDED,
   ANALYZABLE_MATCH_INVALID,
   ANALYZABLE_MATCH_PENDING,
+  MATCH_SOURCE_COMPETITION,
   MATCH_SOURCE_SESSION,
   listSessionPerformanceMatches,
 } from '../domain/performanceMatches.js';
@@ -87,6 +88,19 @@ describe('adapter cloud de desempenho', () => {
         cloudRow({ sessionId: 'cloud-id', legacySourceId: 'gist-session-1' }),
       ])[0].originKey
     ).toBe('gist-session-1');
+    expect(
+      mapCloudPerformanceMatches([
+        {
+          ...cloudRow({ sessionId: null, matchId: 'c-match' }),
+          source_kind: 'competition',
+          competition_id: 'comp-1',
+          legacy_source_id: null,
+        },
+      ])[0]
+    ).toMatchObject({
+      sourceType: MATCH_SOURCE_COMPETITION,
+      originKey: 'comp-1',
+    });
   });
 
   it('mantém sourceIndex crescente com a recência mesmo quando a RPC devolve DESC', () => {

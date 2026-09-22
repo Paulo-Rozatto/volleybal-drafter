@@ -59,6 +59,7 @@ function PlayerSlot({ label, player, onClear }) {
 export default function CompetitionTeamBuilder({
   competition,
   roster = [],
+  readOnly = false,
   onAddTeam,
   onUpdateTeam,
   onRemoveTeam,
@@ -74,7 +75,8 @@ export default function CompetitionTeamBuilder({
   const teamSize = competitionTeamSize(competition);
   const doubles = requiresExactPair(teamSize);
   const unit = teamUnitSingular(teamSize);
-  const editable = competition?.status === 'draft' && (competition?.rounds ?? []).length === 0;
+  const editable =
+    !readOnly && competition?.status === 'draft' && (competition?.rounds ?? []).length === 0;
   const teams = competition?.teams ?? [];
   const available = availablePlayersForCompetition(roster, teams, editingTeamId);
   const visiblePlayers = filterPlayersByName(available, query).sort((left, right) =>
@@ -90,7 +92,8 @@ export default function CompetitionTeamBuilder({
     setConfirmEmpty(false);
   };
 
-  const applyResult = (result, { resetOnSuccess } = { resetOnSuccess: true }) => {
+  const applyResult = async (resultPromise, { resetOnSuccess } = { resetOnSuccess: true }) => {
+    const result = await Promise.resolve(resultPromise);
     if (result?.errors?.[0]?.code === INVALID_COMPETITIONS_CACHE_CONFIRMATION_REQUIRED) {
       return false;
     }
@@ -104,11 +107,11 @@ export default function CompetitionTeamBuilder({
     return true;
   };
 
-  const submitMembers = (memberIds) => {
+  const submitMembers = async (memberIds) => {
     const result = editingTeamId
       ? onUpdateTeam?.(editingTeamId, memberIds)
       : onAddTeam?.(memberIds);
-    applyResult(result);
+    await applyResult(result);
   };
 
   const handleSubmit = ({ emptyConfirmed = false } = {}) => {

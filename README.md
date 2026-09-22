@@ -119,9 +119,9 @@ https://paulo-rozatto.github.io/volleybal-drafter/**
    - `public.match_players`
    - `public.match_events`
 
-Se as etapas 1–3 já estavam aplicadas, rode só `20260921180000_cloud_groups.sql` (já no hospedado). A etapa 5 (`20260921200000_group_performance.sql`) **não** deve ir ao remoto até revisão do RPC.
+Se as etapas 1–3 já estavam aplicadas, rode só `20260921180000_cloud_groups.sql` (já no hospedado). As etapas 5 e 6 (`20260921200000_group_performance.sql`, `20260921220000_cloud_competitions.sql`) **não** devem ir ao remoto até revisão.
 
-O login **não** é exigido para sorteio, elenco Gist, encontros Gist, competições ou desempenho local. A conta vale para **Encontros online** e **Grupos**.
+O login **não** é exigido para sorteio, elenco Gist, encontros Gist, competições Gist ou desempenho local. A conta vale para **Encontros online**, **Grupos** e **Competições online**.
 
 Convite de encontro: `#/join/CODIGO` (já logado) ou `?join=CODIGO` no redirect do magic link.
 Convite de grupo: `#/group/join/CODIGO` ou `?groupJoin=CODIGO`. Os dois códigos ficam em chaves distintas do `sessionStorage` e **não** se misturam.
@@ -156,15 +156,15 @@ Roteiro manual:
 
 ### Etapa 5 — Ranking e perfis no grupo
 
-O ranking de um grupo considera **somente** partidas de `sessions.group_id = grupo atual`. Encontros avulsos, outros grupos e Gist ficam de fora. Competições cloud ainda não existem.
+O ranking de um grupo considera partidas de `sessions.group_id = grupo atual` **e**, na etapa 6, `competitions.group_id` do mesmo grupo. Encontros/competições avulsos, outros grupos e Gist ficam de fora.
 
-População do leaderboard: `group_members` com player vinculado (`players.linked_user_id`). Membro sem player aparece como “Jogador ainda não vinculado”. Player vinculado sem partida válida aparece sem posição, em “Ainda sem partidas no grupo”. Convidados (`session_players` que não são `group_members`) podem entrar no histórico, parceiros e adversários; **não** entram no ranking.
+População do leaderboard: `group_members` com player vinculado (`players.linked_user_id`). Membro sem player aparece como “Jogador ainda não vinculado”. Player vinculado sem partida válida aparece sem posição, em “Ainda sem partidas no grupo”. Convidados (`session_players` / `competition_players` que não são `group_members`) podem entrar no histórico, parceiros e adversários; **não** entram no ranking.
 
 Uma leitura sanitizada:
 
 `get_group_performance_matches(group_id)`
 
-O RPC exige autenticação e membership do grupo (`AUTH_REQUIRED` / `GROUP_NOT_FOUND` / `GROUP_ACCESS_DENIED`). Não concede `SELECT` bruto de `sessions`, não adiciona `session_members`, não devolve `join_code`, email, papéis de sessão nem métricas prontas. O cliente monta o índice com `mapCloudPerformanceMatches` + `buildPlayerPerformanceIndexFromMatches` — o mesmo motor do perfil pessoal. `sourceType` continua `"session"`; `originKey = legacy_source_id ?? session_id`. Ordenação do ranking: vitórias, depois os desempates já existentes no motor (jogos, aproveitamento, saldo, pontos pró, nome, id).
+O RPC exige autenticação e membership do grupo (`AUTH_REQUIRED` / `GROUP_NOT_FOUND` / `GROUP_ACCESS_DENIED`). Não concede `SELECT` bruto de `sessions`, não adiciona `session_members`, não devolve `join_code`, email, papéis de sessão nem métricas prontas. O cliente monta o índice com `mapCloudPerformanceMatches` + `buildPlayerPerformanceIndexFromMatches` — o mesmo motor do perfil pessoal. `sourceType` continua `"session"` ou `"competition"`; `originKey = legacy_source_id ?? session_id|competition_id`.
 
 Perfil pessoal cloud segue em `get_my_performance_matches()`. Perfil no grupo é outro contexto: só as partidas daquele `group_id`, inclusive as de outro membro do mesmo grupo.
 
@@ -181,11 +181,52 @@ Grupo **Vôlei Quinta** — André, Paulo, Davi.
 5. Outsider não consulta o RPC.
 6. Perfil pessoal cloud de Paulo continua no escopo global anterior (`get_my_performance_matches`).
 
-Competições cloud, etapa 6. Gist permanece.
+Competições Gist permanecem. A etapa 6 (abaixo) ainda **não** deve ir ao remoto.
+
+### Etapa 6 — Competições cloud
+
+O domínio JS de `Competition` continua a fonte de verdade para formatos (`swiss`, `double_elimination`, `single_elimination`, `round_robin`, `groups`), geração de chave, standings e validade. O PostgreSQL persiste, autoriza, versiona e audita. Não há algoritmo de bracket no SQL.
+
+Cinco relações distintas:
+
+- `group_members` — usuários da comunidade
+- `session_members` / `session_players` — acesso e elenco do encontro
+- `competition_members` — quem colabora na competição (owner/admin/member/viewer)
+- `competition_players` — jogadores no roster da competição
+
+Entrar no grupo **não** vira `competition_member`. Entrar na competição **não** vira `competition_player`. Identidade continua `players.linked_user_id` + claims da etapa 3.
+
+`competitions.group_id` é opcional. `null` = competição avulsa. Preenchido = associada ao grupo. Criar no grupo exige `group_member`; só o criador vira owner. Demais membros do grupo entram pelo código da competição (`#/competition/join/CODIGO` ou `?competitionJoin=CODIGO`, chave `volleyPendingCompetitionJoinCode` — distinta de encontro e grupo).
+
+JS gera o plano → `save_competition_structure` / `replace_competition_teams` / `set_competition_match_score` persistem atomicamente com `expected_structure_version`. Placar usa `competition_matches.version` + `competition_match_events` na mesma transação. Conflito stale **não** gera evento. Partidas de competição **não** reutilizam `public.matches`. Lineups carregam em lote por `competition_id` (sem embed PostgREST).
+
+Performance:
+
+- perfil pessoal: `get_my_performance_matches()` = sessions + competitions em que o player vinculado jogou
+- ranking do grupo: `get_group_performance_matches(group_id)` = sessions daquele grupo + competitions daquele grupo
+- `sourceType` continua `"session"` | `"competition"` (nunca `cloudCompetition`)
+- `originKey` = `legacy_source_id ?? session_id|competition_id`
+
+`legacy_source_id` nas competições prepara a etapa 7. Esta etapa **não** importa Gist, **não** faz dual-write e **não** remove competições locais.
+
+Migration: `supabase/migrations/20260921220000_cloud_competitions.sql`. **Não aplicar no hospedado até revisão** (migration, RLS, RPC de score/estrutura e RPCs de performance).
+
+Realtime (checklist da publication `supabase_realtime`, replica identity full; a migration declara, o apply hospedado espera revisão):
+
+- `competitions`, `competition_members`, `competition_players`
+- `competition_stages`, `competition_matches`, `competition_match_players`, `competition_match_events`
+
+Roteiro manual (depois do `db push` desta migration):
+
+1. André cria competição, monta roster, gera estrutura, adiciona Paulo como member.
+2. Paulo entra pelo código, registra placar; André recebe Realtime.
+3. Viewer bloqueado no placar; member sem estrutura; outsider sem leitura.
+4. Score conflict e structure conflict como nas sessões.
+5. Perfil pessoal: a competition aparece. Grupo: só a competition com `group_id` daquele grupo. Avulsa não mexe no ranking do grupo.
 
 ### Validação hospedada (etapa 3.5)
 
-Circuito já validado no projeto hospedado (Auth, RLS, RPC, Realtime, grupos). A etapa 5 ainda é só local — não rode `20260921200000_group_performance.sql` no SQL Editor até a revisão.
+Circuito já validado no projeto hospedado (Auth, RLS, RPC, Realtime, grupos). As etapas 5 e 6 ainda são só locais — não rode `20260921200000_group_performance.sql` nem `20260921220000_cloud_competitions.sql` no SQL Editor até a revisão.
 
 1. Preencha `.env` (já copiado de `.env.example`; o arquivo está no `.gitignore`) com a URL e a **anon key** reais. Placeholder do example não conta como configurado.
 2. Rode as três migrations no SQL Editor, na ordem dos timestamps.

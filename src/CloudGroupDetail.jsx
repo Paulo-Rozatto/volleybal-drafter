@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import CloudGroupRanking from './CloudGroupRanking.jsx';
 import CloudSessionCreateForm from './CloudSessionCreateForm.jsx';
+import CloudCompetitionCreateForm from './CloudCompetitionCreateForm.jsx';
 import {
   canManageGroup,
   groupRoleLabel,
@@ -25,11 +26,15 @@ export function CloudGroupOpenPanel({
   sessionsLoading,
   sessionsError,
   sessions,
+  competitionsLoading,
+  competitionsError,
+  competitions,
   user,
   onBack,
   onRetry,
   onReload,
   onOpenSession,
+  onOpenCompetition,
   onLeftGroup,
 }) {
   if (groupLoading) {
@@ -74,10 +79,14 @@ export function CloudGroupOpenPanel({
       sessionsLoading={sessionsLoading}
       sessionsError={sessionsError}
       sessions={sessions}
+      competitionsLoading={competitionsLoading}
+      competitionsError={competitionsError}
+      competitions={competitions}
       user={user}
       onBack={onBack}
       onReload={onReload}
       onOpenSession={onOpenSession}
+      onOpenCompetition={onOpenCompetition}
       onLeftGroup={onLeftGroup}
     />
   );
@@ -88,10 +97,14 @@ export default function CloudGroupDetail({
   sessionsLoading,
   sessionsError,
   sessions = [],
+  competitionsLoading,
+  competitionsError,
+  competitions = [],
   user,
   onBack,
   onReload,
   onOpenSession,
+  onOpenCompetition,
   onLeftGroup,
 }) {
   const [status, setStatus] = useState('');
@@ -169,6 +182,17 @@ export default function CloudGroupDetail({
         >
           Ranking
         </button>
+        <button
+          type="button"
+          onClick={() => setSection('competicoes')}
+          className="text-sm font-bold px-3 py-1 rounded-lg cursor-pointer"
+          style={{
+            backgroundColor: section === 'competicoes' ? 'var(--primary)' : 'var(--bg-subtle)',
+            color: section === 'competicoes' ? 'var(--text-inverse)' : 'var(--text-main)',
+          }}
+        >
+          Competições
+        </button>
       </div>
 
       {section === 'ranking' ? (
@@ -178,6 +202,48 @@ export default function CloudGroupDetail({
           selectedUserId={rankingUserId}
           onSelectUser={setRankingUserId}
         />
+      ) : null}
+
+      {section === 'competicoes' ? (
+        <section className="space-y-3">
+          <h3 className="font-bold text-sm">Competições</h3>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Só aparecem competições deste grupo em que você já é competition_member. Entrar no grupo não abre a competição.
+          </p>
+          <CloudCompetitionCreateForm
+            user={user}
+            groupId={group.id}
+            heading="Nova competição neste grupo"
+            onCreated={onOpenCompetition}
+          />
+          {competitionsLoading ? (
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              Carregando competições...
+            </p>
+          ) : null}
+          {competitionsError ? (
+            <p className="text-sm font-semibold text-red-500">{competitionsError}</p>
+          ) : null}
+          {!competitionsLoading && !competitionsError && competitions.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              Você ainda não participa de uma competição deste grupo.
+            </p>
+          ) : null}
+          {competitions.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onOpenCompetition?.(item.id)}
+              className="w-full text-left p-3 rounded-xl border cursor-pointer"
+              style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
+            >
+              <p className="font-semibold">{item.name || 'Competição'}</p>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                {item.date} · {item.status}
+              </p>
+            </button>
+          ))}
+        </section>
       ) : null}
 
       {section === 'grupo' ? (

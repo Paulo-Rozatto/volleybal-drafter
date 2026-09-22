@@ -52,14 +52,16 @@ export default function CompetitionMatchEditor({
 
   if (!slot || slot.type !== 'match' || !match) return null;
 
-  const applySave = (downstreamConfirmed) => {
+  const applySave = async (downstreamConfirmed) => {
     const { scoreA, scoreB } = scoreFieldsToValues(draftA, draftB);
-    const result = onSave?.({
-      scoreA,
-      scoreB,
-      playedDate,
-      downstreamConfirmed,
-    });
+    const result = await Promise.resolve(
+      onSave?.({
+        scoreA,
+        scoreB,
+        playedDate,
+        downstreamConfirmed,
+      })
+    );
     if (result?.errors?.[0]?.code === COMPETITION_DOWNSTREAM_CONFIRMATION_REQUIRED) {
       setPendingSave(result.errors[0]);
       setError(null);
@@ -73,8 +75,8 @@ export default function CompetitionMatchEditor({
     return result;
   };
 
-  const applyClear = ({ clearConfirmed = false, downstreamConfirmed = false } = {}) => {
-    const result = onClear?.({ clearConfirmed, downstreamConfirmed });
+  const applyClear = async ({ clearConfirmed = false, downstreamConfirmed = false } = {}) => {
+    const result = await Promise.resolve(onClear?.({ clearConfirmed, downstreamConfirmed }));
     if (result?.errors?.[0]?.code === CLEAR_COMPETITION_RESULT_CONFIRMATION_REQUIRED) {
       setPendingClear(true);
       setError(null);

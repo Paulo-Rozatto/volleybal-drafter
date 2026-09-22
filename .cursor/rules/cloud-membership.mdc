@@ -5,16 +5,18 @@ alwaysApply: true
 
 # Associação cloud e roadmap
 
-Roadmap congelado: 4 grupos validada no hospedado → 5 ranking no grupo (código local; não `db push` até revisão) → 6 competições cloud → 7 migração Gist → 8 desligar Gist.
+Roadmap congelado: 4 grupos validada no hospedado → 5 ranking no grupo (código local; não `db push` até revisão) → 6 competições cloud (código local; não `db push` até revisão) → 7 migração Gist → 8 desligar Gist.
 
-Identidade da etapa 3 permanece congelada. Não unifique Gist. Sem ranking mundial público. Sem competições cloud (etapa 6).
+Identidade da etapa 3 permanece congelada. Não unifique Gist. Sem ranking mundial público.
 
-Três relações distintas — nunca colapsar:
+Cinco relações distintas — nunca colapsar:
 
 - `group_members`: pertencem à comunidade
 - `session_members`: têm acesso àquele encontro
 - `session_players`: jogam naquele encontro
+- `competition_members`: usuários com acesso colaborativo à competição
+- `competition_players`: jogadores no roster da competição
 
-Não copie `group_members` automaticamente para `session_members` nem para `session_players`. Encontro avulso continua válido (`sessions.group_id` nulo). Entrar no grupo não abre os encontros do grupo.
+Não copie `group_members` automaticamente para `session_members`, `session_players`, `competition_members` nem `competition_players`. Encontro/competição avulsos continuam válidos (`group_id` nulo). Entrar no grupo não abre os encontros nem as competições do grupo.
 
-`get_my_performance_matches()` é só o player vinculado ao `auth.uid()`. Ranking de grupo usa uma leitura `get_group_performance_matches(group_id)` sanitizada, nunca N chamadas da RPC pessoal. Métricas ficam no JS. Leaderboard = `group_members` com player vinculado; convidados podem aparecer nas partidas, não no ranking.
+`get_my_performance_matches()` é só o player vinculado ao `auth.uid()` (sessions + competitions). Ranking de grupo usa `get_group_performance_matches(group_id)` sanitizada: sessions e competitions daquele `group_id`, nunca N chamadas da RPC pessoal. Métricas ficam no JS. Leaderboard = `group_members` com player vinculado; convidados podem aparecer nas partidas, não no ranking. `sourceType` continua `"session"` ou `"competition"`.

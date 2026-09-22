@@ -6,14 +6,19 @@ import PerformanceHub from './PerformanceHub.jsx';
 import GistSyncPanel from './GistSyncPanel';
 import CloudSessionsView from './CloudSessionsView.jsx';
 import CloudGroupsView from './CloudGroupsView.jsx';
+import CloudCompetitionsView from './CloudCompetitionsView.jsx';
 import JoinSessionView from './JoinSessionView.jsx';
 import JoinGroupView from './JoinGroupView.jsx';
+import JoinCompetitionView from './JoinCompetitionView.jsx';
 import useAuth from './hooks/useAuth.js';
 import {
+  clearPendingCompetitionJoinCode,
   clearPendingGroupJoinCode,
   clearPendingJoinCode,
+  parseCompetitionJoinHash,
   parseGroupJoinHash,
   parseJoinHash,
+  rememberPendingCompetitionJoinCode,
   rememberPendingGroupJoinCode,
   rememberPendingJoinCode,
   resolveIncomingJoinIntent,
@@ -64,11 +69,12 @@ const INITIAL_ROSTER = [];
 
 export default function App() {
   // --- Core Navigation & Drawer States ---
-  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance', 'cloud', 'join', 'groups', 'groupJoin'
+  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance', 'cloud', 'join', 'groups', 'groupJoin', 'cloudCompetitions', 'competitionJoin'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const auth = useAuth();
   const [cloudSessionId, setCloudSessionId] = useState(null);
   const [cloudGroupId, setCloudGroupId] = useState(null);
+  const [cloudCompetitionId, setCloudCompetitionId] = useState(null);
   const [pendingJoinCode, setPendingJoinCode] = useState(() => {
     const intent = resolveIncomingJoinIntent({
       hash: globalThis.location?.hash ?? '',
@@ -82,6 +88,13 @@ export default function App() {
       search: globalThis.location?.search ?? '',
     });
     return intent.type === 'group' ? intent.code : null;
+  });
+  const [pendingCompetitionJoinCode, setPendingCompetitionJoinCode] = useState(() => {
+    const intent = resolveIncomingJoinIntent({
+      hash: globalThis.location?.hash ?? '',
+      search: globalThis.location?.search ?? '',
+    });
+    return intent.type === 'competition' ? intent.code : null;
   });
 
   // --- Players & History States ---
@@ -159,7 +172,11 @@ export default function App() {
       hash: globalThis.location?.hash ?? '',
       search: globalThis.location?.search ?? '',
     });
-    if (intent.type === 'group') {
+    if (intent.type === 'competition') {
+      rememberPendingCompetitionJoinCode(intent.code);
+      setPendingCompetitionJoinCode(intent.code);
+      setCurrentView('competitionJoin');
+    } else if (intent.type === 'group') {
       rememberPendingGroupJoinCode(intent.code);
       setPendingGroupJoinCode(intent.code);
       setCurrentView('groupJoin');
@@ -170,6 +187,13 @@ export default function App() {
     }
 
     const onHashChange = () => {
+      const competitionCode = parseCompetitionJoinHash(globalThis.location?.hash ?? '');
+      if (competitionCode) {
+        rememberPendingCompetitionJoinCode(competitionCode);
+        setPendingCompetitionJoinCode(competitionCode);
+        setCurrentView('competitionJoin');
+        return;
+      }
       const groupCode = parseGroupJoinHash(globalThis.location?.hash ?? '');
       if (groupCode) {
         rememberPendingGroupJoinCode(groupCode);
@@ -206,6 +230,17 @@ export default function App() {
     const url = new URL(globalThis.location.href);
     url.searchParams.delete('groupJoin');
     if (url.hash.startsWith('#/group/join/')) url.hash = '';
+    globalThis.history?.replaceState?.({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  const handleJoinedCloudCompetition = useCallback((competitionId) => {
+    clearPendingCompetitionJoinCode();
+    setPendingCompetitionJoinCode(null);
+    setCloudCompetitionId(competitionId);
+    setCurrentView('cloudCompetitions');
+    const url = new URL(globalThis.location.href);
+    url.searchParams.delete('competitionJoin');
+    if (url.hash.startsWith('#/competition/join/')) url.hash = '';
     globalThis.history?.replaceState?.({}, '', `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
@@ -762,6 +797,18 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={() => { setCurrentView('cloudCompetitions'); setIsMenuOpen(false); }}
+              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+              style={{
+                backgroundColor: currentView === 'cloudCompetitions' || currentView === 'competitionJoin' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)'
+              }}
+              aria-current={currentView === 'cloudCompetitions' || currentView === 'competitionJoin' ? 'page' : undefined}
+            >
+              ☁️ Competições online
+            </button>
+            <button
+              type="button"
               onClick={() => { setCurrentView('performance'); setIsMenuOpen(false); }}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
@@ -1043,6 +1090,16 @@ export default function App() {
             />
           )}
 
+          {currentView === 'competitionJoin' && (
+            <JoinCompetitionView
+              joinCode={pendingCompetitionJoinCode}
+              configured={auth.configured}
+              ready={auth.ready}
+              user={auth.user}
+              onJoined={handleJoinedCloudCompetition}
+            />
+          )}
+
           {currentView === 'cloud' && (
             <CloudSessionsView
               configured={auth.configured}
@@ -1066,6 +1123,22 @@ export default function App() {
                 setCloudSessionId(sessionId);
                 setCurrentView('cloud');
               }}
+              onOpenCompetition={(competitionId) => {
+                setCloudCompetitionId(competitionId);
+                setCurrentView('cloudCompetitions');
+              }}
+            />
+          )}
+
+          {currentView === 'cloudCompetitions' && (
+            <CloudCompetitionsView
+              configured={auth.configured}
+              ready={auth.ready}
+              user={auth.user}
+              pendingCompetitionJoinCode={pendingCompetitionJoinCode}
+              openCompetitionId={cloudCompetitionId}
+              onOpenCompetition={setCloudCompetitionId}
+              players={players}
             />
           )}
 

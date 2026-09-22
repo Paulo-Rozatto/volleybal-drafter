@@ -1,4 +1,5 @@
 import {
+  MATCH_SOURCE_COMPETITION,
   MATCH_SOURCE_SESSION,
   createAnalyzableMatch,
 } from '../domain/performanceMatches.js';
@@ -35,37 +36,44 @@ function uniqueBy(items, keyOf) {
   return [...seen.values()];
 }
 
-function roundKey(sessionId, roundId) {
-  return `${sessionId}\0${roundId}`;
+function roundKey(sourceKey, roundId) {
+  return `${sourceKey}\0${roundId}`;
+}
+
+function performanceSourceKey(row) {
+  if (row?.source_kind === 'competition' || row?.competition_id) {
+    return `competition:${row.competition_id ?? ''}`;
+  }
+  return `session:${row?.session_id ?? ''}`;
 }
 
 export function assignCloudPerformanceRecency(rows) {
   const list = Array.isArray(rows) ? rows : [];
-  const sessions = uniqueBy(list, (row) => row.session_id).sort(compareSessionRecency);
-  const sourceIndexBySession = new Map(
-    sessions.map((session, index) => [session.session_id, index])
-  );
+  const sources = uniqueBy(list, (row) => performanceSourceKey(row)).sort(compareSessionRecency);
+  const sourceIndexByKey = new Map(sources.map((source, index) => [performanceSourceKey(source), index]));
 
   const roundIndexByKey = new Map();
-  for (const session of sessions) {
+  for (const source of sources) {
+    const key = performanceSourceKey(source);
     const rounds = uniqueBy(
-      list.filter((row) => row.session_id === session.session_id),
+      list.filter((row) => performanceSourceKey(row) === key),
       (row) => row.round_id
     ).sort(compareRoundRecency);
     rounds.forEach((round, index) => {
-      roundIndexByKey.set(roundKey(session.session_id, round.round_id), index);
+      roundIndexByKey.set(roundKey(key, round.round_id), index);
     });
   }
 
   const matchIndexById = new Map();
-  for (const session of sessions) {
+  for (const source of sources) {
+    const key = performanceSourceKey(source);
     const roundIds = uniqueBy(
-      list.filter((row) => row.session_id === session.session_id),
+      list.filter((row) => performanceSourceKey(row) === key),
       (row) => row.round_id
     ).map((row) => row.round_id);
     for (const roundId of roundIds) {
       const matches = list
-        .filter((row) => row.session_id === session.session_id && row.round_id === roundId)
+        .filter((row) => performanceSourceKey(row) === key && row.round_id === roundId)
         .sort((left, right) => compareText(left.match_id, right.match_id));
       matches.forEach((match, index) => {
         matchIndexById.set(match.match_id, index);
@@ -75,8 +83,8 @@ export function assignCloudPerformanceRecency(rows) {
 
   return list.map((row) => ({
     ...row,
-    sourceIndex: sourceIndexBySession.get(row.session_id) ?? 0,
-    roundIndex: roundIndexByKey.get(roundKey(row.session_id, row.round_id)) ?? 0,
+    sourceIndex: sourceIndexByKey.get(performanceSourceKey(row)) ?? 0,
+    roundIndex: roundIndexByKey.get(roundKey(performanceSourceKey(row), row.round_id)) ?? 0,
     matchIndex: matchIndexById.get(row.match_id) ?? 0,
   }));
 }
@@ -89,10 +97,12 @@ function mapLineup(side) {
 }
 
 export function mapCloudPerformanceMatches(rows) {
-  return assignCloudPerformanceRecency(rows).map((row) =>
-    createAnalyzableMatch({
-      sourceType: MATCH_SOURCE_SESSION,
-      sourceId: row.session_id ?? null,
+  return assignCloudPerformanceRecency(rows).map((row) => {
+    const isCompetition = row.source_kind === 'competition' || Boolean(row.competition_id);
+    const sourceId = isCompetition ? row.competition_id : row.session_id;
+    return createAnalyzableMatch({
+      sourceType: isCompetition ? MATCH_SOURCE_COMPETITION : MATCH_SOURCE_SESSION,
+      sourceId: sourceId ?? null,
       sourceName: row.session_name,
       date: row.session_date ?? null,
       sourceUpdatedAt: row.session_updated_at,
@@ -108,9 +118,9 @@ export function mapCloudPerformanceMatches(rows) {
       lineupB: mapLineup(row.lineup_b),
       scoreA: row.score_a ?? null,
       scoreB: row.score_b ?? null,
-      originKey: row.legacy_source_id ?? row.session_id ?? null,
-    })
-  );
+      originKey: row.legacy_source_id ?? sourceId ?? null,
+    });
+  });
 }
 
 export function buildCloudPlayerPerformanceIndex(payload) {

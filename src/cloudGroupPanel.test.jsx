@@ -81,6 +81,7 @@ describe('cloud group panel', () => {
     expect(detail).toContain('Rebaixar a membro');
     expect(detail).toContain('Novo encontro neste grupo');
     expect(detail).toContain('Ranking');
+    expect(detail).toContain('Competições');
     expect(detail).not.toContain('Carregando grupo');
   });
 

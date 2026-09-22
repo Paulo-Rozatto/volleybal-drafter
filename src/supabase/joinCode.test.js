@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PENDING_COMPETITION_JOIN_CODE_KEY,
   PENDING_GROUP_JOIN_CODE_KEY,
   PENDING_JOIN_CODE_KEY,
   buildAuthRedirectTo,
+  cloudCompetitionJoinPath,
   cloudGroupJoinPath,
   cloudJoinPath,
   isCanonicalJoinCode,
   normalizeJoinCode,
+  parseCompetitionJoinHash,
+  parseCompetitionJoinSearch,
   parseGroupJoinHash,
   parseGroupJoinSearch,
   parseJoinHash,
   parseJoinSearch,
+  rememberPendingCompetitionJoinCode,
   rememberPendingGroupJoinCode,
   rememberPendingJoinCode,
   resolveIncomingJoinCode,
@@ -66,19 +71,27 @@ describe('joinCode', () => {
     ).toBe('XY23KMNP');
   });
 
-  it('não mistura código de grupo com código de encontro', () => {
+  it('não mistura código de grupo, encontro e competição', () => {
     expect(parseJoinHash('#/group/join/ab23cd56')).toBeNull();
     expect(parseGroupJoinHash('#/join/ab23cd56')).toBeNull();
     expect(parseGroupJoinHash('#/group/join/ab23cd56')).toBe('AB23CD56');
     expect(parseGroupJoinSearch('?groupJoin=ab23cd56')).toBe('AB23CD56');
     expect(parseJoinSearch('?groupJoin=ab23cd56')).toBeNull();
     expect(cloudGroupJoinPath('ab23cd56')).toBe('#/group/join/AB23CD56');
+    expect(parseJoinHash('#/competition/join/ab23cd56')).toBeNull();
+    expect(parseCompetitionJoinHash('#/join/ab23cd56')).toBeNull();
+    expect(parseCompetitionJoinHash('#/competition/join/ab23cd56')).toBe('AB23CD56');
+    expect(parseCompetitionJoinSearch('?competitionJoin=ab23cd56')).toBe('AB23CD56');
+    expect(parseJoinSearch('?competitionJoin=ab23cd56')).toBeNull();
+    expect(cloudCompetitionJoinPath('ab23cd56')).toBe('#/competition/join/AB23CD56');
 
     const storage = memoryStorage();
     rememberPendingJoinCode('ab23cd56', storage);
     rememberPendingGroupJoinCode('xy23kmnp', storage);
+    rememberPendingCompetitionJoinCode('km23np45', storage);
     expect(storage.getItem(PENDING_JOIN_CODE_KEY)).toBe('AB23CD56');
     expect(storage.getItem(PENDING_GROUP_JOIN_CODE_KEY)).toBe('XY23KMNP');
+    expect(storage.getItem(PENDING_COMPETITION_JOIN_CODE_KEY)).toBe('KM23NP45');
     expect(
       resolveIncomingJoinIntent({
         hash: '#/join/ab23cd56',
@@ -95,11 +108,11 @@ describe('joinCode', () => {
     ).toEqual({ type: 'group', code: 'XY23KMNP' });
     expect(
       resolveIncomingJoinIntent({
-        hash: '#access_token=secret',
-        search: '?groupJoin=xy23kmnp',
+        hash: '#/competition/join/km23np45',
+        search: '',
         storage,
-      }).type
-    ).toBe('group');
+      })
+    ).toEqual({ type: 'competition', code: 'KM23NP45' });
   });
 
   it('monta redirectTo com base do GitHub Pages e query join', () => {
@@ -118,5 +131,12 @@ describe('joinCode', () => {
         groupJoinCode: 'xy23kmnp',
       })
     ).toBe('https://paulo-rozatto.github.io/volleybal-drafter/?groupJoin=XY23KMNP');
+    expect(
+      buildAuthRedirectTo({
+        origin: 'https://paulo-rozatto.github.io',
+        base: '/volleybal-drafter/',
+        competitionJoinCode: 'km23np45',
+      })
+    ).toBe('https://paulo-rozatto.github.io/volleybal-drafter/?competitionJoin=KM23NP45');
   });
 });

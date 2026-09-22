@@ -52,6 +52,28 @@ export const CLOUD_RPC_ERROR_MESSAGES = Object.freeze({
   GROUP_ID_IMMUTABLE: 'O encontro não pode mudar de grupo depois de criado.',
   GROUP_ACCESS_DENIED: 'Você não participa deste grupo.',
   JOIN_CODE_GENERATION_FAILED: 'Não foi possível gerar um código de convite. Tente de novo.',
+  COMPETITION_NOT_FOUND: 'Competição não encontrada.',
+  COMPETITION_JOIN_CODE_NOT_FOUND: 'Não encontramos uma competição com esse código.',
+  COMPETITION_JOIN_CODE_ROTATE_FORBIDDEN: 'Só o organizador ou um admin pode trocar o código da competição.',
+  COMPETITION_JOIN_CODE_ROTATE_REQUIRED: 'O código da competição só muda pela função de convite.',
+  COMPETITION_FORBIDDEN: 'Você não pode alterar esta competição.',
+  COMPETITION_STRUCTURE_VERSION_CONFLICT:
+    'A competição mudou em outro dispositivo. Recarregue e tente de novo.',
+  COMPETITION_FINISHED: 'Esta competição já está finalizada.',
+  COMPETITION_STATUS_FORBIDDEN: 'O status da competição só muda pelo fluxo de chave e finalização.',
+  COMPETITION_NOT_DRAFT: 'Só é possível alterar os times no rascunho.',
+  COMPETITION_TEAMS_LOCKED: 'Os times não podem ser alterados depois que a chave existe.',
+  COMPETITION_MATCH_NOT_FOUND: 'Partida da competição não encontrada.',
+  COMPETITION_MATCH_TEAMS_UNRESOLVED: 'A partida ainda não tem os dois times definidos.',
+  COMPETITION_MATCH_HISTORY_LOCKED:
+    'Não é possível alterar o histórico de uma partida por este fluxo. Limpe o placar dela primeiro.',
+  COMPETITION_SCORE_IMMUTABLE: 'O placar só pode ser gravado pela função de atualização de placar.',
+  COMPETITION_MATCH_HAS_HISTORY: 'Não é possível remover uma partida que já tem placar ou histórico.',
+  COMPETITION_ROLE_INVALID: 'Papel da competição inválido.',
+  COMPETITION_ROLE_FORBIDDEN: 'Você não pode alterar esse papel.',
+  COMPETITION_OWNER_IMMUTABLE: 'O organizador da competição não pode ser alterado nesta etapa.',
+  COMPETITION_MEMBER_NOT_FOUND: 'Essa pessoa não participa desta competição.',
+  COMPETITION_ACCESS_DENIED: 'Você não participa desta competição.',
 });
 
 export function rpcErrorCode(error) {

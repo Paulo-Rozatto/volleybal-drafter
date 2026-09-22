@@ -29,6 +29,9 @@ export default function CompetitionDetail({
   competition,
   players = [],
   syncPanel,
+  headerExtra = null,
+  canEditTeams = true,
+  canScore = true,
   onBack,
   onApplyOperation,
 }) {
@@ -46,15 +49,17 @@ export default function CompetitionDetail({
   const applyTeams = (operation) =>
     onApplyOperation?.((current) => operation(current, competition.id));
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setGenerateError(null);
-    const result = onApplyOperation?.((current) =>
-      generateCompetitionBracket(current, competition.id, {
-        seedTeamIds: seedTeamIdsFromTeams(competition.teams),
-      })
+    const result = await Promise.resolve(
+      onApplyOperation?.((current) =>
+        generateCompetitionBracket(current, competition.id, {
+          seedTeamIds: seedTeamIdsFromTeams(competition.teams),
+        })
+      )
     );
     if (!result?.ok) {
-      setGenerateError(result?.errors?.[0]?.message || 'Não foi possível gerar a chave.');
+      setGenerateError(result?.errors?.[0]?.message || result?.error?.message || 'Não foi possível gerar a chave.');
     }
   };
 
@@ -80,6 +85,7 @@ export default function CompetitionDetail({
         <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
           {summary.teamCountLabel} · {summary.phaseLabel}
         </p>
+        {headerExtra}
       </div>
 
       {syncPanel}
@@ -111,6 +117,7 @@ export default function CompetitionDetail({
       <section className="space-y-2">
         <h3 className="font-bold">Times e seeding</h3>
         <CompetitionTeamBuilder
+          readOnly={!canEditTeams}
           competition={competition}
           roster={players}
           onAddTeam={(memberIds) =>
@@ -136,7 +143,7 @@ export default function CompetitionDetail({
         />
       </section>
 
-      {showGenerate && (
+      {showGenerate && canEditTeams && (
         <div className="space-y-2">
           {blockedReason && (
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -214,6 +221,7 @@ export default function CompetitionDetail({
               stage={competition.stages[stageIndex]}
               showChampion={stageIndex === stageViews.length - 1 && Boolean(champion)}
               onOpenMatch={(slot) => {
+                if (!canScore) return;
                 matchOpenerRef.current = document.activeElement;
                 setOpenSlot(slot);
               }}
@@ -226,7 +234,7 @@ export default function CompetitionDetail({
         </section>
       ))}
 
-      {openSlot && (
+      {openSlot && canScore && (
         <CompetitionMatchEditor
           competition={competition}
           slot={openSlot}

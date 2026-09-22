@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { signInWithMagicLink, signOut } from './supabase/auth.js';
-import { rememberPendingGroupJoinCode, rememberPendingJoinCode } from './supabase/joinCode.js';
+import { rememberPendingCompetitionJoinCode, rememberPendingGroupJoinCode, rememberPendingJoinCode } from './supabase/joinCode.js';
 
 export default function AuthPanel({
   configured,
@@ -8,6 +8,7 @@ export default function AuthPanel({
   user,
   pendingJoinCode,
   pendingGroupJoinCode,
+  pendingCompetitionJoinCode,
   onSignedOut,
 }) {
   const [email, setEmail] = useState('');
@@ -75,9 +76,11 @@ export default function AuthPanel({
         setStatus('');
         if (pendingJoinCode) rememberPendingJoinCode(pendingJoinCode);
         if (pendingGroupJoinCode) rememberPendingGroupJoinCode(pendingGroupJoinCode);
+        if (pendingCompetitionJoinCode) rememberPendingCompetitionJoinCode(pendingCompetitionJoinCode);
         const result = await signInWithMagicLink(email, {
-          joinCode: pendingGroupJoinCode ? undefined : pendingJoinCode,
+          joinCode: pendingGroupJoinCode || pendingCompetitionJoinCode ? undefined : pendingJoinCode,
           groupJoinCode: pendingGroupJoinCode,
+          competitionJoinCode: pendingCompetitionJoinCode,
         });
         setBusy(false);
         setStatus(
@@ -90,7 +93,7 @@ export default function AuthPanel({
       <h3 className="font-bold text-sm">Entrar nos encontros online</h3>
       <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
         O sorteio, o Gist e as competições continuam sem conta. A conta vale para criar e
-        participar de encontros compartilhados.
+        participar de encontros e competições compartilhados.
       </p>
       {pendingJoinCode ? (
         <p className="text-sm font-semibold">
@@ -100,6 +103,11 @@ export default function AuthPanel({
       {pendingGroupJoinCode ? (
         <p className="text-sm font-semibold">
           Depois do login você entra no grupo {pendingGroupJoinCode}.
+        </p>
+      ) : null}
+      {pendingCompetitionJoinCode ? (
+        <p className="text-sm font-semibold">
+          Depois do login você entra na competição {pendingCompetitionJoinCode}.
         </p>
       ) : null}
       <input
