@@ -103,6 +103,16 @@ export const CLOUD_RPC_ERROR_MESSAGES = Object.freeze({
   GROUP_MESSAGE_FORBIDDEN: 'Você só pode editar ou apagar a própria mensagem.',
   GROUP_MESSAGE_DELETED: 'Esta mensagem já foi removida.',
   GROUP_MESSAGE_IMMUTABLE: 'Não é possível alterar o remetente desta mensagem.',
+  GROUP_TIMEZONE_INVALID: 'O fuso horário do grupo é inválido.',
+  AVAILABILITY_RANGE_INVALID: 'O intervalo de disponibilidade é inválido.',
+  AVAILABILITY_SLOT_INVALID: 'Esse horário não pode ser marcado. Use blocos de 30 minutos, só no futuro (até 90 dias).',
+  PROPOSAL_NOT_FOUND: 'Proposta de jogo não encontrada.',
+  PROPOSAL_FORBIDDEN: 'Você não pode alterar esta proposta.',
+  PROPOSAL_CANCELLED: 'Esta proposta foi cancelada.',
+  PROPOSAL_ALREADY_LINKED: 'Esta proposta já virou um encontro.',
+  PROPOSAL_TIME_INVALID: 'Confira o horário, a duração e o título da proposta.',
+  PROPOSAL_RESPONSE_INVALID: 'Resposta inválida. Use Vou, Talvez ou Não vou.',
+  PROPOSAL_VERSION_CONFLICT: 'A proposta mudou em outro dispositivo. Recarregue e tente de novo.',
 });
 
 export function rpcErrorCode(error) {

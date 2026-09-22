@@ -32,7 +32,11 @@ export default function CloudGroupsView({
   user,
   pendingGroupJoinCode,
   openGroupId,
+  initialSection,
+  openProposalId,
   onOpenGroup,
+  onSectionChange,
+  onOpenProposal,
   onOpenSession,
   onOpenCompetition,
 }) {
@@ -297,6 +301,10 @@ export default function CloudGroupsView({
         onReload={() => refreshGroup(group?.id ?? openGroupId, { keepGroup: true })}
         onOpenSession={onOpenSession}
         onOpenCompetition={onOpenCompetition}
+        initialSection={initialSection}
+        openProposalId={openProposalId}
+        onSectionChange={onSectionChange}
+        onOpenProposal={onOpenProposal}
         onLeftGroup={() => {
           onOpenGroup?.(null);
           refreshList();

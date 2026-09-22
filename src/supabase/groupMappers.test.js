@@ -30,6 +30,7 @@ describe('group mappers', () => {
       name: 'Vôlei Quinta',
       description: null,
       joinCode: 'AB23CD56',
+      timezone: 'America/Sao_Paulo',
       myRole: 'owner',
       memberCount: 1,
     });

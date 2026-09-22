@@ -124,7 +124,7 @@ export function padrePwaPlugin(base = '/volleybal-drafter/') {
         .map((file) => relative(outDir, file).replace(/\\/g, '/'))
         .filter((file) => !file.endsWith('.map') && file !== 'sw.js');
       const precache = [base, ...files.map((file) => `${base}${file}`)];
-      const sw = `const CACHE = 'padre-shell-v2';
+      const sw = `const CACHE = 'padre-shell-v3';
 const PRECACHE = ${JSON.stringify(precache)};
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)).then(() => self.skipWaiting()));

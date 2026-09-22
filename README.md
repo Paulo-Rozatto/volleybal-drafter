@@ -11,8 +11,11 @@ A marca visível é **PaDre**. O repositório e o caminho público ainda usam `v
 - Encontros com times, rodadas e placar
 - Competições (eliminatória, suíço, double elimination e combinações)
 - Grupos (a turma) com ranking
+- Disponibilidade em grupo, propostas de jogo e RSVP (Community Beta)
+- Criação de encontro a partir de uma proposta confirmada (Community Beta)
 - Histórico e estatísticas do jogador vinculado
 - Convites por código e atualização em tempo real
+- Comunidade Beta: amigos, perfis sociais, estatísticas globais e chat de grupo
 
 ## Arquitetura
 

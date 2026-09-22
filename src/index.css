@@ -170,3 +170,8 @@ body {
     animation: none;
   }
 }
+
+.availability-grid th,
+.availability-grid td {
+  min-width: 2.4rem;
+}

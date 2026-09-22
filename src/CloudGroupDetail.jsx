@@ -14,6 +14,7 @@ import {
   rotateGroupJoinCode,
   setGroupMemberRole,
   updateGroup,
+  updateGroupTimezone,
 } from './supabase/groupApi.js';
 import CopyInviteButton from './ui/CopyInviteButton.jsx';
 import EmptyState from './ui/EmptyState.jsx';
@@ -24,6 +25,8 @@ import Tabs from './ui/Tabs.jsx';
 import GroupChatPanel from './community/GroupChatPanel.jsx';
 import { isCommunityBetaEnabled } from './community/flags.js';
 import { formatSessionDate } from './teamGameSessions.js';
+import GroupScheduleView from './schedule/GroupScheduleView.jsx';
+import { COMMON_GROUP_TIMEZONES } from './domain/groupAvailability.js';
 
 function memberCountLabel(count) {
   return `${count} ${count === 1 ? 'membro' : 'membros'}`;
@@ -46,6 +49,10 @@ export function CloudGroupOpenPanel({
   onOpenSession,
   onOpenCompetition,
   onLeftGroup,
+  initialSection,
+  openProposalId,
+  onSectionChange,
+  onOpenProposal,
 }) {
   if (groupLoading) {
     return <LoadingState label="Carregando grupo..." />;
@@ -77,6 +84,10 @@ export function CloudGroupOpenPanel({
       onOpenSession={onOpenSession}
       onOpenCompetition={onOpenCompetition}
       onLeftGroup={onLeftGroup}
+      initialSection={initialSection}
+      openProposalId={openProposalId}
+      onSectionChange={onSectionChange}
+      onOpenProposal={onOpenProposal}
     />
   );
 }
@@ -95,17 +106,29 @@ export default function CloudGroupDetail({
   onOpenSession,
   onOpenCompetition,
   onLeftGroup,
+  initialSection,
+  openProposalId,
+  onSectionChange,
+  onOpenProposal,
 }) {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [section, setSection] = useState('grupo');
+  const [section, setSection] = useState(initialSection || 'grupo');
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [pendingRemove, setPendingRemove] = useState(null);
+  const [pendingTimezone, setPendingTimezone] = useState(null);
   const [rankingUserId, setRankingUserId] = useState(null);
   const [name, setName] = useState(group.name);
   const [description, setDescription] = useState(group.description ?? '');
+  const [timezone, setTimezone] = useState(group.timezone || 'America/Sao_Paulo');
   const manage = canManageGroup(group.myRole);
+  const communityBeta = isCommunityBetaEnabled();
+
+  function changeSection(next) {
+    setSection(next);
+    onSectionChange?.(next);
+  }
   const joinHref = `${globalThis.location?.origin ?? ''}${import.meta.env.BASE_URL ?? '/'}${cloudGroupJoinPath(group.joinCode)}`;
 
   async function run(action, { left = false } = {}) {
@@ -143,14 +166,15 @@ export default function CloudGroupDetail({
       <Tabs
         label="Seções do grupo"
         value={section}
-        onChange={setSection}
+        onChange={changeSection}
         options={[
           { id: 'grupo', label: 'Visão geral' },
           { id: 'encontros', label: 'Encontros' },
           { id: 'competicoes', label: 'Competições' },
           { id: 'ranking', label: 'Ranking' },
-          ...(isCommunityBetaEnabled() ? [{ id: 'chat', label: 'Chat' }] : []),
           { id: 'membros', label: 'Membros' },
+          ...(communityBeta ? [{ id: 'chat', label: 'Chat' }] : []),
+          ...(communityBeta ? [{ id: 'disponibilidade', label: 'Disponibilidade' }] : []),
         ]}
       />
 
@@ -164,8 +188,18 @@ export default function CloudGroupDetail({
         />
       ) : null}
 
-      {section === 'chat' && isCommunityBetaEnabled() ? (
+      {section === 'chat' && communityBeta ? (
         <GroupChatPanel group={group} user={user} />
+      ) : null}
+
+      {section === 'disponibilidade' && communityBeta ? (
+        <GroupScheduleView
+          group={group}
+          user={user}
+          openProposalId={openProposalId}
+          onOpenProposal={onOpenProposal}
+          onOpenSession={onOpenSession}
+        />
       ) : null}
 
       {section === 'competicoes' ? (
@@ -221,7 +255,13 @@ export default function CloudGroupDetail({
               event.preventDefault();
               run(async () => {
                 const result = await updateGroup(group.id, { name, description });
-                if (result.ok) setEditing(false);
+                if (!result.ok) return result;
+                if (timezone !== (group.timezone || 'America/Sao_Paulo')) {
+                  setPendingTimezone(timezone);
+                  setEditing(false);
+                  return result;
+                }
+                setEditing(false);
                 return result;
               });
             }}
@@ -249,6 +289,25 @@ export default function CloudGroupDetail({
                 borderColor: 'var(--border-color)',
               }}
             />
+            <label className="block text-sm font-semibold">
+              Fuso do grupo
+              <select
+                value={timezone}
+                onChange={(event) => setTimezone(event.target.value)}
+                className="mt-1 w-full border p-2 rounded text-sm outline-none"
+                style={{
+                  backgroundColor: 'var(--bg-app)',
+                  color: 'var(--text-main)',
+                  borderColor: 'var(--border-color)',
+                }}
+              >
+                {COMMON_GROUP_TIMEZONES.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -264,6 +323,7 @@ export default function CloudGroupDetail({
                   setEditing(false);
                   setName(group.name);
                   setDescription(group.description ?? '');
+                  setTimezone(group.timezone || 'America/Sao_Paulo');
                 }}
                 className="text-sm font-bold cursor-pointer"
                 style={{ color: 'var(--primary)' }}
@@ -285,7 +345,8 @@ export default function CloudGroupDetail({
               </p>
             )}
             <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-              {memberCountLabel(group.memberCount)} · seu papel: {groupRoleLabel(group.myRole)}
+              {memberCountLabel(group.memberCount)} · seu papel: {groupRoleLabel(group.myRole)} · fuso{' '}
+              {group.timezone || 'America/Sao_Paulo'}
             </p>
             {manage ? (
               <button
@@ -345,7 +406,7 @@ export default function CloudGroupDetail({
                 type="button"
                 onClick={() => {
                   setRankingUserId(member.userId);
-                  setSection('ranking');
+                  changeSection('ranking');
                 }}
                 className="text-sm text-left font-semibold cursor-pointer"
                 style={{ color: 'var(--primary)' }}
@@ -468,6 +529,23 @@ export default function CloudGroupDetail({
             run(() => leaveGroup(group.id), { left: true });
           }}
           onCancel={() => setConfirmLeave(false)}
+        />
+      ) : null}
+      {pendingTimezone ? (
+        <ConfirmDialog
+          titleId="group-timezone-title"
+          title="Alterar fuso do grupo?"
+          message="Os horários existentes serão exibidos no novo fuso. Os timestamps gravados não mudam."
+          confirmLabel="Alterar fuso"
+          onConfirm={() => {
+            const next = pendingTimezone;
+            setPendingTimezone(null);
+            run(() => updateGroupTimezone(group.id, next));
+          }}
+          onCancel={() => {
+            setPendingTimezone(null);
+            setTimezone(group.timezone || 'America/Sao_Paulo');
+          }}
         />
       ) : null}
       {pendingRemove ? (

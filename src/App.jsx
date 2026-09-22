@@ -24,6 +24,7 @@ import { signOut } from './supabase/auth.js';
 import { hasBrowserLegacyHint } from './hasBrowserLegacyHint.js';
 import { isCommunityBetaEnabled } from './community/flags.js';
 import { communityHash, parseCommunityHash, playerProfileHash } from './community/hash.js';
+import { groupProposalHash, groupScheduleHash, parseGroupScheduleHash } from './schedule/hash.js';
 import AppShell from './ui/AppShell.jsx';
 import Button from './ui/Button.jsx';
 import LoadingState from './ui/LoadingState.jsx';
@@ -83,6 +84,8 @@ export default function App() {
   const auth = useAuth();
   const [cloudSessionId, setCloudSessionId] = useState(null);
   const [cloudGroupId, setCloudGroupId] = useState(null);
+  const [groupScheduleProposalId, setGroupScheduleProposalId] = useState(null);
+  const [groupOpenSection, setGroupOpenSection] = useState(null);
   const [cloudCompetitionId, setCloudCompetitionId] = useState(null);
   const [communitySection, setCommunitySection] = useState('friends');
   const [playerProfileId, setPlayerProfileId] = useState(null);
@@ -156,13 +159,21 @@ export default function App() {
     } else if ((globalThis.location?.hash ?? '') === '#/migration' || (globalThis.location?.hash ?? '').startsWith('#/migration')) {
       setCurrentView('migration');
     } else if (isCommunityBetaEnabled()) {
-      const community = parseCommunityHash(globalThis.location?.hash ?? '');
-      if (community?.view === 'player') {
-        setPlayerProfileId(community.playerId);
-        setCurrentView('player');
-      } else if (community?.view === 'community') {
-        setCommunitySection(community.section);
-        setCurrentView('community');
+      const schedule = parseGroupScheduleHash(globalThis.location?.hash ?? '');
+      if (schedule) {
+        setCloudGroupId(schedule.groupId);
+        setGroupScheduleProposalId(schedule.proposalId);
+        setGroupOpenSection('disponibilidade');
+        setCurrentView('groups');
+      } else {
+        const community = parseCommunityHash(globalThis.location?.hash ?? '');
+        if (community?.view === 'player') {
+          setPlayerProfileId(community.playerId);
+          setCurrentView('player');
+        } else if (community?.view === 'community') {
+          setCommunitySection(community.section);
+          setCurrentView('community');
+        }
       }
     }
 
@@ -194,6 +205,14 @@ export default function App() {
         return;
       }
       if (isCommunityBetaEnabled()) {
+        const schedule = parseGroupScheduleHash(hash);
+        if (schedule) {
+          setCloudGroupId(schedule.groupId);
+          setGroupScheduleProposalId(schedule.proposalId);
+          setGroupOpenSection('disponibilidade');
+          setCurrentView('groups');
+          return;
+        }
         const community = parseCommunityHash(hash);
         if (community?.view === 'player') {
           setPlayerProfileId(community.playerId);
@@ -225,6 +244,8 @@ export default function App() {
     clearPendingGroupJoinCode();
     setPendingGroupJoinCode(null);
     setCloudGroupId(groupId);
+    setGroupScheduleProposalId(null);
+    setGroupOpenSection(null);
     setCurrentView('groups');
     const url = new URL(globalThis.location.href);
     url.searchParams.delete('groupJoin');
@@ -608,7 +629,45 @@ export default function App() {
             user={auth.user}
             pendingGroupJoinCode={pendingGroupJoinCode}
             openGroupId={cloudGroupId}
-            onOpenGroup={setCloudGroupId}
+            initialSection={groupOpenSection}
+            openProposalId={groupScheduleProposalId}
+            onOpenGroup={(groupId) => {
+              setCloudGroupId(groupId);
+              if (!groupId) {
+                setGroupOpenSection(null);
+                setGroupScheduleProposalId(null);
+                if (parseGroupScheduleHash(globalThis.location?.hash ?? '')) {
+                  const url = new URL(globalThis.location.href);
+                  url.hash = '';
+                  globalThis.history?.replaceState?.({}, '', `${url.pathname}${url.search}`);
+                }
+              } else if (!parseGroupScheduleHash(globalThis.location?.hash ?? '')) {
+                setGroupOpenSection(null);
+                setGroupScheduleProposalId(null);
+              }
+            }}
+            onSectionChange={(section) => {
+              setGroupOpenSection(section);
+              if (!cloudGroupId || !isCommunityBetaEnabled()) return;
+              if (section === 'disponibilidade') {
+                globalThis.location.hash = groupScheduleProposalId
+                  ? groupProposalHash(cloudGroupId, groupScheduleProposalId)
+                  : groupScheduleHash(cloudGroupId);
+                return;
+              }
+              if (parseGroupScheduleHash(globalThis.location?.hash ?? '')) {
+                const url = new URL(globalThis.location.href);
+                url.hash = '';
+                globalThis.history?.replaceState?.({}, '', `${url.pathname}${url.search}`);
+              }
+            }}
+            onOpenProposal={(proposalId) => {
+              setGroupScheduleProposalId(proposalId);
+              if (!cloudGroupId || !isCommunityBetaEnabled()) return;
+              globalThis.location.hash = proposalId
+                ? groupProposalHash(cloudGroupId, proposalId)
+                : groupScheduleHash(cloudGroupId);
+            }}
             onOpenSession={(sessionId) => {
               setCloudSessionId(sessionId);
               setCurrentView('sessions');

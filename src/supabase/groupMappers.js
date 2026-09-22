@@ -43,6 +43,7 @@ export function mapGroup({ group, members = [], myUserId } = {}) {
     createdBy: group.created_by,
     createdAt: group.created_at,
     updatedAt: group.updated_at,
+    timezone: group.timezone || 'America/Sao_Paulo',
     members: mappedMembers,
     memberCount: mappedMembers.length,
     myRole: myMembership?.role ?? null,

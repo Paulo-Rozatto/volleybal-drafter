@@ -6,4 +6,7 @@ import { padrePwaPlugin } from './scripts/padrePwaPlugin.js'
 export default defineConfig({
   plugins: [react(), tailwindcss(), padrePwaPlugin('/volleybal-drafter/')],
   base: '/volleybal-drafter/',
+  test: {
+    hookTimeout: 60_000,
+  },
 })

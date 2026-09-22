@@ -41,7 +41,7 @@ export async function listMyGroups(myUserId) {
     const [groupsResult, membersResult] = await Promise.all([
       supabase
         .from('groups')
-        .select('id, name, description, join_code, created_by, created_at, updated_at')
+        .select('id, name, description, join_code, timezone, created_by, created_at, updated_at')
         .order('name'),
       supabase.from('group_members').select('group_id, user_id, role, joined_at'),
     ]);
@@ -127,6 +127,15 @@ export async function rotateGroupJoinCode(groupId) {
   const result = await rpcOk('rotate_group_join_code', { p_group_id: groupId });
   if (!result.ok) return { ...result, joinCode: null };
   return { ok: true, joinCode: result.data };
+}
+
+export async function updateGroupTimezone(groupId, timezone) {
+  const result = await rpcOk('update_group_timezone', {
+    p_group_id: groupId,
+    p_timezone: timezone,
+  });
+  if (!result.ok) return { ...result, group: null };
+  return { ok: true, group: result.data };
 }
 
 export async function updateGroup(groupId, { name, description = null }) {
