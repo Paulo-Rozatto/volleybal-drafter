@@ -142,9 +142,9 @@ describe('isolamento da análise no encontro', () => {
 
     const view = readFileSync(new URL('./SessionPerformanceView.jsx', import.meta.url), 'utf8');
     const presentation = readFileSync(new URL('./sessionPerformancePresentation.js', import.meta.url), 'utf8');
-    const detail = readFileSync(new URL('./GameSessionDetail.jsx', import.meta.url), 'utf8');
+    const detail = readFileSync(new URL('./CloudSessionDetail.jsx', import.meta.url), 'utf8');
     const app = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-    const sessionsView = readFileSync(new URL('./GameSessionsView.jsx', import.meta.url), 'utf8');
+    const sessionsView = readFileSync(new URL('./CloudSessionsView.jsx', import.meta.url), 'utf8');
     const combined = `${view}\n${presentation}`;
 
     expect(combined).not.toMatch(/localStorage/);
@@ -158,9 +158,9 @@ describe('isolamento da análise no encontro', () => {
     expect(detail).toContain('useState(SESSION_DETAIL_DEFAULT_VIEW)');
     expect(detail).toContain('<SessionPerformanceView');
     expect(detail).toContain('document={document}');
-    expect(sessionsView).toContain('document={document}');
-    expect(app).toContain('<GameSessionsView');
-    expect(app).toContain('document={gameSessions}');
+    expect(sessionsView).toContain('<CloudSessionDetail');
+    expect(app).toContain('<CloudSessionsView');
+    expect(app).not.toMatch(/GameSessionsView/);
     expect(combined).not.toMatch(/neste encontro/);
     expect(readFileSync(new URL('./domain/sessionPerformance.test.js', import.meta.url), 'utf8')).not.toMatch(
       /neste encontro/

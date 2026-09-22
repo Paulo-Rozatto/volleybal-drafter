@@ -69,7 +69,7 @@ describe('cloud competition panel', () => {
     );
     expect(erro).toContain('Falha ao abrir');
     expect(erro).toContain('Recarregar');
-    expect(erro).toContain('Competições online');
+    expect(erro).toContain('Competições');
 
     const detail = renderToStaticMarkup(
       <CloudCompetitionOpenPanel

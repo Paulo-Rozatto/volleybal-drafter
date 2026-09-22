@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import AuthPanel from './AuthPanel.jsx';
-import CloudProfileView from './CloudProfileView.jsx';
 import CloudSessionDetail from './CloudSessionDetail.jsx';
 import CloudSessionCreateForm from './CloudSessionCreateForm.jsx';
 import {
@@ -40,7 +39,7 @@ export function CloudSessionOpenPanel({
             className="text-sm font-bold cursor-pointer"
             style={{ color: 'var(--primary)' }}
           >
-            ← Encontros online
+            ← Encontros
           </button>
           <button
             type="button"
@@ -63,7 +62,7 @@ export function CloudSessionOpenPanel({
         className="text-sm font-bold cursor-pointer"
         style={{ color: 'var(--primary)' }}
       >
-        ← Encontros online
+        ← Encontros
       </button>
       <CloudSessionDetail session={session} user={user} onReload={onReload} />
     </div>
@@ -77,7 +76,7 @@ export default function CloudSessionsView({
   pendingJoinCode,
   openSessionId,
   onOpenSession,
-  onOpenMigration,
+  legacyNotice = null,
 }) {
   const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(null);
@@ -184,7 +183,7 @@ export default function CloudSessionsView({
   if (!user) {
     return (
       <div className="space-y-4">
-        <h2 className="text-xl font-bold">Encontros online</h2>
+        <h2 className="text-xl font-bold">Encontros</h2>
         <AuthPanel
           configured={configured}
           ready={ready}
@@ -211,9 +210,9 @@ export default function CloudSessionsView({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">Encontros online</h2>
-      <AuthPanel configured={configured} ready={ready} user={user} onOpenMigration={onOpenMigration} />
-      {user ? <CloudProfileView user={user} /> : null}
+      <h2 className="text-xl font-bold">Encontros</h2>
+      <AuthPanel configured={configured} ready={ready} user={user} />
+      {legacyNotice}
 
       <CloudSessionCreateForm
         user={user}
@@ -227,7 +226,7 @@ export default function CloudSessionsView({
       <div className="space-y-2">
         {sessions.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Você ainda não participa de um encontro online.
+            Você ainda não participa de um encontro.
           </p>
         ) : (
           sessions.map((item) => (

@@ -8,7 +8,12 @@ export default function LegacyMigrationPreview({ plan, fingerprint, sourceType }
     >
       <h3 className="font-bold text-sm">Análise (nenhuma escrita)</h3>
       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-        Origem: {sourceType === 'gist' ? 'Gist carregado + cache local' : 'localStorage deste navegador'}
+        Origem:{' '}
+        {sourceType === 'gist'
+          ? 'Gist antigo (somente leitura)'
+          : sourceType === 'unknown'
+            ? 'Snapshot JSON'
+            : 'Dados antigos deste navegador'}
       </p>
       {fingerprint ? (
         <p className="text-xs break-all" style={{ color: 'var(--text-muted)' }}>

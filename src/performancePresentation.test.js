@@ -386,10 +386,9 @@ describe('isolamento da tela', () => {
     expect(combined).not.toMatch(/gistService/);
     expect(combined).not.toMatch(/persistLocalGameSessions/);
     expect(combined).not.toMatch(/applyGameSessionsOperation/);
-    expect(app).toMatch('<PerformanceHub');
-    expect(app).toMatch('document={gameSessions}');
-    expect(app).toMatch('roster={players}');
-    expect(app).toMatch('competitionsDocument={competitions}');
+    expect(app).toMatch('<CloudProfileView');
+    expect(app).not.toMatch('<PerformanceHub');
+    expect(app).not.toMatch('document={gameSessions}');
     expect(app).not.toMatch(/PerformanceHub[\s\S]{0,400}onApplyOperation/);
   });
 });

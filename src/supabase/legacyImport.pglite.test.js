@@ -920,4 +920,53 @@ describe('etapa 7 legacy import', () => {
         .rows[0].n
     ).toBe(1);
   });
+
+  it('entidade importada aceita RPC normal; legacy_source_id não congela', async () => {
+    const players = [
+      guest('live-1', 'A'),
+      guest('live-2', 'B'),
+      guest('live-3', 'C'),
+      guest('live-4', 'D'),
+    ];
+    await importPlayersOf(db, andre, players);
+    const session = scoredSession({ id: 'sess-imported-live', status: 'in_progress', players });
+    const imported = await importSession(db, andre, session);
+    const before = (
+      await db.query('select join_code, legacy_source_id, status from public.sessions where id = $1', [
+        imported.cloud_id,
+      ])
+    ).rows[0];
+    expect(before.legacy_source_id).toBe(session.id);
+    const rotated = await asUser(db, andre, () =>
+      db.query('select public.rotate_session_join_code($1) as code', [imported.cloud_id])
+    );
+    expect(rotated.rows[0].code).toBeTruthy();
+    expect(rotated.rows[0].code).not.toBe(before.join_code);
+    const after = (
+      await db.query('select join_code, legacy_source_id, status from public.sessions where id = $1', [
+        imported.cloud_id,
+      ])
+    ).rows[0];
+    expect(after.legacy_source_id).toBe(session.id);
+    expect(after.status).toBe('in_progress');
+
+    const draft = createDraftCompetition(
+      { name: 'Comp live', date: '2026-09-12', format: { teamSize: 2 } },
+      { now: () => new Date(ISO) }
+    );
+    const importedComp = await importCompetition(db, andre, draft);
+    const codeBefore = (
+      await db.query('select join_code, legacy_source_id from public.competitions where id = $1', [
+        importedComp.cloud_id,
+      ])
+    ).rows[0];
+    const rotatedComp = await asUser(db, andre, () =>
+      db.query('select public.rotate_competition_join_code($1) as code', [importedComp.cloud_id])
+    );
+    expect(rotatedComp.rows[0].code).not.toBe(codeBefore.join_code);
+    expect(
+      (await db.query('select legacy_source_id from public.competitions where id = $1', [importedComp.cloud_id]))
+        .rows[0].legacy_source_id
+    ).toBe(draft.id);
+  });
 });

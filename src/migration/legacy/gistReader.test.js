@@ -1,24 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  GIST_EXPECTED_REVISION_REQUIRED_MESSAGE,
   GIST_ID,
   loadGistState,
   loadPlayersFromGist,
-  patchGistFiles,
-  saveGistState,
-  savePlayersToGist,
-} from './gistService.js';
-import { COMPETITIONS_FILENAME, GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constants.js';
+} from './gistReader.js';
+import { COMPETITIONS_FILENAME, GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from '../../persistence/constants.js';
 import {
   createEmptyGameSessionsDocument,
-  serializeGameSessionsDocument,
-} from './persistence/gameSessionsDocument.js';
+} from '../../persistence/gameSessionsDocument.js';
 import {
   createEmptyCompetitionDocument,
-  serializeCompetitionsDocument,
-} from './persistence/competitionsDocument.js';
+} from '../../persistence/competitionsDocument.js';
 
-const TOKEN = 'ghp_test_token_secret';
 const ISO = '2026-09-12T18:00:00.000Z';
 
 function v1DraftSession(id = 's1') {
@@ -53,33 +46,6 @@ function gistPayload(files, extras = {}) {
 
 function mockFetch(response) {
   return vi.fn(async () => response);
-}
-
-function mockFetchQueue(responses) {
-  const queue = [...responses];
-  return vi.fn(async () => {
-    const next = queue.shift();
-    if (next == null) {
-      throw new Error('fetch inesperado');
-    }
-    return typeof next === 'function' ? next() : next;
-  });
-}
-
-function captureConsole() {
-  const lines = [];
-  const methods = ['log', 'info', 'warn', 'error', 'debug'];
-  const spies = methods.map((method) =>
-    vi.spyOn(console, method).mockImplementation((...args) => {
-      lines.push(args.map(String).join(' '));
-    })
-  );
-  return {
-    lines,
-    restore() {
-      spies.forEach((spy) => spy.mockRestore());
-    },
-  };
 }
 
 afterEach(() => {
@@ -542,168 +508,5 @@ describe('arquivos truncados pela API', () => {
 
     await expect(loadPlayersFromGist({ fetchImpl })).resolves.toEqual(players);
     expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([gistApiUrl, RAW_PLAYERS]);
-  });
-});
-
-describe('patchGistFiles e saveGistState', () => {
-  it('salva os dois arquivos em um único PATCH depois do GET de preflight', async () => {
-    const players = [{ id: 'p1' }];
-    const gameSessions = createEmptyGameSessionsDocument();
-    const fetchImpl = mockFetchQueue([
-      jsonResponse(gistPayload({})),
-      jsonResponse({ id: GIST_ID, history: [{ version: 'rev-after' }] }),
-    ]);
-
-    const saved = await saveGistState({
-      players,
-      gameSessions,
-      expectedRevision: 'version:rev-test',
-      token: TOKEN,
-      fetchImpl,
-    });
-
-    expect(saved.revision).toBe('version:rev-after');
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(fetchImpl.mock.calls[0][1].method).toBeUndefined();
-    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBeUndefined();
-    expect(fetchImpl.mock.calls[1][1].method).toBe('PATCH');
-    const body = JSON.parse(fetchImpl.mock.calls[1][1].body);
-    expect(Object.keys(body.files).sort()).toEqual(
-      [COMPETITIONS_FILENAME, GAME_SESSIONS_FILENAME, PLAYERS_FILENAME].sort()
-    );
-    expect(JSON.parse(body.files[PLAYERS_FILENAME].content)).toEqual(players);
-    expect(body.files[GAME_SESSIONS_FILENAME].content).toBe(
-      serializeGameSessionsDocument(gameSessions)
-    );
-    expect(JSON.parse(body.files[GAME_SESSIONS_FILENAME].content)).toEqual(gameSessions);
-    expect(body.files[COMPETITIONS_FILENAME].content).toBe(
-      serializeCompetitionsDocument(createEmptyCompetitionDocument())
-    );
-  });
-
-  it('rejeita PATCH de documento V1 antes do fetch e deixa players.json intacto', async () => {
-    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
-
-    await expect(
-      saveGistState({
-        players: [{ id: 'p1', name: 'Erik' }],
-        gameSessions: { schemaVersion: 1, sessions: [] },
-        token: TOKEN,
-        fetchImpl,
-      })
-    ).rejects.toThrow('Versão de schema de encontros não suportada: 1.');
-
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it('rejeita PATCH de documento V2 inválido antes do fetch', async () => {
-    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
-
-    await expect(
-      saveGistState({
-        players: [{ id: 'p1', name: 'Erik' }],
-        gameSessions: {
-          schemaVersion: 2,
-          sessions: [
-            {
-              id: 's1',
-              date: '2026-09-12',
-              name: null,
-              status: 'archived',
-              createdAt: ISO,
-              updatedAt: ISO,
-              format: { teamSize: 2, teamCount: 2 },
-              teams: [],
-              rounds: [],
-            },
-          ],
-        },
-        token: TOKEN,
-        fetchImpl,
-      })
-    ).rejects.toThrow('O status do encontro precisa ser rascunho, em andamento ou finalizado.');
-
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it('permite PATCH com somente um arquivo e omite os demais', async () => {
-    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
-    await patchGistFiles(
-      { [GAME_SESSIONS_FILENAME]: createEmptyGameSessionsDocument() },
-      TOKEN,
-      { fetchImpl }
-    );
-
-    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(body.files).toHaveProperty(GAME_SESSIONS_FILENAME);
-    expect(body.files).not.toHaveProperty(PLAYERS_FILENAME);
-  });
-
-  it('rejeita null e undefined para não apagar arquivos no Gist', async () => {
-    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
-
-    await expect(
-      patchGistFiles({ [PLAYERS_FILENAME]: null }, TOKEN, { fetchImpl })
-    ).rejects.toThrow('Não é permitido enviar players.json como null ou undefined.');
-
-    await expect(
-      patchGistFiles({ [GAME_SESSIONS_FILENAME]: undefined }, TOKEN, { fetchImpl })
-    ).rejects.toThrow('Não é permitido enviar game-sessions.json como null ou undefined.');
-
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it('exige revisão esperada antes de qualquer fetch', async () => {
-    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
-    await expect(
-      patchGistFiles({ [PLAYERS_FILENAME]: [] }, '', { fetchImpl })
-    ).rejects.toThrow('GitHub Personal Access Token is required to save.');
-    await expect(
-      saveGistState({
-        players: [],
-        gameSessions: createEmptyGameSessionsDocument(),
-        token: TOKEN,
-        fetchImpl,
-      })
-    ).rejects.toThrow(GIST_EXPECTED_REVISION_REQUIRED_MESSAGE);
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it('propaga erro HTTP no PATCH', async () => {
-    const fetchImpl = mockFetch(jsonResponse({}, { status: 401, statusText: 'Unauthorized' }));
-    await expect(
-      patchGistFiles({ [PLAYERS_FILENAME]: [] }, TOKEN, { fetchImpl })
-    ).rejects.toThrow('Falha ao atualizar o Gist (HTTP 401 Unauthorized).');
-  });
-
-  it('não registra o token em logs', async () => {
-    const fetchImpl = mockFetchQueue([
-      jsonResponse(gistPayload({})),
-      jsonResponse({ id: GIST_ID, history: [{ version: 'rev-after' }] }),
-      jsonResponse({ id: GIST_ID }),
-    ]);
-    const consoleCapture = captureConsole();
-
-    try {
-      await saveGistState({
-        players: [],
-        gameSessions: createEmptyGameSessionsDocument(),
-        expectedRevision: 'version:rev-test',
-        token: TOKEN,
-        fetchImpl,
-      });
-      await patchGistFiles({ [PLAYERS_FILENAME]: [] }, TOKEN, { fetchImpl });
-    } finally {
-      consoleCapture.restore();
-    }
-
-    expect(consoleCapture.lines.join('\n')).not.toContain(TOKEN);
-  });
-
-  it('mantém o wrapper savePlayersToGist sem incluir game-sessions.json', async () => {
-    const fetchImpl = mockFetch(jsonResponse({ id: GIST_ID }));
-    await savePlayersToGist([{ id: 'p1' }], TOKEN, { fetchImpl });
-    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(Object.keys(body.files)).toEqual([PLAYERS_FILENAME]);
   });
 });

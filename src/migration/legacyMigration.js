@@ -639,6 +639,38 @@ export function serializeLegacySnapshot({ players, sessions, competitions }) {
   );
 }
 
+export function parseLegacySnapshotJson(raw) {
+  let parsed;
+  try {
+    parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    throw new Error('JSON inválido no snapshot legado.');
+  }
+  if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('O snapshot legado precisa ser um objeto.');
+  }
+  const players = Array.isArray(parsed.players) ? parsed.players : [];
+  const sessionsSource = parsed.sessions ?? parsed.gameSessions ?? parsed;
+  const competitionsSource = parsed.competitions;
+  const sessions = interpretGameSessionsJson(
+    typeof sessionsSource === 'string' ? sessionsSource : JSON.stringify(sessionsSource)
+  );
+  const competitions = interpretCompetitionsJson(
+    competitionsSource == null
+      ? ''
+      : typeof competitionsSource === 'string'
+        ? competitionsSource
+        : JSON.stringify(competitionsSource)
+  );
+  return {
+    players,
+    sessions: sessions.document,
+    competitions: competitions.document,
+    sessionsMigrated: Boolean(sessions.migrated),
+    competitionsMigrated: Boolean(competitions.migrated),
+  };
+}
+
 export function summarizeImportReport(results = []) {
   return {
     imported: results.filter((item) => item.status === 'imported' || item.status === 'ALREADY_IMPORTED' || item.status === 'already_imported').length,

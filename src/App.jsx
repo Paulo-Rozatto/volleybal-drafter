@@ -1,16 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import PlayerList from './PlayerList';
-import GameSessionsView from './GameSessionsView';
-import CompetitionsView from './CompetitionsView.jsx';
-import PerformanceHub from './PerformanceHub.jsx';
-import GistSyncPanel from './GistSyncPanel';
 import CloudSessionsView from './CloudSessionsView.jsx';
 import CloudGroupsView from './CloudGroupsView.jsx';
 import CloudCompetitionsView from './CloudCompetitionsView.jsx';
+import CloudProfileView from './CloudProfileView.jsx';
 import JoinSessionView from './JoinSessionView.jsx';
 import JoinGroupView from './JoinGroupView.jsx';
 import JoinCompetitionView from './JoinCompetitionView.jsx';
 import LegacyMigrationView from './LegacyMigrationView.jsx';
+import AuthPanel from './AuthPanel.jsx';
 import useAuth from './hooks/useAuth.js';
 import {
   clearPendingCompetitionJoinCode,
@@ -24,53 +22,53 @@ import {
   rememberPendingJoinCode,
   resolveIncomingJoinIntent,
 } from './supabase/joinCode.js';
-import { ENCRYPTED_GITHUB_TOKEN, loadGistState, saveGistState } from './gistService';
-import { decryptToken } from './cryptoUtils';
-import { appendDraftTeamSession } from './teamGameSessions.js';
-import { appendDraftCompetition } from './competitions.js';
-import { createPlayer, deletePlayer, updatePlayer } from './players.js';
+import { createPlayer } from './players.js';
 import { calcTeamBalancePenalty, prepareTeamDraftPool } from './domain/teamBalance.js';
-import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
-import { createEmptyCompetitionDocument } from './persistence/competitionsDocument.js';
-import {
-  applySuccessfulGistLoad,
-  applyGistLoadFailure,
-  applyGistSaveFailure,
-  applyGistSaveSuccess,
-  canSaveToGist,
-  clearPendingGistChanges,
-  createSyncLock,
-  getGistGateMessage,
-  gistLoadNeedsFetch,
-  GIST_LOAD_STRATEGY,
-  markPendingGistChanges,
-  nextCompetitionsDocument,
-  nextGameSessionsDocument,
-  persistLocalCompetitions,
-  persistLocalGameSessions,
-  readLocalCompetitions,
-  readLocalGameSessions,
-  readPendingGistChanges,
-  runExclusiveSync,
-} from './persistence/syncHelpers.js';
-import {
-  applyGameSessionsOperation,
-  INVALID_CACHE_CONFIRMATION_MESSAGE,
-  INVALID_CACHE_CONFIRMATION_REQUIRED,
-} from './persistence/sessionOperations.js';
-import {
-  applyCompetitionsOperation,
-  INVALID_COMPETITIONS_CACHE_CONFIRMATION_MESSAGE,
-  INVALID_COMPETITIONS_CACHE_CONFIRMATION_REQUIRED,
-} from './persistence/competitionOperations.js';
-import { applyPlayersOperation } from './persistence/playerOperations.js';
+import { DRAFTS_STORAGE_KEY, hasLocalLegacyData } from './migration/legacy/localLegacyReader.js';
 
+const DRAFT_VIEWS = new Set(['draft', 'preview', 'history']);
 
-const INITIAL_ROSTER = [];
+function readDraftHistory() {
+  try {
+    const saved = globalThis.localStorage?.getItem?.(DRAFTS_STORAGE_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+function namesFromPastedText(text) {
+  return String(text ?? '')
+    .split(/[\n,;]+/)
+    .map((line) => line.replace(/^\s*\d+\s*[).\-:]\s*/, '').trim())
+    .filter((name) => name.length >= 2);
+}
+
+function LegacyBrowserNotice({ visible, onOpenMigration }) {
+  if (!visible) return null;
+  return (
+    <div
+      className="p-3 rounded-xl border space-y-2"
+      style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--border-color)' }}
+    >
+      <p className="text-sm font-semibold">Encontramos dados antigos neste navegador.</p>
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        Eles não entram no app automaticamente. Importe se quiser usá-los em encontros e competições.
+      </p>
+      <button
+        type="button"
+        onClick={onOpenMigration}
+        className="w-full font-bold py-2 rounded-lg text-sm cursor-pointer"
+        style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
+      >
+        Importar dados antigos
+      </button>
+    </div>
+  );
+}
 
 export default function App() {
-  // --- Core Navigation & Drawer States ---
-  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance', 'cloud', 'join', 'groups', 'groupJoin', 'cloudCompetitions', 'competitionJoin', 'migration'
+  const [currentView, setCurrentView] = useState('sessions');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const auth = useAuth();
   const [cloudSessionId, setCloudSessionId] = useState(null);
@@ -97,76 +95,31 @@ export default function App() {
     });
     return intent.type === 'competition' ? intent.code : null;
   });
+  const foundLegacy = useMemo(() => hasLocalLegacyData(), []);
 
-  // --- Players & History States ---
-  const [players, setPlayers] = useState(() => {
-    const saved = localStorage.getItem('volleyPlayers');
-    return saved ? JSON.parse(saved) : INITIAL_ROSTER;
-  });
-  const playersRef = useRef(players);
-
-  const [draftHistory, setDraftHistory] = useState(() => {
-    const saved = localStorage.getItem('volleyDrafts');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  // --- Quick Draft States ---
+  const [draftHistory, setDraftHistory] = useState(readDraftHistory);
   const [pastedText, setPastedText] = useState('');
   const [sessionPlayers, setSessionPlayers] = useState([]);
   const [teamSize, setTeamSize] = useState(6);
   const [balanceGender, setBalanceGender] = useState(true);
   const [balanceHeight, setBalanceHeight] = useState(true);
   const [newPlayerName, setNewPlayerName] = useState('');
-
-  // --- Draft Preview & History Index ---
   const [draftPreview, setDraftPreview] = useState(null);
   const [currentDraftIndex, setCurrentDraftIndex] = useState(0);
 
-  const [localSessions] = useState(() => readLocalGameSessions());
-  const [localCompetitions] = useState(() => readLocalCompetitions());
-  const [gameSessions, setGameSessions] = useState(
-    () => localSessions.document ?? createEmptyGameSessionsDocument()
-  );
-  const [competitions, setCompetitions] = useState(
-    () => localCompetitions.document ?? createEmptyCompetitionDocument()
-  );
-  const [localCacheError, setLocalCacheError] = useState(() => localSessions.error);
-  const [localWriteError, setLocalWriteError] = useState(() => localSessions.writeError ?? null);
-  const [localCompetitionsCacheError, setLocalCompetitionsCacheError] = useState(
-    () => localCompetitions.error
-  );
-  const [localCompetitionsWriteError, setLocalCompetitionsWriteError] = useState(
-    () => localCompetitions.writeError ?? null
-  );
-  const [showInvalidCacheConfirm, setShowInvalidCacheConfirm] = useState(false);
-  const [showInvalidCompetitionsCacheConfirm, setShowInvalidCompetitionsCacheConfirm] = useState(false);
-  const sessionsRef = useRef(localSessions.document ?? createEmptyGameSessionsDocument());
-  const competitionsRef = useRef(localCompetitions.document ?? createEmptyCompetitionDocument());
-  const cacheInvalidRef = useRef(Boolean(localSessions.error));
-  const competitionsCacheInvalidRef = useRef(Boolean(localCompetitions.error));
-  const pendingGameSessionsOperationRef = useRef(null);
-  const pendingCompetitionsOperationRef = useRef(null);
-  const syncLockRef = useRef(createSyncLock());
-  const gistRevisionRef = useRef(null);
+  useEffect(() => {
+    try {
+      globalThis.localStorage?.setItem?.(DRAFTS_STORAGE_KEY, JSON.stringify(draftHistory));
+    } catch {
+      // UI cache only
+    }
+  }, [draftHistory]);
 
-  // --- GitHub Gist Sync States ---
-  const [appPassword, setAppPassword] = useState(() => sessionStorage.getItem('app_password') || '');
-  const [syncStatus, setSyncStatus] = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [gistLoaded, setGistLoaded] = useState(false);
-  const [gistRevision, setGistRevision] = useState(null);
-  const [hasPendingGistChanges, setHasPendingGistChanges] = useState(
-    () => Boolean(localSessions.migrated || localCompetitions.migrated) || readPendingGistChanges()
-  );
-  const [showLoadConflict, setShowLoadConflict] = useState(false);
-
-  const gistGateMessage = getGistGateMessage({ gistLoaded, hasPendingGistChanges });
-  const saveEnabled = canSaveToGist({
-    gistLoaded,
-    isSyncing,
-    hasPassword: Boolean(appPassword),
-    hasRevision: Boolean(gistRevision),
-  });
+  const openMigration = useCallback(() => {
+    setCurrentView('migration');
+    if (globalThis.location) globalThis.location.hash = '#/migration';
+    setIsMenuOpen(false);
+  }, []);
 
   useEffect(() => {
     const intent = resolveIncomingJoinIntent({
@@ -223,7 +176,7 @@ export default function App() {
     clearPendingJoinCode();
     setPendingJoinCode(null);
     setCloudSessionId(sessionId);
-    setCurrentView('cloud');
+    setCurrentView('sessions');
     const url = new URL(globalThis.location.href);
     url.searchParams.delete('join');
     if (url.hash.startsWith('#/join/')) url.hash = '';
@@ -245,396 +198,47 @@ export default function App() {
     clearPendingCompetitionJoinCode();
     setPendingCompetitionJoinCode(null);
     setCloudCompetitionId(competitionId);
-    setCurrentView('cloudCompetitions');
+    setCurrentView('competitions');
     const url = new URL(globalThis.location.href);
     url.searchParams.delete('competitionJoin');
     if (url.hash.startsWith('#/competition/join/')) url.hash = '';
     globalThis.history?.replaceState?.({}, '', `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
-  // LocalStorage Persistence
-  useEffect(() => {
-    localStorage.setItem('volleyPlayers', JSON.stringify(players));
-  }, [players]);
-
-  useEffect(() => {
-    localStorage.setItem('volleyDrafts', JSON.stringify(draftHistory));
-  }, [draftHistory]);
-
-  const applyPlayersChange = (operation) =>
-    applyPlayersOperation({
-      getPlayers: () => playersRef.current,
-      setPlayers: (next) => {
-        playersRef.current = next;
-        setPlayers(next);
-      },
-      persistPlayers: (next) => {
-        try {
-          localStorage.setItem('volleyPlayers', JSON.stringify(next));
-          return { ok: true };
-        } catch (error) {
-          return {
-            ok: false,
-            error: error.message || 'Não foi possível salvar o cache local de jogadores.',
-          };
-        }
-      },
-      markPending: () => {
-        markPendingGistChanges();
-        setHasPendingGistChanges(true);
-      },
-      operation,
-    });
-
-  const commitSessionsDocument = (nextDocument) => {
-    sessionsRef.current = nextDocument;
-    setGameSessions(nextDocument);
-  };
-
-  const commitCompetitionsDocument = (nextDocument) => {
-    competitionsRef.current = nextDocument;
-    setCompetitions(nextDocument);
-  };
-
-  const commitGistRevision = (revision) => {
-    gistRevisionRef.current = revision;
-    setGistRevision(revision);
-  };
-
-  const applySaveOutcome = (outcome) => {
-    if (outcome.clearRevision) {
-      commitGistRevision(null);
-    } else if (outcome.revision !== undefined) {
-      commitGistRevision(outcome.revision);
-    }
-    setGistLoaded(outcome.gistLoaded);
-    if (outcome.hasPendingGistChanges) {
-      markPendingGistChanges();
-      setHasPendingGistChanges(true);
-    } else {
-      clearPendingGistChanges();
-      setHasPendingGistChanges(false);
-    }
-    setSyncStatus(outcome.syncStatus);
-  };
-
-  const requestGameSessionsOperation = (operation, { discardConfirmed = false } = {}) => {
-    const result = applyGameSessionsOperation({
-      getDocument: () => sessionsRef.current,
-      setDocument: commitSessionsDocument,
-      persistDocument: persistLocalGameSessions,
-      markPending: () => {
-        markPendingGistChanges();
-        setHasPendingGistChanges(true);
-      },
-      operation,
-      cacheInvalid: cacheInvalidRef.current,
-      discardConfirmed,
-    });
-
-    if (result?.errors?.[0]?.code === INVALID_CACHE_CONFIRMATION_REQUIRED) {
-      pendingGameSessionsOperationRef.current = operation;
-      setShowInvalidCacheConfirm(true);
-      return result;
-    }
-
-    if (result?.ok && result.persistOk) {
-      setLocalWriteError(null);
-      if (result.cacheCleared) {
-        cacheInvalidRef.current = false;
-        setLocalCacheError(null);
-      }
-    } else if (result?.persistOk === false) {
-      setLocalWriteError(result.persistError);
-    }
-
-    return result;
-  };
-
-  const requestCompetitionsOperation = (operation, { discardConfirmed = false } = {}) => {
-    const result = applyCompetitionsOperation({
-      getDocument: () => competitionsRef.current,
-      setDocument: commitCompetitionsDocument,
-      persistDocument: persistLocalCompetitions,
-      markPending: () => {
-        markPendingGistChanges();
-        setHasPendingGistChanges(true);
-      },
-      operation,
-      cacheInvalid: competitionsCacheInvalidRef.current,
-      discardConfirmed,
-    });
-
-    if (result?.errors?.[0]?.code === INVALID_COMPETITIONS_CACHE_CONFIRMATION_REQUIRED) {
-      pendingCompetitionsOperationRef.current = operation;
-      setShowInvalidCompetitionsCacheConfirm(true);
-      return result;
-    }
-
-    if (result?.ok && result.persistOk) {
-      setLocalCompetitionsWriteError(null);
-      if (result.cacheCleared) {
-        competitionsCacheInvalidRef.current = false;
-        setLocalCompetitionsCacheError(null);
-      }
-    } else if (result?.persistOk === false) {
-      setLocalCompetitionsWriteError(result.persistError);
-    }
-
-    return result;
-  };
-
-  const handleCreateGameSession = (input) =>
-    requestGameSessionsOperation((document) => {
-      const created = appendDraftTeamSession(document, {
-        date: input.date,
-        name: input.name,
-        format: {
-          teamSize: input.teamSize,
-          teamCount: input.teamCount,
-        },
-      });
-      return {
-        ok: true,
-        errors: [],
-        document: created.document,
-        session: created.session,
-      };
-    });
-
-  const handleCreateCompetition = (input) =>
-    requestCompetitionsOperation((document) =>
-      appendDraftCompetition(document, {
-        date: input.date,
-        name: input.name,
-        format: {
-          teamSize: input.teamSize,
-        },
-        stages: input.stages,
-      })
-    );
-
-  const handleConfirmDiscardInvalidCache = () => {
-    const operation = pendingGameSessionsOperationRef.current;
-    pendingGameSessionsOperationRef.current = null;
-    setShowInvalidCacheConfirm(false);
-    if (!operation) return null;
-    return requestGameSessionsOperation(operation, { discardConfirmed: true });
-  };
-
-  const handleCancelDiscardInvalidCache = () => {
-    pendingGameSessionsOperationRef.current = null;
-    setShowInvalidCacheConfirm(false);
-  };
-
-  const handleConfirmDiscardInvalidCompetitionsCache = () => {
-    const operation = pendingCompetitionsOperationRef.current;
-    pendingCompetitionsOperationRef.current = null;
-    setShowInvalidCompetitionsCacheConfirm(false);
-    if (!operation) return null;
-    return requestCompetitionsOperation(operation, { discardConfirmed: true });
-  };
-
-  const handleCancelDiscardInvalidCompetitionsCache = () => {
-    pendingCompetitionsOperationRef.current = null;
-    setShowInvalidCompetitionsCacheConfirm(false);
-  };
-
-  const loadGistWithStrategy = async (strategy) => {
-    setShowLoadConflict(false);
-    if (!gistLoadNeedsFetch(strategy)) return { started: false };
-
-    return runExclusiveSync(syncLockRef.current, async () => {
-      try {
-        setIsSyncing(true);
-        setSyncStatus('Carregando do Gist...');
-        const remote = await loadGistState();
-        const remoteSessions = nextGameSessionsDocument(
-          createEmptyGameSessionsDocument(),
-          remote.gameSessions
-        );
-        const remoteCompetitions = nextCompetitionsDocument(
-          createEmptyCompetitionDocument(),
-          remote.competitions
-        );
-        const result = applySuccessfulGistLoad({
-          strategy,
-          localPlayers: playersRef.current,
-          localGameSessions: sessionsRef.current,
-          localCompetitions: competitionsRef.current,
-          remotePlayers: remote.players,
-          remoteGameSessions: remoteSessions,
-          remoteCompetitions,
-          remoteMigrated: remote.migrated,
-        });
-
-        if (result.replaceLocal) {
-          const persistResult = persistLocalGameSessions(result.gameSessions);
-          const persistCompetitionsResult = persistLocalCompetitions(result.competitions);
-          playersRef.current = result.players;
-          setPlayers(result.players);
-          commitSessionsDocument(result.gameSessions);
-          commitCompetitionsDocument(result.competitions);
-          cacheInvalidRef.current = false;
-          setLocalCacheError(null);
-          setLocalWriteError(persistResult.ok ? null : persistResult.error);
-          competitionsCacheInvalidRef.current = false;
-          setLocalCompetitionsCacheError(null);
-          setLocalCompetitionsWriteError(
-            persistCompetitionsResult.ok ? null : persistCompetitionsResult.error
-          );
-        }
-
-        commitGistRevision(remote.revision);
-
-        if (result.hasPendingGistChanges) {
-          markPendingGistChanges();
-        } else {
-          clearPendingGistChanges();
-        }
-
-        setHasPendingGistChanges(result.hasPendingGistChanges);
-        setGistLoaded(true);
-        setSyncStatus(result.syncStatus);
-      } catch (err) {
-        const failure = applyGistLoadFailure({
-          error: err,
-          hasPendingGistChanges,
-          localPlayers: playersRef.current,
-          localGameSessions: sessionsRef.current,
-          localCompetitions: competitionsRef.current,
-        });
-        setSyncStatus(failure.syncStatus);
-      } finally {
-        setIsSyncing(false);
-      }
-    });
-  };
-
-  // --- Gist API Handlers ---
-  const handleLoadGist = () => {
-    if (hasPendingGistChanges) {
-      setShowLoadConflict(true);
-      return;
-    }
-    return loadGistWithStrategy(GIST_LOAD_STRATEGY.FRESH);
-  };
-
-  // Keep password in sessionStorage so you only type it once per session on any device
-  const handlePasswordChange = (e) => {
-    const pwd = e.target.value;
-    setAppPassword(pwd);
-    sessionStorage.setItem('app_password', pwd);
-  };
-
-  const handleSaveGist = async () => {
-    if (!gistLoaded) {
-      setSyncStatus('Carregue o Gist antes de salvar');
-      return;
-    }
-
-    if (!appPassword) {
-      alert('Por favor, digite sua senha de desbloqueio.');
-      return;
-    }
-
-    return runExclusiveSync(syncLockRef.current, async () => {
-      let decryptedPat;
-      try {
-        setIsSyncing(true);
-        setSyncStatus('Verificando o Gist...');
-        const result = await saveGistState({
-          players: playersRef.current,
-          gameSessions: sessionsRef.current,
-          competitions: competitionsRef.current,
-          expectedRevision: gistRevisionRef.current,
-          getToken: async () => {
-            setSyncStatus('Descriptografando token...');
-            decryptedPat = await decryptToken(ENCRYPTED_GITHUB_TOKEN, appPassword);
-            setSyncStatus('Salvando no Gist...');
-            return decryptedPat;
-          },
-        });
-        applySaveOutcome(applyGistSaveSuccess({ revision: result.revision }));
-      } catch (err) {
-        applySaveOutcome(
-          applyGistSaveFailure({
-            error: err,
-            gistLoaded,
-            revision: gistRevisionRef.current,
-            hasPendingGistChanges,
-          })
-        );
-      } finally {
-        decryptedPat = undefined;
-        setIsSyncing(false);
-      }
-    });
-  };
-
-
-  // --- Name Matcher ---
   const handleIdentifyPlayers = () => {
     if (!pastedText.trim()) return;
-
-    const normalize = (str) =>
-      str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '');
-
-    const cleanText = normalize(pastedText);
-
-    const matched = playersRef.current.filter((p) => {
-      const cleanName = normalize(p.name);
-      return cleanName.length >= 2 && cleanText.includes(cleanName);
-    });
-
-    setSessionPlayers(matched);
-  };
-
-  // --- State Updates ---
-  const handleCreatePlayer = (input) => applyPlayersChange((current) => createPlayer(current, input));
-
-  const handleUpdatePlayer = (id, changes) => {
-    const result = applyPlayersChange((current) => updatePlayer(current, id, changes));
-    if (result?.ok && result.player) {
-      setSessionPlayers((prev) =>
-        prev.map((player) => (player.id === id ? { ...player, ...result.player } : player))
+    const names = namesFromPastedText(pastedText);
+    let next = [...sessionPlayers];
+    for (const name of names) {
+      const existing = next.find(
+        (player) => player.name.toLowerCase() === name.toLowerCase()
       );
-    }
-    return result;
-  };
-
-  const handleDeletePlayer = (id) => {
-    const result = applyPlayersChange((current) =>
-      deletePlayer(current, id, { deleteConfirmed: true })
-    );
-    if (result?.ok) {
-      setSessionPlayers((prev) => prev.filter((player) => player.id !== id));
-    }
-    return result;
-  };
-
-  const handleRemoveFromSession = (id) => {
-    setSessionPlayers((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const handleAddQuickPlayer = (e) => {
-    e.preventDefault();
-    if (!newPlayerName.trim()) return;
-
-    const result = applyPlayersChange((current) =>
-      createPlayer(current, {
-        name: newPlayerName.trim(),
+      if (existing) continue;
+      const created = createPlayer(next, {
+        name,
         score: 3,
         gender: 'F',
         height: 'short',
-      })
-    );
+      });
+      if (created?.ok) next = created.players;
+    }
+    setSessionPlayers(next);
+  };
+
+  const handleAddQuickPlayer = (event) => {
+    event.preventDefault();
+    if (!newPlayerName.trim()) return;
+    const result = createPlayer(sessionPlayers, {
+      name: newPlayerName.trim(),
+      score: 3,
+      gender: 'F',
+      height: 'short',
+    });
     if (!result?.ok) return;
-    setSessionPlayers((prev) => [...prev, result.player]);
+    setSessionPlayers(result.players);
     setNewPlayerName('');
   };
 
-  // --- Monte Carlo Draft Generator ---
   const runMonteCarloDraft = () => {
     const { numTeams, playersToDraft, bench } = prepareTeamDraftPool(sessionPlayers, teamSize);
     if (numTeams < 2) {
@@ -659,15 +263,13 @@ export default function App() {
       }
     }
 
-    const result = {
+    setDraftPreview({
       id: crypto.randomUUID(),
       date: new Date().toLocaleString('pt-BR'),
       teams: bestTeams,
       format: `${teamSize}x${teamSize}`,
       bench,
-    };
-
-    setDraftPreview(result);
+    });
     setCurrentView('preview');
   };
 
@@ -679,28 +281,10 @@ export default function App() {
     setCurrentView('history');
   };
 
-  const gistSyncPanel = (
-    <GistSyncPanel
-      password={appPassword}
-      onPasswordChange={handlePasswordChange}
-      onLoad={handleLoadGist}
-      onSave={handleSaveGist}
-      isSyncing={isSyncing}
-      saveEnabled={saveEnabled}
-      gistGateMessage={gistGateMessage}
-      syncStatus={syncStatus}
-      localCacheError={localCacheError}
-      localWriteError={localWriteError}
-      localCompetitionsCacheError={localCompetitionsCacheError}
-      localCompetitionsWriteError={localCompetitionsWriteError}
-      showLoadConflict={showLoadConflict}
-      onKeepLocalChanges={() => loadGistWithStrategy(GIST_LOAD_STRATEGY.KEEP_LOCAL)}
-      onUseRemoteData={() => loadGistWithStrategy(GIST_LOAD_STRATEGY.USE_REMOTE)}
-      onCancelLoad={() => setShowLoadConflict(false)}
-      gameSessions={gameSessions}
-      competitions={competitions}
-    />
-  );
+  const go = (view) => {
+    setCurrentView(view);
+    setIsMenuOpen(false);
+  };
 
   return (
     <div
@@ -711,13 +295,12 @@ export default function App() {
         className="max-w-2xl mx-auto min-h-screen flex flex-col border-x shadow-2xl relative"
         style={{ backgroundColor: 'var(--bg-app)', borderColor: 'var(--border-color)' }}
       >
-        {/* Header */}
         <header
           className="p-4 flex justify-between items-center border-b shadow-sm"
           style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
         >
           <h1
-            onClick={() => setCurrentView('draft')}
+            onClick={() => setCurrentView('sessions')}
             className="text-2xl font-black tracking-wide cursor-pointer flex items-center gap-2"
           >
             🏐 Cortada
@@ -730,62 +313,43 @@ export default function App() {
           </button>
         </header>
 
-        {/* Navigation Menu Drawer */}
         {isMenuOpen && (
           <div
             className="flex flex-col p-2 space-y-1 border-b shadow-inner"
             style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
           >
             <button
-              onClick={() => { setCurrentView('draft'); setIsMenuOpen(false); }}
-              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
-              style={{
-                backgroundColor: currentView === 'draft' ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text-main)'
-              }}
-            >
-              ⚡ Sorteio Rápido
-            </button>
-            <button
-              onClick={() => { setCurrentView('players'); setIsMenuOpen(false); }}
-              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
-              style={{
-                backgroundColor: currentView === 'players' ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text-main)'
-              }}
-            >
-              👥 Elenco Completo ({players.length})
-            </button>
-            <button
               type="button"
-              onClick={() => { setCurrentView('sessions'); setIsMenuOpen(false); }}
+              onClick={() => go('sessions')}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
-                backgroundColor: currentView === 'sessions' ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text-main)'
+                backgroundColor: currentView === 'sessions' || currentView === 'join' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)',
               }}
+              aria-current={currentView === 'sessions' || currentView === 'join' ? 'page' : undefined}
             >
               🗓️ Encontros
             </button>
             <button
               type="button"
-              onClick={() => { setCurrentView('cloud'); setIsMenuOpen(false); }}
+              onClick={() => go('competitions')}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
-                backgroundColor: currentView === 'cloud' || currentView === 'join' ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text-main)'
+                backgroundColor:
+                  currentView === 'competitions' || currentView === 'competitionJoin' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)',
               }}
-              aria-current={currentView === 'cloud' || currentView === 'join' ? 'page' : undefined}
+              aria-current={currentView === 'competitions' || currentView === 'competitionJoin' ? 'page' : undefined}
             >
-              ☁️ Encontros online
+              🏆 Competições
             </button>
             <button
               type="button"
-              onClick={() => { setCurrentView('groups'); setIsMenuOpen(false); }}
+              onClick={() => go('groups')}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
                 backgroundColor: currentView === 'groups' || currentView === 'groupJoin' ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text-main)'
+                color: 'var(--text-main)',
               }}
               aria-current={currentView === 'groups' || currentView === 'groupJoin' ? 'page' : undefined}
             >
@@ -793,83 +357,62 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={() => { setCurrentView('competitions'); setIsMenuOpen(false); }}
+              onClick={() => go('profile')}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
-                backgroundColor: currentView === 'competitions' ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text-main)'
+                backgroundColor: currentView === 'profile' ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)',
               }}
-              aria-current={currentView === 'competitions' ? 'page' : undefined}
+              aria-current={currentView === 'profile' ? 'page' : undefined}
             >
-              🏆 Competições
+              👤 Perfil
             </button>
             <button
               type="button"
-              onClick={() => { setCurrentView('cloudCompetitions'); setIsMenuOpen(false); }}
+              onClick={() => go('draft')}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
-                backgroundColor: currentView === 'cloudCompetitions' || currentView === 'competitionJoin' ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text-main)'
+                backgroundColor: DRAFT_VIEWS.has(currentView) ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text-main)',
               }}
-              aria-current={currentView === 'cloudCompetitions' || currentView === 'competitionJoin' ? 'page' : undefined}
             >
-              ☁️ Competições online
-            </button>
-            <button
-              type="button"
-              onClick={() => { setCurrentView('performance'); setIsMenuOpen(false); }}
-              className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
-              style={{
-                backgroundColor: currentView === 'performance' ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text-main)'
-              }}
-              aria-current={currentView === 'performance' ? 'page' : undefined}
-            >
-              📊 Desempenho
+              ⚡ Sorteio rápido
             </button>
             {auth.user ? (
               <button
                 type="button"
-                onClick={() => {
-                  setCurrentView('migration');
-                  if (globalThis.location) globalThis.location.hash = '#/migration';
-                  setIsMenuOpen(false);
-                }}
+                onClick={openMigration}
                 className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
                 style={{
                   backgroundColor: currentView === 'migration' ? 'var(--bg-subtle)' : 'transparent',
-                  color: 'var(--text-main)'
+                  color: 'var(--text-main)',
                 }}
                 aria-current={currentView === 'migration' ? 'page' : undefined}
               >
-                ⬆️ Migrar dados antigos
+                ⬆️ Importar dados antigos
               </button>
             ) : null}
             <button
+              type="button"
               onClick={() => {
                 if (draftHistory.length === 0) return alert('Nenhum sorteio salvo!');
                 setCurrentDraftIndex(0);
-                setCurrentView('history');
-                setIsMenuOpen(false);
+                go('history');
               }}
               className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
               style={{
                 backgroundColor: currentView === 'history' ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text-main)'
+                color: 'var(--text-main)',
               }}
             >
-              📜 Histórico de Sorteios
+              📜 Histórico de sorteios
             </button>
           </div>
         )}
 
-        {/* Main Content Area */}
         <main className="flex-1 p-4 overflow-y-auto space-y-4">
-
-          {/* 1. DRAFT VIEW */}
           {currentView === 'draft' && (
             <div className="space-y-4">
-              {/* WhatsApp Textarea */}
               <div
                 className="p-3 rounded-xl border space-y-2"
                 style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
@@ -886,7 +429,7 @@ export default function App() {
                   style={{
                     backgroundColor: 'var(--bg-app)',
                     color: 'var(--text-main)',
-                    borderColor: 'var(--border-color)'
+                    borderColor: 'var(--border-color)',
                   }}
                 />
                 <button
@@ -894,34 +437,31 @@ export default function App() {
                   className="w-full font-bold py-2 rounded-lg text-sm transition cursor-pointer"
                   style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
                 >
-                  🔍 Identificar Jogadores
+                  🔍 Identificar jogadores
                 </button>
               </div>
 
-              {/* Matched Session Players */}
               {sessionPlayers.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex justify-between items-center px-1">
                     <span className="font-bold text-sm">
-                      Jogadores na Mesa ({sessionPlayers.length})
+                      Jogadores na mesa ({sessionPlayers.length})
                     </span>
                     <button
                       onClick={() => setSessionPlayers([])}
                       className="text-xs text-red-500 font-bold cursor-pointer"
                     >
-                      Limpar Tudo
+                      Limpar tudo
                     </button>
                   </div>
-
                   <PlayerList
                     variant="session"
                     players={sessionPlayers}
-                    onDeletePlayer={handleRemoveFromSession}
+                    onDeletePlayer={(id) => setSessionPlayers((prev) => prev.filter((player) => player.id !== id))}
                   />
                 </div>
               )}
 
-              {/* Add Quick Player */}
               <form onSubmit={handleAddQuickPlayer} className="flex gap-2">
                 <input
                   type="text"
@@ -932,7 +472,7 @@ export default function App() {
                   style={{
                     backgroundColor: 'var(--bg-surface)',
                     color: 'var(--text-main)',
-                    borderColor: 'var(--border-color)'
+                    borderColor: 'var(--border-color)',
                   }}
                 />
                 <button
@@ -944,7 +484,6 @@ export default function App() {
                 </button>
               </form>
 
-              {/* Game Format & Settings */}
               <div
                 className="p-3 rounded-xl border space-y-3"
                 style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
@@ -962,7 +501,7 @@ export default function App() {
                         className="flex-1 py-1 text-xs font-bold rounded-md transition cursor-pointer"
                         style={{
                           backgroundColor: teamSize === n ? 'var(--primary)' : 'transparent',
-                          color: teamSize === n ? 'var(--text-inverse)' : 'var(--text-muted)'
+                          color: teamSize === n ? 'var(--text-inverse)' : 'var(--text-muted)',
                         }}
                       >
                         {n}x{n}
@@ -970,7 +509,6 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -979,7 +517,7 @@ export default function App() {
                     style={{
                       backgroundColor: balanceGender ? 'var(--bg-subtle)' : 'transparent',
                       borderColor: balanceGender ? 'var(--primary)' : 'var(--border-color)',
-                      color: 'var(--text-main)'
+                      color: 'var(--text-main)',
                     }}
                   >
                     👩/👨 Gênero {balanceGender ? '✓' : ''}
@@ -991,7 +529,7 @@ export default function App() {
                     style={{
                       backgroundColor: balanceHeight ? 'var(--bg-subtle)' : 'transparent',
                       borderColor: balanceHeight ? 'var(--primary)' : 'var(--border-color)',
-                      color: 'var(--text-main)'
+                      color: 'var(--text-main)',
                     }}
                   >
                     📏 Altura {balanceHeight ? '✓' : ''}
@@ -999,22 +537,19 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Main CTA Button */}
               <button
                 onClick={runMonteCarloDraft}
                 className="w-full font-bold py-3.5 rounded-xl text-lg shadow-lg transition cursor-pointer"
                 style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
               >
-                Sortear Times!
+                Sortear times!
               </button>
             </div>
           )}
 
-          {/* 2. PREVIEW VIEW */}
           {currentView === 'preview' && draftPreview && (
             <div className="space-y-4 pb-12">
-              <h2 className="text-xl font-bold text-center">Prévia do Sorteio</h2>
-
+              <h2 className="text-xl font-bold text-center">Prévia do sorteio</h2>
               {draftPreview.teams.map((team, idx) => {
                 const scoreSum = team.reduce((a, b) => a + b.score, 0);
                 return (
@@ -1046,7 +581,6 @@ export default function App() {
                   </div>
                 );
               })}
-
               <div className="flex gap-2 pt-4">
                 <button
                   onClick={runMonteCarloDraft}
@@ -1064,36 +598,6 @@ export default function App() {
                 </button>
               </div>
             </div>
-          )}
-
-          {/* 3. ROSTER MANAGEMENT & GIST SYNC VIEW */}
-          {currentView === 'players' && (
-            <div className="space-y-4">
-              {gistSyncPanel}
-
-              <h2 className="text-xl font-bold">Elenco Registrado ({players.length})</h2>
-
-              <PlayerList
-                players={players}
-                onCreatePlayer={handleCreatePlayer}
-                onUpdatePlayer={handleUpdatePlayer}
-                onDeletePlayer={handleDeletePlayer}
-              />
-            </div>
-          )}
-
-          {currentView === 'sessions' && (
-            <GameSessionsView
-              sessions={gameSessions.sessions}
-              document={gameSessions}
-              competitionsDocument={competitions}
-              players={players}
-              cacheInvalid={Boolean(localCacheError)}
-              cacheError={localCacheError}
-              onCreateSession={handleCreateGameSession}
-              onApplyOperation={requestGameSessionsOperation}
-              syncPanel={gistSyncPanel}
-            />
           )}
 
           {currentView === 'join' && (
@@ -1126,7 +630,7 @@ export default function App() {
             />
           )}
 
-          {currentView === 'cloud' && (
+          {currentView === 'sessions' && (
             <CloudSessionsView
               configured={auth.configured}
               ready={auth.ready}
@@ -1134,10 +638,9 @@ export default function App() {
               pendingJoinCode={pendingJoinCode}
               openSessionId={cloudSessionId}
               onOpenSession={setCloudSessionId}
-              onOpenMigration={() => {
-                setCurrentView('migration');
-                if (globalThis.location) globalThis.location.hash = '#/migration';
-              }}
+              legacyNotice={
+                <LegacyBrowserNotice visible={Boolean(auth.user && foundLegacy)} onOpenMigration={openMigration} />
+              }
             />
           )}
 
@@ -1151,16 +654,16 @@ export default function App() {
               onOpenGroup={setCloudGroupId}
               onOpenSession={(sessionId) => {
                 setCloudSessionId(sessionId);
-                setCurrentView('cloud');
+                setCurrentView('sessions');
               }}
               onOpenCompetition={(competitionId) => {
                 setCloudCompetitionId(competitionId);
-                setCurrentView('cloudCompetitions');
+                setCurrentView('competitions');
               }}
             />
           )}
 
-          {currentView === 'cloudCompetitions' && (
+          {currentView === 'competitions' && (
             <CloudCompetitionsView
               configured={auth.configured}
               ready={auth.ready}
@@ -1168,29 +671,16 @@ export default function App() {
               pendingCompetitionJoinCode={pendingCompetitionJoinCode}
               openCompetitionId={cloudCompetitionId}
               onOpenCompetition={setCloudCompetitionId}
-              players={players}
             />
           )}
 
-          {currentView === 'competitions' && (
-            <CompetitionsView
-              competitions={competitions.competitions}
-              document={competitions}
-              players={players}
-              cacheInvalid={Boolean(localCompetitionsCacheError)}
-              cacheError={localCompetitionsCacheError}
-              onCreateCompetition={handleCreateCompetition}
-              onApplyOperation={requestCompetitionsOperation}
-              syncPanel={gistSyncPanel}
-            />
-          )}
-
-          {currentView === 'performance' && (
-            <PerformanceHub
-              document={gameSessions}
-              roster={players}
-              competitionsDocument={competitions}
-            />
+          {currentView === 'profile' && (
+            <div className="space-y-4">
+              <h2 className="text-xl font-bold">Perfil</h2>
+              <AuthPanel configured={auth.configured} ready={auth.ready} user={auth.user} onOpenMigration={openMigration} />
+              <LegacyBrowserNotice visible={Boolean(auth.user && foundLegacy)} onOpenMigration={openMigration} />
+              {auth.user ? <CloudProfileView user={auth.user} /> : null}
+            </div>
           )}
 
           {currentView === 'migration' && (
@@ -1198,12 +688,8 @@ export default function App() {
               configured={auth.configured}
               ready={auth.ready}
               user={auth.user}
-              players={players}
-              gameSessions={gameSessions}
-              competitions={competitions}
-              gistLoaded={gistLoaded}
               onBack={() => {
-                setCurrentView('draft');
+                setCurrentView('sessions');
                 if ((globalThis.location?.hash ?? '').startsWith('#/migration')) {
                   const url = new URL(globalThis.location.href);
                   url.hash = '';
@@ -1213,7 +699,6 @@ export default function App() {
             />
           )}
 
-          {/* 4. HISTORY VIEW */}
           {currentView === 'history' && draftHistory.length > 0 && (
             <div className="space-y-4">
               <div
@@ -1232,13 +717,12 @@ export default function App() {
                 <button
                   onClick={() => setCurrentDraftIndex(Math.max(currentDraftIndex - 1, 0))}
                   disabled={currentDraftIndex === 0}
-                  className="p-2 font-bold cursor-pointer disabled:opacity-30"
+                  className="p-2 font-bold cursor-pointer"
                   style={{ color: 'var(--primary)' }}
                 >
                   Próximo →
                 </button>
               </div>
-
               {draftHistory[currentDraftIndex].teams.map((team, idx) => (
                 <div
                   key={idx}
@@ -1258,115 +742,8 @@ export default function App() {
               ))}
             </div>
           )}
-
         </main>
       </div>
-
-      {showInvalidCacheConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)' }}
-          onClick={handleCancelDiscardInvalidCache}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="invalid-cache-title"
-            aria-describedby="invalid-cache-description"
-            className="w-full max-w-md rounded-xl border p-4 space-y-3 shadow-2xl"
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              borderColor: 'var(--border-color)',
-              color: 'var(--text-main)',
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 id="invalid-cache-title" className="font-bold text-base">
-              Cache local inválido
-            </h3>
-            <p
-              id="invalid-cache-description"
-              className="text-sm whitespace-pre-line"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              {INVALID_CACHE_CONFIRMATION_MESSAGE}
-            </p>
-            <button
-              type="button"
-              onClick={handleConfirmDiscardInvalidCache}
-              className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer"
-              style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
-            >
-              Descartar cache inválido e continuar
-            </button>
-            <button
-              type="button"
-              onClick={handleCancelDiscardInvalidCache}
-              className="w-full font-bold py-3 rounded-xl border cursor-pointer"
-              style={{
-                backgroundColor: 'var(--bg-subtle)',
-                borderColor: 'var(--border-color)',
-                color: 'var(--text-main)',
-              }}
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {showInvalidCompetitionsCacheConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)' }}
-          onClick={handleCancelDiscardInvalidCompetitionsCache}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="invalid-competitions-cache-title"
-            aria-describedby="invalid-competitions-cache-description"
-            className="w-full max-w-md rounded-xl border p-4 space-y-3 shadow-2xl"
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              borderColor: 'var(--border-color)',
-              color: 'var(--text-main)',
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 id="invalid-competitions-cache-title" className="font-bold text-base">
-              Cache local inválido
-            </h3>
-            <p
-              id="invalid-competitions-cache-description"
-              className="text-sm whitespace-pre-line"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              {INVALID_COMPETITIONS_CACHE_CONFIRMATION_MESSAGE}
-            </p>
-            <button
-              type="button"
-              onClick={handleConfirmDiscardInvalidCompetitionsCache}
-              className="w-full font-bold py-3 rounded-xl shadow-md cursor-pointer"
-              style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
-            >
-              Descartar cache inválido e continuar
-            </button>
-            <button
-              type="button"
-              onClick={handleCancelDiscardInvalidCompetitionsCache}
-              className="w-full font-bold py-3 rounded-xl border cursor-pointer"
-              style={{
-                backgroundColor: 'var(--bg-subtle)',
-                borderColor: 'var(--border-color)',
-                color: 'var(--text-main)',
-              }}
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

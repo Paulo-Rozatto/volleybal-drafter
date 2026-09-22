@@ -1,6 +1,30 @@
 # Cortada
 
-SPA React para sortear times de vôlei, registrar encontros e sincronizar elenco e placares entre dispositivos.
+SPA React para sortear times de vôlei e registrar encontros, competições e grupos.
+
+A fonte de verdade operacional é o **Supabase**. Gist/localStorage legado não persistem o app normal.
+
+```text
+React/Vite
+   ↓
+Supabase Auth
+   ↓
+Supabase PostgreSQL
+   ↓
+Realtime
+   ↓
+Domain performance engine
+```
+
+Importação histórica (opcional):
+
+```text
+Gist / localStorage / snapshot JSON
+   ↓
+somente ferramenta de migração (`#/migration`)
+```
+
+O Gist remoto **não** é apagado. A importação é unidirecional. Não há dual-write nem fallback silencioso para o legado.
 
 ## Instalação e execução
 
@@ -45,49 +69,29 @@ O documento de encontros usa `schemaVersion: 2`:
 - `rounds[]` com `matches[]`
 - partidas com `teamAId` / `teamBId`, `lineupA` / `lineupB`, `scoreA` / `scoreB` e `byeTeamId` na rodada
 
-Um Gist ainda em V1 (duplas / `pairs`) é **migrado automaticamente para V2 na leitura**. O App passa a trabalhar só com V2; a gravação no Gist continua manual.
+Um documento legado V1 (duplas / `pairs`) ainda pode ser **lido** pela ferramenta de importação e convertido para V2. O app normal não grava esse documento.
 
-## Cache local
+## Estado local
 
-Elenco, histórico de sorteios e encontros ficam no `localStorage` deste navegador. Encontros inválidos no cache não são sobrescritos em silêncio: a edição pede confirmação antes de descartar o cache corrompido.
+O `localStorage` **não** é autoridade de encontros, competições ou elenco. Chaves antigas (`volleyPlayers`, `volleyGameSessions`, `volleyCompetitions`, `volleyGistPendingChanges`) podem permanecer no navegador, mas o app normal as ignora. O histórico de sorteio rápido usa `volleyDrafts` só como cache de UI. Convites usam `sessionStorage` (`volleyPendingJoinCode` e equivalentes).
 
-## Sincronização com Gist
+## Gist (somente migração)
 
-O App lê e grava dois arquivos no Gist:
+O app normal **não** lê nem grava Gist. Não há painel de sincronização, pendências nem “salvar no Gist”.
 
-- `players.json` — elenco
-- `game-sessions.json` — encontros V2
+A tela **Importar dados antigos** (`#/migration`, autenticada) pode ler, em modo somente leitura:
 
-O salvamento é **manual**. Não há PATCH automático. O painel mostra quando há **alterações não salvas no Gist**.
+- `players.json`
+- `game-sessions.json`
+- `competitions.json`
 
-### Fluxo recomendado
+ou o cache local / um snapshot JSON exportado. Truncamento da API do GitHub continua tratado nessa leitura (`raw_url` HTTPS em `gist.githubusercontent.com`). O conteúdo remoto **não** é alterado.
 
-1. Carregar o Gist.
-2. Realizar as alterações.
-3. Salvar.
-4. Se outro dispositivo tiver gravado no meio do caminho, resolver o conflito **antes** de sobrescrever.
+Gist público ou secret **não é armazenamento privado**.
 
-O salvamento compara a revisão remota com a última lida neste dispositivo. Se o Gist mudou, o App bloqueia o PATCH e pede para recarregar. Você escolhe manter os dados locais (e salvar depois) ou substituí-los pelos dados do Gist.
+## Cloud (Supabase)
 
-### Truncamento da API
-
-A API do GitHub pode devolver arquivo grande assim:
-
-- `truncated: true`
-- `content` parcial
-- `raw_url` para o texto completo
-
-O App **nunca interpreta** `content` quando `truncated === true`. Nesse caso ele baixa o arquivo por `raw_url`, só em HTTPS e só em `gist.githubusercontent.com`. A revisão usada no controle de concorrência continua vindo do GET principal do Gist; o download raw não altera a revisão esperada.
-
-Arquivos muito grandes devem, no futuro, ser **arquivados** (encontros antigos fora do documento ativo). O painel mostra o tamanho serializado atual de `game-sessions.json` e avisa a partir de 750 KiB, sem bloquear o salvamento.
-
-### Privacidade
-
-Gist público ou secret **não é armazenamento privado**. Qualquer pessoa com o link pode ler nomes, elenco e placares.
-
-## Encontros online (Supabase)
-
-A etapa 3 adiciona identidade do jogador (criar/vincular/reivindicar) e o desempenho do perfil cloud, reusando a engine JS. Competições, Gist e o ranking global **não** foram migrados.
+A etapa 3 adiciona identidade do jogador (criar/vincular/reivindicar) e o desempenho do perfil, reusando a engine JS.
 
 1. Copie `.env.example` para `.env`.
 2. Preencha `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` (chave **anon**, nunca `service_role`).
@@ -119,16 +123,16 @@ https://paulo-rozatto.github.io/volleybal-drafter/**
    - `public.match_players`
    - `public.match_events`
 
-Se as etapas 1–3 já estavam aplicadas, rode só `20260921180000_cloud_groups.sql` (já no hospedado). As etapas 5 e 6 (`20260921200000_group_performance.sql`, `20260921220000_cloud_competitions.sql`) **não** devem ir ao remoto até revisão.
+Se as etapas 1–3 já estavam aplicadas, rode só `20260921180000_cloud_groups.sql` (já no hospedado). As etapas 5, 6 e 7 já estão no hospedado. A etapa 8 não adiciona SQL.
 
-O login **não** é exigido para sorteio, elenco Gist, encontros Gist, competições Gist ou desempenho local. A conta vale para **Encontros online**, **Grupos**, **Competições online** e **Migrar dados antigos**.
+O login é exigido para encontros, competições, grupos e perfil. O sorteio rápido continua só neste aparelho (não persiste entidades esportivas). **Importar dados antigos** também exige conta.
 
 Convite de encontro: `#/join/CODIGO` (já logado) ou `?join=CODIGO` no redirect do magic link.
 Convite de grupo: `#/group/join/CODIGO` ou `?groupJoin=CODIGO`. Os dois códigos ficam em chaves distintas do `sessionStorage` e **não** se misturam.
 
 Estrutura (times, rodadas, elenco, escalação, finalizar) usa `structure_version`. Placar usa `matches.version`, independente. Depois de finalizado, só organizador/admin corrigem placar; limpar continua proibido.
 
-Identidade: `link_player` só vale para jogador que **você criou**. `create_and_link_player` cria e vincula o seu jogador. Jogador de outra pessoa exige `request_player_link_claim`; só o `created_by` aprova ou recusa. O desempenho do perfil cloud lê as partidas via `get_my_performance_matches` e calcula no cliente com a mesma engine dos encontros Gist.
+Identidade: `link_player` só vale para jogador que **você criou**. `create_and_link_player` cria e vincula o seu jogador. Jogador de outra pessoa exige `request_player_link_claim`; só o `created_by` aprova ou recusa. O desempenho do perfil lê as partidas via `get_my_performance_matches` e calcula no cliente com a mesma engine.
 
 A `anon key` é a chave pública do cliente; a segurança vem do RLS. A `service_role` **nunca** entra no Vite nem no browser.
 
@@ -168,7 +172,7 @@ O RPC exige autenticação e membership do grupo (`AUTH_REQUIRED` / `GROUP_NOT_F
 
 Perfil pessoal cloud segue em `get_my_performance_matches()`. Perfil no grupo é outro contexto: só as partidas daquele `group_id`, inclusive as de outro membro do mesmo grupo.
 
-Migration: `supabase/migrations/20260921200000_group_performance.sql`. **Não aplicar no hospedado até revisão.**
+Migration: `supabase/migrations/20260921200000_group_performance.sql`.
 
 Roteiro manual (depois do `db push` desta migration):
 
@@ -209,7 +213,7 @@ Performance:
 
 `legacy_source_id` nas competições prepara a etapa 7. Esta etapa **não** importa Gist, **não** faz dual-write e **não** remove competições locais.
 
-Migration: `supabase/migrations/20260921220000_cloud_competitions.sql`. **Não aplicar no hospedado até revisão** (migration, RLS, RPC de score/estrutura e RPCs de performance).
+Migration: `supabase/migrations/20260921220000_cloud_competitions.sql`.
 
 Realtime (checklist da publication `supabase_realtime`, replica identity full; a migration declara, o apply hospedado espera revisão):
 
@@ -226,7 +230,7 @@ Roteiro manual (depois do `db push` desta migration):
 
 ### Etapa 7 — Migração do legado
 
-Importação **unidirecional** e explícita de Gist/localStorage → Supabase. **Não** é sincronização permanente. **Não** há dual-write. O Gist **não** é apagado, editado nem marcado como migrado. As telas e a persistência legadas continuam até a etapa 8.
+Importação **unidirecional** e explícita de Gist/localStorage → Supabase. **Não** é sincronização permanente. **Não** há dual-write. O Gist **não** é apagado, editado nem marcado como migrado.
 
 Identidade de importação: `sessions.legacy_source_id` e `competitions.legacy_source_id` (texto; UUID legado permanece texto). `already_imported` só vale quando `created_by` é o importador atual; membership (`session_members` / `competition_members`) **não** prova importação — outro usuário, mesmo member, recebe `LEGACY_ID_CONFLICT` sem detalhes da entidade. Reexecutar a mesma entidade pelo dono devolve `already_imported` e **não** atualiza o cloud. Fingerprint SHA-256 do snapshot é auditoria do lote, não identidade. Itens de lote são únicos por batch (`batch_id` + usuário + tipo + legado); lote novo não apaga o relatório do lote anterior.
 
@@ -236,15 +240,21 @@ Encontros e competições importados nascem **avulsos** (`group_id` nulo). O imp
 
 RPCs específicas (`import_legacy_player`, `import_legacy_session`, `import_legacy_competition`) criam o estado histórico validado em **uma transação por entidade**. Não enfraquecem `save_competition_structure` / `set_match_score` / `set_competition_match_score`. Placar histórico entra com `version = 0` e `updated_by` nulo, **sem** `match_events` / `competition_match_events` falsos. A primeira correção cloud incrementa version e audita normalmente.
 
-UI: `#/migration` (autenticado). Preview/dry-run, resolução de jogadores, progresso retomável, relatório por item. Falha de um item não desfaz os demais. Cancelar para de enviar novos itens; não há botão “desfazer migração”.
+UI: `#/migration` (autenticado, fora do fluxo principal). Preview/dry-run, resolução de jogadores, progresso retomável, relatório por item. Falha de um item não desfaz os demais. Cancelar para de enviar novos itens; não há botão “desfazer migração”.
 
-`originKey` no motor local passou a ser o id da sessão/competição. Cloud continua `legacy_source_id ?? entity_id`. `dedupePerformanceMatchesByOrigin` evita contar o mesmo encontro duas vezes se legado e cloud importado forem combinados. Métricas continuam no JS.
+`originKey` no motor local passou a ser o id da sessão/competição. Cloud continua `legacy_source_id ?? entity_id`. `dedupePerformanceMatchesByOrigin` permanece para tooling/fixtures e para dados importados. Métricas continuam no JS.
 
-Migration: `supabase/migrations/20260922000000_legacy_import.sql`. **Não aplicar no hospedado até revisão.** Tabelas de import não entram no realtime.
+Migration: `supabase/migrations/20260922000000_legacy_import.sql`. Tabelas de import não entram no realtime.
 
-### Validação hospedada (etapa 3.5)
+### Etapa 8 — Consolidação cloud
 
-Circuito já validado no projeto hospedado (Auth, RLS, RPC, Realtime, grupos). As etapas 5, 6 e 7 ainda são só locais — não rode `20260921200000_group_performance.sql`, `20260921220000_cloud_competitions.sql` nem `20260922000000_legacy_import.sql` no SQL Editor até a revisão.
+O app normal usa só Supabase. Encontros, competições, grupos e perfil não leem Gist/localStorage de domínio. Não há dual-write, fallback para Gist nem botão de salvar no Gist. Entidades importadas (`legacy_source_id` preenchido) são entidades cloud normais — não ficam somente leitura.
+
+Não há migration SQL nova. Histórico de importação e mappings permanecem.
+
+### Validação hospedada
+
+Circuito das etapas 1–7 validado no projeto hospedado. A etapa 8 é só código do cliente — **não** rode `db push` por causa dela.
 
 1. Preencha `.env` (já copiado de `.env.example`; o arquivo está no `.gitignore`) com a URL e a **anon key** reais. Placeholder do example não conta como configurado.
 2. Rode as três migrations no SQL Editor, na ordem dos timestamps.

@@ -7,7 +7,7 @@ import {
   GIST_RAW_URL_REQUIRED_MESSAGE,
   readGistFileContent,
 } from './gistFileContent.js';
-import { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from './persistence/constants.js';
+import { GAME_SESSIONS_FILENAME, PLAYERS_FILENAME } from '../../persistence/constants.js';
 
 const RAW_PLAYERS =
   'https://gist.githubusercontent.com/owner/id/raw/rev/players.json';

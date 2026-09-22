@@ -13,7 +13,6 @@ import {
   loadGameSessionsRecord,
   saveGameSessionsDocument,
 } from './gameSessionsStorage.js';
-import { persistLocalGameSessions, readLocalGameSessions, readPendingGistChanges } from './syncHelpers.js';
 
 function createMemoryStorage(initial = {}) {
   const data = { ...initial };
@@ -326,109 +325,38 @@ describe('gameSessionsStorage', () => {
   });
 });
 
-describe('migração do cache local', () => {
-  it('migra cache V1, grava V2 na mesma chave e marca pendência', () => {
+describe('leitura do cache sem regravar', () => {
+  it('interpreta V1 em memória e não regrava a chave', () => {
+    const raw = JSON.stringify(v1Empty);
     const storage = createMemoryStorage({
-      [GAME_SESSIONS_STORAGE_KEY]: JSON.stringify(v1Empty),
+      [GAME_SESSIONS_STORAGE_KEY]: raw,
       volleyPlayers: '[]',
     });
-
-    const result = readLocalGameSessions(storage);
-
-    expect(result.error).toBeNull();
-    expect(result.writeError).toBeNull();
+    const result = loadGameSessionsRecord(storage);
     expect(result.migrated).toBe(true);
     expect(result.sourceVersion).toBe(1);
     expect(result.document).toEqual(emptyV2);
-    expect(JSON.parse(storage.getItem(GAME_SESSIONS_STORAGE_KEY))).toEqual(emptyV2);
-    expect(readPendingGistChanges(storage)).toBe(true);
+    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe(raw);
     expect(storage.getItem('volleyPlayers')).toBe('[]');
   });
 
-  it('carrega cache V2 sem migrar e sem marcar pendência', () => {
+  it('carrega cache V2 sem migrar', () => {
     const storage = createMemoryStorage({
       [GAME_SESSIONS_STORAGE_KEY]: JSON.stringify(emptyV2),
     });
-
-    const result = readLocalGameSessions(storage);
+    const result = loadGameSessionsRecord(storage);
     expect(result.migrated).toBe(false);
     expect(result.sourceVersion).toBe(2);
     expect(result.document).toEqual(emptyV2);
-    expect(readPendingGistChanges(storage)).toBe(false);
   });
 
-  it('cache ausente devolve V2 vazio sem gravar', () => {
-    const storage = createMemoryStorage();
-    const result = readLocalGameSessions(storage);
-    expect(result).toMatchObject({
-      document: emptyV2,
-      error: null,
-      migrated: false,
-      sourceVersion: null,
-      writeError: null,
-    });
-    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBeNull();
-  });
-
-  it('JSON inválido permanece intacto e não finge migração', () => {
+  it('JSON inválido permanece intacto', () => {
     const storage = createMemoryStorage({
       [GAME_SESSIONS_STORAGE_KEY]: '{broken',
       volleyPlayers: '[{"id":"p1"}]',
     });
-
-    const result = readLocalGameSessions(storage);
-
-    expect(result.error).toBe('JSON inválido no documento de encontros.');
-    expect(result.migrated).toBe(false);
-    expect(result.document).toEqual(emptyV2);
+    expect(() => loadGameSessionsRecord(storage)).toThrow('JSON inválido no documento de encontros.');
     expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe('{broken');
     expect(storage.getItem('volleyPlayers')).toBe('[{"id":"p1"}]');
-    expect(readPendingGistChanges(storage)).toBe(false);
-  });
-
-  it('falha de migração não chama setItem', () => {
-    const writes = [];
-    const storage = {
-      getItem() {
-        return JSON.stringify(v1BrokenRef);
-      },
-      setItem(key, value) {
-        writes.push([key, value]);
-      },
-      removeItem() {},
-    };
-
-    const result = readLocalGameSessions(storage);
-    expect(result.migrated).toBe(false);
-    expect(result.error).toContain('Não é possível migrar uma referência a uma dupla inexistente.');
-    expect(writes).toEqual([]);
-  });
-
-  it('falha de gravação mantém V2 em memória e o cache antigo', () => {
-    const original = JSON.stringify(v1Empty);
-    const storage = {
-      getItem(key) {
-        if (key === GAME_SESSIONS_STORAGE_KEY) return original;
-        return null;
-      },
-      setItem() {
-        throw new Error('quota exceeded');
-      },
-      removeItem() {},
-    };
-
-    const result = readLocalGameSessions(storage);
-    expect(result.migrated).toBe(true);
-    expect(result.document).toEqual(emptyV2);
-    expect(result.writeError).toBe('quota exceeded');
-    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBe(original);
-  });
-
-  it('persistência local rejeita V1', () => {
-    const storage = createMemoryStorage();
-    const result = persistLocalGameSessions(v1Empty, storage);
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain('Versão de schema de encontros não suportada: 1.');
-    expect(storage.getItem(GAME_SESSIONS_STORAGE_KEY)).toBeNull();
   });
 });

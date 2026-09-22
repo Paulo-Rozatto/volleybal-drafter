@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COMPETITIONS_STORAGE_KEY, GIST_PENDING_CHANGES_STORAGE_KEY } from './constants.js';
+import { COMPETITIONS_STORAGE_KEY } from './constants.js';
 import {
   createEmptyCompetitionDocument,
   interpretCompetitionsJson,
@@ -12,11 +12,6 @@ import {
   loadCompetitionsRecord,
   saveCompetitionsDocument,
 } from './competitionsStorage.js';
-import {
-  persistLocalCompetitions,
-  readLocalCompetitions,
-  readPendingGistChanges,
-} from './syncHelpers.js';
 import { appendDraftCompetition } from '../competitions.js';
 
 function createMemoryStorage(initial = {}) {
@@ -96,26 +91,22 @@ describe('competitionsStorage', () => {
   });
 });
 
-describe('readLocalCompetitions', () => {
+describe('leitura do cache sem regravar', () => {
   it('não quebra e não apaga cache corrompido', () => {
     const storage = createMemoryStorage({
       [COMPETITIONS_STORAGE_KEY]: '{broken',
       volleyGameSessions: '{"schemaVersion":2,"sessions":[]}',
     });
-    const result = readLocalCompetitions(storage);
-    expect(result.error).toBe('JSON inválido no documento de competições.');
-    expect(result.document).toEqual(createEmptyCompetitionDocument());
+    expect(() => loadCompetitionsRecord(storage)).toThrow('JSON inválido no documento de competições.');
     expect(storage.getItem(COMPETITIONS_STORAGE_KEY)).toBe('{broken');
     expect(storage.getItem('volleyGameSessions')).toContain('schemaVersion');
   });
 
-  it('persiste um documento válido sem marcar encontros', () => {
+  it('persiste um documento válido sem tocar encontros', () => {
     const storage = createMemoryStorage();
     const document = sampleDocument();
-    const result = persistLocalCompetitions(document, storage);
-    expect(result).toEqual({ ok: true, error: null });
-    expect(readLocalCompetitions(storage).document).toEqual(document);
-    expect(readPendingGistChanges(storage)).toBe(false);
-    expect(storage.getItem(GIST_PENDING_CHANGES_STORAGE_KEY)).toBeNull();
+    saveCompetitionsDocument(document, storage);
+    expect(loadCompetitionsRecord(storage).document).toEqual(document);
+    expect(storage.getItem('volleyGameSessions')).toBeNull();
   });
 });

@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Associação cloud e roadmap
 
-Roadmap congelado: 4 grupos validada no hospedado → 5 ranking no grupo (código local; não `db push` até revisão) → 6 competições cloud (código local; não `db push` até revisão) → 7 migração Gist (código local; não `db push` até revisão) → 8 desligar Gist.
+Roadmap congelado: 4 grupos validada no hospedado → 5 ranking no grupo (validada) → 6 competições cloud (validada) → 7 migração Gist (validada) → 8 desligar Gist (código do cliente; sem migration SQL nova; não `db push` por causa desta etapa).
 
 Identidade da etapa 3 permanece congelada. Não unifique Gist. Sem ranking mundial público.
 

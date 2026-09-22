@@ -78,7 +78,7 @@ describe('legacy migration UI', () => {
       <LegacyMigrationView configured ready={false} user={null} onBack={() => {}} />
     );
     expect(locked).toContain('Voltar');
-    expect(locked).toContain('Migrar dados antigos');
+    expect(locked).toContain('Importar dados antigos');
     expect(canStartImport({ players: [{ status: 'NEEDS_PLAYER_MAPPING' }], sessions: [], competitions: [] })).toBe(
       false
     );
@@ -101,7 +101,8 @@ describe('legacy migration UI', () => {
         onBack={() => {}}
       />
     );
-    expect(html).toContain('Nenhum dado do Gist será apagado');
-    expect(html).toContain('Migrar dados antigos');
+    expect(html).toContain('Nenhum dado antigo remoto será apagado');
+    expect(html).toContain('Importar dados antigos');
+    expect(html).toContain('Ler Gist antigo');
   });
 });

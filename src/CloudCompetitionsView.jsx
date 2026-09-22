@@ -20,7 +20,6 @@ export function CloudCompetitionOpenPanel({
   competitionError,
   loaded,
   user,
-  players,
   onBack,
   onRetry,
   onReload,
@@ -46,7 +45,7 @@ export function CloudCompetitionOpenPanel({
             className="text-sm font-bold cursor-pointer"
             style={{ color: 'var(--primary)' }}
           >
-            ← Competições online
+            ← Competições
           </button>
           <button
             type="button"
@@ -65,7 +64,6 @@ export function CloudCompetitionOpenPanel({
     <CloudCompetitionDetail
       loaded={loaded}
       user={user}
-      players={players}
       onBack={onBack}
       onReload={onReload}
     />
@@ -79,7 +77,6 @@ export default function CloudCompetitionsView({
   pendingCompetitionJoinCode,
   openCompetitionId,
   onOpenCompetition,
-  players = [],
 }) {
   const [competitions, setCompetitions] = useState([]);
   const [loaded, setLoaded] = useState(null);
@@ -188,7 +185,7 @@ export default function CloudCompetitionsView({
   if (!user) {
     return (
       <div className="space-y-4">
-        <h2 className="text-xl font-bold">Competições online</h2>
+        <h2 className="text-xl font-bold">Competições</h2>
         <AuthPanel
           configured={configured}
           ready={ready}
@@ -206,7 +203,6 @@ export default function CloudCompetitionsView({
         competitionError={competitionError}
         loaded={loaded}
         user={user}
-        players={players}
         onBack={() => onOpenCompetition?.(null)}
         onRetry={() => refreshCompetition(openCompetitionId)}
         onReload={() => refreshCompetition(loaded?.competition?.id ?? openCompetitionId, { keepCompetition: true })}
@@ -216,7 +212,7 @@ export default function CloudCompetitionsView({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">Competições online</h2>
+      <h2 className="text-xl font-bold">Competições</h2>
       <AuthPanel configured={configured} ready={ready} user={user} />
       <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
         Minhas competições. Pertencer a um grupo não abre a competição automaticamente.
@@ -281,7 +277,7 @@ export default function CloudCompetitionsView({
       <div className="space-y-2">
         {competitions.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Você ainda não participa de uma competição online.
+            Você ainda não participa de uma competição.
           </p>
         ) : (
           competitions.map((item) => (

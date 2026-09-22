@@ -34,7 +34,7 @@ function asRpcResult(rpc, fallback = 'Não foi possível concluir.') {
   };
 }
 
-export default function CloudCompetitionDetail({ loaded, user, players = [], onBack, onReload }) {
+export default function CloudCompetitionDetail({ loaded, user, onBack, onReload }) {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [guestName, setGuestName] = useState('');
@@ -59,7 +59,7 @@ export default function CloudCompetitionDetail({ loaded, user, players = [], onB
   }, [user?.id]);
 
   const rosterById = new Map();
-  for (const player of [...cloudPlayers, ...(loaded.roster ?? []), ...players]) {
+  for (const player of [...cloudPlayers, ...(loaded.roster ?? [])]) {
     if (player?.id && !rosterById.has(player.id)) {
       rosterById.set(player.id, { id: player.id, name: player.name });
     }

@@ -579,7 +579,7 @@ describe('compatibilidade do Sorteio Rápido e do fluxo ativo', () => {
   it('não importa generateBalancedPairs no fluxo ativo de encontros', () => {
     const root = dirname(fileURLToPath(import.meta.url));
     const builder = readFileSync(join(root, '../AutomaticTeamBuilder.jsx'), 'utf8');
-    const detail = readFileSync(join(root, '../GameSessionDetail.jsx'), 'utf8');
+    const detail = readFileSync(join(root, '../CloudSessionDetail.jsx'), 'utf8');
     expect(builder).toContain('generateBalancedTeams');
     expect(builder).not.toContain('generateBalancedPairs');
     expect(detail).not.toContain('generateBalancedPairs');

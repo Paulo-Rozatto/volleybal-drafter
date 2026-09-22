@@ -24,8 +24,8 @@ export default function AuthPanel({
       >
         <h3 className="font-bold text-sm">Conta (Supabase)</h3>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para entrar e usar encontros
-          online. O Gist continua funcionando sem login.
+          Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para entrar e usar encontros,
+          competições e grupos.
         </p>
       </div>
     );
@@ -56,7 +56,7 @@ export default function AuthPanel({
             className="w-full font-bold py-2 rounded-lg text-sm cursor-pointer"
             style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
           >
-            Migrar dados antigos
+            Importar dados antigos
           </button>
         ) : null}
         <button
@@ -101,10 +101,10 @@ export default function AuthPanel({
         );
       }}
     >
-      <h3 className="font-bold text-sm">Entrar nos encontros online</h3>
+      <h3 className="font-bold text-sm">Entrar</h3>
       <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        O sorteio, o Gist e as competições continuam sem conta. A conta vale para criar e
-        participar de encontros e competições compartilhados.
+        A conta é necessária para encontros, competições, grupos e perfil. O sorteio rápido
+        continua só neste aparelho.
       </p>
       {pendingJoinCode ? (
         <p className="text-sm font-semibold">

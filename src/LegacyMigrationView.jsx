@@ -4,21 +4,25 @@ import LegacyMigrationPreview from './LegacyMigrationPreview.jsx';
 import LegacyMigrationProgress from './LegacyMigrationProgress.jsx';
 import LegacyMigrationReport from './LegacyMigrationReport.jsx';
 import LegacyPlayerMapping from './LegacyPlayerMapping.jsx';
+import { createEmptyCompetitionDocument } from './persistence/competitionsDocument.js';
+import { createEmptyGameSessionsDocument } from './persistence/gameSessionsDocument.js';
 import {
   canStartImport,
   downloadLegacySnapshotFile,
   itemsToImport,
-  migrationSourceType,
   nextMigrationStep,
   previousMigrationStep,
 } from './legacyMigrationPanel.js';
 import {
   buildLegacyMigrationPlan,
   fingerprintLegacySnapshot,
+  parseLegacySnapshotJson,
   serializeLegacySnapshot,
   verifyImportedCompetition,
   verifyImportedSession,
 } from './migration/legacyMigration.js';
+import { loadGistState } from './migration/legacy/gistReader.js';
+import { hasLocalLegacyData, readLocalLegacySnapshot } from './migration/legacy/localLegacyReader.js';
 import {
   fetchLegacyImportCloudState,
   finishLegacyImportBatch,
@@ -30,16 +34,21 @@ import {
   startLegacyImportBatch,
 } from './supabase/legacyImportApi.js';
 
+const EMPTY_SNAPSHOT = {
+  players: [],
+  sessions: createEmptyGameSessionsDocument(),
+  competitions: createEmptyCompetitionDocument(),
+};
+
 export default function LegacyMigrationView({
   configured,
   ready,
   user,
-  players,
-  gameSessions,
-  competitions,
-  gistLoaded,
   onBack,
 }) {
+  const [sourceType, setSourceType] = useState('localStorage');
+  const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT);
+  const [localFound] = useState(() => hasLocalLegacyData());
   const [step, setStep] = useState('origin');
   const [plan, setPlan] = useState(null);
   const [fingerprint, setFingerprint] = useState('');
@@ -58,11 +67,10 @@ export default function LegacyMigrationView({
   });
   const [results, setResults] = useState([]);
   const cancelRef = useRef(false);
-  const sourceType = migrationSourceType(gistLoaded);
-  const snapshot = useMemo(
-    () => ({ players, sessions: gameSessions, competitions }),
-    [players, gameSessions, competitions]
-  );
+
+  const players = snapshot.players;
+  const gameSessions = snapshot.sessions;
+  const competitions = snapshot.competitions;
 
   const resolvedPlan = useMemo(() => {
     if (!plan) return null;
@@ -74,6 +82,66 @@ export default function LegacyMigrationView({
       playerDecisions: decisions,
     });
   }, [plan, players, gameSessions, competitions, decisions]);
+
+  function applySnapshot(next, nextSourceType) {
+    setSnapshot({
+      players: next.players ?? [],
+      sessions: next.sessions ?? createEmptyGameSessionsDocument(),
+      competitions: next.competitions ?? createEmptyCompetitionDocument(),
+    });
+    setSourceType(nextSourceType);
+    setPlan(null);
+    setFingerprint('');
+    setDecisions({});
+    setStatus('');
+  }
+
+  function loadFromBrowser() {
+    const local = readLocalLegacySnapshot();
+    applySnapshot(local, 'localStorage');
+    if (local.errors.length) {
+      setStatus(local.errors.join(' '));
+    }
+    if (!local.found) {
+      setStatus('Não há dados antigos neste navegador.');
+    }
+  }
+
+  async function loadFromGist() {
+    setBusy(true);
+    setStatus('');
+    try {
+      const remote = await loadGistState();
+      applySnapshot(
+        {
+          players: remote.players,
+          sessions: remote.gameSessions,
+          competitions: remote.competitions,
+        },
+        'gist'
+      );
+    } catch (error) {
+      setStatus(error?.message || 'Não foi possível ler o Gist antigo.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function loadFromFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = parseLegacySnapshotJson(String(reader.result ?? ''));
+        applySnapshot(parsed, 'unknown');
+      } catch (error) {
+        setStatus(error?.message || 'Não foi possível ler o snapshot.');
+      }
+    };
+    reader.readAsText(file);
+  }
 
   async function analyze() {
     setBusy(true);
@@ -289,9 +357,9 @@ export default function LegacyMigrationView({
         <button type="button" className="text-sm font-bold cursor-pointer" style={{ color: 'var(--primary)' }} onClick={onBack}>
           ← Voltar
         </button>
-        <h2 className="text-xl font-bold">Migrar dados antigos</h2>
+          <h2 className="text-xl font-bold">Importar dados antigos</h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          A importação exige login. Nenhum dado do Gist será apagado.
+          A importação exige login. Nenhum dado do Gist remoto será apagado.
         </p>
         <AuthPanel configured={configured} ready={ready} user={user} />
       </div>
@@ -303,16 +371,39 @@ export default function LegacyMigrationView({
       <button type="button" className="text-sm font-bold cursor-pointer" style={{ color: 'var(--primary)' }} onClick={onBack}>
         ← Voltar
       </button>
-      <h2 className="text-xl font-bold">Migrar dados antigos</h2>
+      <h2 className="text-xl font-bold">Importar dados antigos</h2>
       <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        Importação unidirecional para o cloud. Nenhum dado do Gist será apagado. Não é sincronização permanente.
+        Importação unidirecional. Nenhum dado antigo remoto será apagado. Não é sincronização permanente.
       </p>
 
       {step === 'origin' && (
         <div className="space-y-3">
-          <p className="text-sm">
-            O App analisa o elenco, os encontros e as competições já carregados neste navegador.
-          </p>
+          {localFound ? (
+            <p className="text-sm font-semibold">Encontramos dados antigos neste navegador.</p>
+          ) : (
+            <p className="text-sm">Nenhum dado antigo foi detectado automaticamente neste navegador.</p>
+          )}
+          <button
+            type="button"
+            className="w-full font-bold py-2 rounded-lg text-sm cursor-pointer"
+            style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
+            onClick={loadFromBrowser}
+          >
+            Usar dados antigos deste navegador
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            className="w-full font-bold py-2 rounded-lg text-sm cursor-pointer disabled:opacity-50"
+            style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
+            onClick={loadFromGist}
+          >
+            Ler Gist antigo (somente leitura)
+          </button>
+          <label className="block w-full font-bold py-2 rounded-lg text-sm cursor-pointer text-center" style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}>
+            Enviar snapshot JSON
+            <input type="file" accept="application/json,.json" className="hidden" onChange={loadFromFile} />
+          </label>
           <button
             type="button"
             className="w-full font-bold py-2 rounded-lg text-sm cursor-pointer"

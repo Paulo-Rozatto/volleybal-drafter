@@ -24,7 +24,6 @@ import {
   competitionTeamsLockedMessage,
 } from './competitionPresentation.js';
 import { filterPlayersByName, teamMembersForEdit } from './teamGameSessions.js';
-import { INVALID_COMPETITIONS_CACHE_CONFIRMATION_REQUIRED } from './persistence/competitionOperations.js';
 
 function PlayerSlot({ label, player, onClear }) {
   return (
@@ -94,9 +93,6 @@ export default function CompetitionTeamBuilder({
 
   const applyResult = async (resultPromise, { resetOnSuccess } = { resetOnSuccess: true }) => {
     const result = await Promise.resolve(resultPromise);
-    if (result?.errors?.[0]?.code === INVALID_COMPETITIONS_CACHE_CONFIRMATION_REQUIRED) {
-      return false;
-    }
     if (!result?.ok) {
       setError(result?.errors?.[0]?.message || `Não foi possível atualizar ${doubles ? 'a dupla' : 'o time'}.`);
       return false;
