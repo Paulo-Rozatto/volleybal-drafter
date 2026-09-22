@@ -65,13 +65,17 @@ export default function JoinGroupView({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">Entrar no grupo {normalized}</h2>
+      <h2 className="text-h1">Você recebeu um convite para um grupo</h2>
+      <p className="text-small" style={{ color: 'var(--text-muted)' }}>
+        Depois do login, o acesso é retomado automaticamente.
+      </p>
       {!user ? (
         <AuthPanel
           configured={configured}
           ready={ready}
           user={user}
           pendingGroupJoinCode={normalized}
+          variant="compact"
         />
       ) : joining ? (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>

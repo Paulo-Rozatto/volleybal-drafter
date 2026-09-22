@@ -36,6 +36,8 @@ describe('group mappers', () => {
     expect(group.members[0]).toEqual({
       userId: 'u1',
       displayName: 'André',
+      username: '',
+      avatarPath: null,
       role: 'owner',
       joinedAt: '2026-09-21T12:00:00Z',
     });

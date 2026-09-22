@@ -57,7 +57,7 @@ describe('cloud group panel', () => {
       />
     );
     expect(erro).toContain('Falha ao abrir');
-    expect(erro).toContain('Recarregar');
+    expect(erro).toContain('Tentar novamente');
     expect(erro).toContain('Grupos');
 
     const detail = renderToStaticMarkup(
@@ -76,7 +76,7 @@ describe('cloud group panel', () => {
     expect(detail).toContain('Vôlei Quinta');
     expect(detail).toContain('Sem descrição');
     expect(detail).toContain('André');
-    expect(detail).toContain('Owner');
+    expect(detail).toContain('Dono');
     expect(detail).toContain('Promover a admin');
     expect(detail).toContain('Rebaixar a membro');
     expect(detail).toContain('Novo encontro neste grupo');

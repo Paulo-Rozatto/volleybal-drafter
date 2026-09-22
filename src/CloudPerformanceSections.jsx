@@ -25,10 +25,14 @@ export function CloudPerformanceStatCard({ label, value }) {
 export function CloudPerformanceSections({
   summary,
   bestPartner,
+  partners = null,
+  lowestPartners = [],
   hardestOpponents = [],
+  bestAgainst = [],
   history = [],
   diagnostics,
   emptyMessage = 'Ainda não há partidas válidas neste perfil.',
+  partnerNote,
 }) {
   if (!summary || summary.matches === 0) {
     return (
@@ -39,6 +43,7 @@ export function CloudPerformanceSections({
   }
 
   const recentHistory = [...history].reverse();
+  const partnerList = partners ?? (bestPartner ? [bestPartner] : []);
 
   return (
     <>
@@ -58,6 +63,41 @@ export function CloudPerformanceSections({
           Melhor parceiro: {bestPartner.partnerName} ({bestPartner.wins}V/{bestPartner.losses}D)
         </p>
       ) : null}
+      {partnerNote ? (
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          {partnerNote}
+        </p>
+      ) : null}
+      {partnerList.length > 0 ? (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+            Melhores parceiros
+          </p>
+          <ul className="text-sm space-y-1">
+            {partnerList.map((partner) => (
+              <li key={partner.partnerId}>
+                {partner.partnerName} ({partner.wins}V/{partner.losses}D · {partner.matches} partidas
+                juntos)
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {lowestPartners.length > 0 ? (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+            Menor aproveitamento em dupla
+          </p>
+          <ul className="text-sm space-y-1">
+            {lowestPartners.map((partner) => (
+              <li key={`low-${partner.partnerId}`}>
+                {partner.partnerName} ({partner.wins}V/{partner.losses}D · {partner.matches} partidas
+                juntos)
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {hardestOpponents.length > 0 ? (
         <div className="space-y-1">
           <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
@@ -66,7 +106,23 @@ export function CloudPerformanceSections({
           <ul className="text-sm space-y-1">
             {hardestOpponents.map((opponent) => (
               <li key={opponent.opponentId}>
-                {opponent.opponentName} ({opponent.wins}V/{opponent.losses}D)
+                {opponent.opponentName} ({opponent.wins}V/{opponent.losses}D · {opponent.matches}{' '}
+                partidas)
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {bestAgainst.length > 0 ? (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+            Melhor desempenho contra
+          </p>
+          <ul className="text-sm space-y-1">
+            {bestAgainst.map((opponent) => (
+              <li key={`best-${opponent.opponentId}`}>
+                {opponent.opponentName} ({opponent.wins}V/{opponent.losses}D · {opponent.matches}{' '}
+                partidas)
               </li>
             ))}
           </ul>

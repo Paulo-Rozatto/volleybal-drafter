@@ -39,6 +39,9 @@ function connectorPaths(columns, positions) {
 function BracketStrip({ columns, onOpenMatch, paths, canvasSize, canvasRef, columnRefs, tabAriaLabel }) {
   return (
     <div className="space-y-3">
+      <p className="text-caption" style={{ color: 'var(--text-muted)' }}>
+        Deslize para o lado para ver a chave completa.
+      </p>
       <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label={tabAriaLabel}>
         {columns.map((column, index) => (
           <button

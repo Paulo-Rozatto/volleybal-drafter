@@ -67,7 +67,7 @@ export async function loadGroup(groupId, myUserId) {
       supabase.from('groups').select('*').eq('id', groupId).maybeSingle(),
       supabase
         .from('group_members')
-        .select('group_id, user_id, role, joined_at, profiles(id, display_name)')
+        .select('group_id, user_id, role, joined_at, profiles(id, display_name, username, avatar_path)')
         .eq('group_id', groupId),
     ]);
 

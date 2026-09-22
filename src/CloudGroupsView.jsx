@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import AuthPanel from './AuthPanel.jsx';
 import { CloudGroupOpenPanel } from './CloudGroupDetail.jsx';
+import EmptyState from './ui/EmptyState.jsx';
+import EntityCard from './ui/EntityCard.jsx';
+import ErrorState from './ui/ErrorState.jsx';
+import LoadingState from './ui/LoadingState.jsx';
+import PageHeader from './ui/PageHeader.jsx';
+import { translateRole } from './ui/labels.js';
 import {
   createdCloudGroupId,
   fetchOpenCloudGroup,
@@ -16,7 +21,6 @@ import {
 } from './supabase/groupApi.js';
 import { listGroupCloudCompetitions } from './supabase/competitionApi.js';
 import { isCanonicalJoinCode, normalizeJoinCode } from './supabase/joinCode.js';
-import { groupRoleLabel } from './supabase/groupMappers.js';
 
 function memberCountLabel(count) {
   return `${count} ${count === 1 ? 'membro' : 'membros'}`;
@@ -46,6 +50,7 @@ export default function CloudGroupsView({
   const [competitionsError, setCompetitionsError] = useState(null);
   const [createName, setCreateName] = useState('');
   const [createDescription, setCreateDescription] = useState('');
+  const [creating, setCreating] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -271,19 +276,7 @@ export default function CloudGroupsView({
     };
   }, [userId, openGroupId]);
 
-  if (!user) {
-    return (
-      <div className="space-y-4">
-        <h2 className="text-xl font-bold">Grupos</h2>
-        <AuthPanel
-          configured={configured}
-          ready={ready}
-          user={user}
-          pendingGroupJoinCode={pendingGroupJoinCode}
-        />
-      </div>
-    );
-  }
+  if (!user) return null;
 
   if (openGroupId) {
     return (
@@ -312,11 +305,27 @@ export default function CloudGroupsView({
     );
   }
 
+  void configured;
+  void ready;
+  void pendingGroupJoinCode;
+
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">Grupos</h2>
-      <AuthPanel configured={configured} ready={ready} user={user} />
+      <PageHeader
+        title="Grupos"
+        action={
+          <button
+            type="button"
+            onClick={() => setCreating((open) => !open)}
+            className="min-h-11 px-4 rounded-xl text-small font-bold cursor-pointer"
+            style={{ backgroundColor: 'var(--primary)', color: 'var(--text-on-primary)' }}
+          >
+            {creating ? 'Fechar' : 'Novo grupo'}
+          </button>
+        }
+      />
 
+      {creating ? (
       <form
         className="p-4 rounded-xl border space-y-3"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
@@ -379,6 +388,7 @@ export default function CloudGroupsView({
           Criar grupo
         </button>
       </form>
+      ) : null}
 
       <form
         className="p-4 rounded-xl border space-y-3"
@@ -431,32 +441,24 @@ export default function CloudGroupsView({
       </form>
 
       <div className="space-y-2">
-        <h3 className="font-bold text-sm">Meus grupos</h3>
-        {listLoading ? (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Carregando grupos...
-          </p>
-        ) : null}
-        {listError ? <p className="text-sm font-semibold text-red-500">{listError}</p> : null}
+        {listLoading ? <LoadingState label="Carregando grupos..." /> : null}
+        {listError ? <ErrorState message={listError} onRetry={refreshList} /> : null}
         {!listLoading && !listError && groups.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Você ainda não participa de um grupo.
-          </p>
+          <EmptyState
+            title="Você ainda não tem grupos"
+            description="Crie um grupo para jogar sempre com a mesma turma e ver o ranking."
+            actionLabel="Criar grupo"
+            onAction={() => setCreating(true)}
+          />
         ) : null}
         {groups.map((item) => (
-          <button
+          <EntityCard
             key={item.id}
-            type="button"
+            title={item.name}
+            dateLabel={memberCountLabel(item.memberCount)}
+            meta={item.myRole ? translateRole(item.myRole) : null}
             onClick={() => onOpenGroup?.(item.id)}
-            className="w-full text-left p-3 rounded-xl border cursor-pointer"
-            style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-          >
-            <p className="font-semibold">{item.name}</p>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              {memberCountLabel(item.memberCount)}
-              {item.myRole ? ` · ${groupRoleLabel(item.myRole)}` : ''}
-            </p>
-          </button>
+          />
         ))}
       </div>
       {status ? (

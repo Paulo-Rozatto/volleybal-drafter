@@ -68,7 +68,7 @@ describe('cloud competition panel', () => {
       />
     );
     expect(erro).toContain('Falha ao abrir');
-    expect(erro).toContain('Recarregar');
+    expect(erro).toContain('Tentar novamente');
     expect(erro).toContain('Competições');
 
     const detail = renderToStaticMarkup(
@@ -83,7 +83,7 @@ describe('cloud competition panel', () => {
     );
     expect(detail).toContain('Torneio');
     expect(detail).toContain('AB23CD56');
-    expect(detail).toContain('organizador');
+    expect(detail).toContain('Dono');
     expect(detail).not.toContain('Carregando competição');
   });
 

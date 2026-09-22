@@ -1,8 +1,22 @@
-# Cortada
+# PaDre
 
-SPA React para sortear times de vôlei e registrar encontros, competições e grupos.
+Cada jogo conta.
 
-A fonte de verdade operacional é o **Supabase**. Gist/localStorage legado não persistem o app normal.
+PaDre (Plataforma de Acompanhamento de Disputas, Rankings e Estatísticas) organiza encontros, competições, grupos, rankings e histórico em um só lugar.
+
+A marca visível é **PaDre**. O repositório e o caminho público ainda usam `volleybal-drafter` (GitHub Pages em `/volleybal-drafter/`).
+
+## Principais recursos
+
+- Encontros com times, rodadas e placar
+- Competições (eliminatória, suíço, double elimination e combinações)
+- Grupos (a turma) com ranking
+- Histórico e estatísticas do jogador vinculado
+- Convites por código e atualização em tempo real
+
+## Arquitetura
+
+React/Vite + Supabase (Auth por link de e-mail, PostgreSQL, Realtime). A fonte operacional é só o cloud.
 
 ```text
 React/Vite
@@ -16,15 +30,7 @@ Realtime
 Domain performance engine
 ```
 
-Importação histórica (opcional):
-
-```text
-Gist / localStorage / snapshot JSON
-   ↓
-somente ferramenta de migração (`#/migration`)
-```
-
-O Gist remoto **não** é apagado. A importação é unidirecional. Não há dual-write nem fallback silencioso para o legado.
+O app pode ser instalado como PWA. O service worker guarda o shell e os assets estáticos. Respostas autenticadas do Supabase não são cache autoritativo. Sem conexão, a interface mostra **Sem conexão** — não há edição offline nem fallback para dados antigos.
 
 ## Instalação e execução
 
@@ -49,9 +55,13 @@ npm run lint
 npm run build
 ```
 
+## Importar dados antigos
+
+Se você usava uma versão anterior, a tela **Importar dados antigos** (`#/migration`, autenticada) lê Gist/localStorage/snapshot em modo somente leitura e importa para o Supabase. O Gist remoto **não** é apagado. Isso não faz parte do fluxo normal.
+
 ## Encontros
 
-O Cortada registra peladas além do Sorteio Rápido.
+O PaDre registra peladas além do Sorteio Rápido.
 
 - Formatos de **2x2** a **6x6**, com quantidade de times definida na criação.
 - Encontro pode ser criado **manualmente** (data, formato, nome) ou a partir de um **sorteio automático** de times.
@@ -154,7 +164,7 @@ Papéis do grupo: owner, admin, member. Owner/admin editam nome, rotacionam cód
 
 Roteiro manual:
 
-1. André cria o grupo, vê-se Owner, copia o código, cria um encontro no grupo.
+1. André cria o grupo, vê-se Dono, copia o código, cria um encontro no grupo.
 2. Paulo entra no grupo pelo código, vê-se Membro, **não** vê o encontro até entrar pelo mecanismo da sessão.
 3. Paulo entra no encontro pelo código da sessão. Identidade/player dele continua independente da membership do grupo.
 
@@ -288,3 +298,9 @@ Concorrência de estrutura: dois admins carregam `structure_version = 3`; A reor
 ## Sorteio Rápido
 
 Cole a lista de confirmados, identifique o elenco, escolha o formato e sorteie times equilibrados. Esse fluxo não grava encontros até você registrar um encontro à parte.
+
+
+### Etapa 9 — Rebranding PaDre
+
+Identidade visual, AppShell, PWA instalável e lazy loading. Sem migration SQL. Sem alteração do Vite `base` nem do repositório.
+

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import CloudGroupRanking from './CloudGroupRanking.jsx';
 import CloudSessionCreateForm from './CloudSessionCreateForm.jsx';
 import CloudCompetitionCreateForm from './CloudCompetitionCreateForm.jsx';
+import ConfirmDialog from './ConfirmDialog.jsx';
 import {
   canManageGroup,
   groupRoleLabel,
@@ -14,6 +15,15 @@ import {
   setGroupMemberRole,
   updateGroup,
 } from './supabase/groupApi.js';
+import CopyInviteButton from './ui/CopyInviteButton.jsx';
+import EmptyState from './ui/EmptyState.jsx';
+import EntityCard from './ui/EntityCard.jsx';
+import ErrorState from './ui/ErrorState.jsx';
+import LoadingState from './ui/LoadingState.jsx';
+import Tabs from './ui/Tabs.jsx';
+import GroupChatPanel from './community/GroupChatPanel.jsx';
+import { isCommunityBetaEnabled } from './community/flags.js';
+import { formatSessionDate } from './teamGameSessions.js';
 
 function memberCountLabel(count) {
   return `${count} ${count === 1 ? 'membro' : 'membros'}`;
@@ -38,38 +48,17 @@ export function CloudGroupOpenPanel({
   onLeftGroup,
 }) {
   if (groupLoading) {
-    return (
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        Carregando grupo...
-      </p>
-    );
+    return <LoadingState label="Carregando grupo..." />;
   }
 
   if (groupError || !group) {
     return (
-      <div className="space-y-3">
-        <p className="text-sm font-semibold text-red-500">
-          {groupError || 'Não foi possível abrir o grupo.'}
-        </p>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            className="text-sm font-bold cursor-pointer"
-            style={{ color: 'var(--primary)' }}
-          >
-            ← Grupos
-          </button>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="text-sm font-bold cursor-pointer"
-            style={{ color: 'var(--primary)' }}
-          >
-            Recarregar
-          </button>
-        </div>
-      </div>
+      <ErrorState
+        message={groupError || 'Não foi possível abrir o grupo.'}
+        onBack={onBack}
+        backLabel="← Grupos"
+        onRetry={onRetry}
+      />
     );
   }
 
@@ -111,6 +100,8 @@ export default function CloudGroupDetail({
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [section, setSection] = useState('grupo');
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState(null);
   const [rankingUserId, setRankingUserId] = useState(null);
   const [name, setName] = useState(group.name);
   const [description, setDescription] = useState(group.description ?? '');
@@ -138,16 +129,6 @@ export default function CloudGroupDetail({
     }
   }
 
-  async function copyInvite() {
-    const text = `${group.joinCode}\n${joinHref}`;
-    try {
-      await globalThis.navigator?.clipboard?.writeText?.(text);
-      setStatus('Código copiado.');
-    } catch {
-      setStatus(joinHref);
-    }
-  }
-
   return (
     <div className="space-y-4">
       <button
@@ -159,49 +140,32 @@ export default function CloudGroupDetail({
         ← Grupos
       </button>
 
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => setSection('grupo')}
-          className="text-sm font-bold px-3 py-1 rounded-lg cursor-pointer"
-          style={{
-            backgroundColor: section === 'grupo' ? 'var(--primary)' : 'var(--bg-subtle)',
-            color: section === 'grupo' ? 'var(--text-inverse)' : 'var(--text-main)',
-          }}
-        >
-          Grupo
-        </button>
-        <button
-          type="button"
-          onClick={() => setSection('ranking')}
-          className="text-sm font-bold px-3 py-1 rounded-lg cursor-pointer"
-          style={{
-            backgroundColor: section === 'ranking' ? 'var(--primary)' : 'var(--bg-subtle)',
-            color: section === 'ranking' ? 'var(--text-inverse)' : 'var(--text-main)',
-          }}
-        >
-          Ranking
-        </button>
-        <button
-          type="button"
-          onClick={() => setSection('competicoes')}
-          className="text-sm font-bold px-3 py-1 rounded-lg cursor-pointer"
-          style={{
-            backgroundColor: section === 'competicoes' ? 'var(--primary)' : 'var(--bg-subtle)',
-            color: section === 'competicoes' ? 'var(--text-inverse)' : 'var(--text-main)',
-          }}
-        >
-          Competições
-        </button>
-      </div>
+      <Tabs
+        label="Seções do grupo"
+        value={section}
+        onChange={setSection}
+        options={[
+          { id: 'grupo', label: 'Visão geral' },
+          { id: 'encontros', label: 'Encontros' },
+          { id: 'competicoes', label: 'Competições' },
+          { id: 'ranking', label: 'Ranking' },
+          ...(isCommunityBetaEnabled() ? [{ id: 'chat', label: 'Chat' }] : []),
+          { id: 'membros', label: 'Membros' },
+        ]}
+      />
 
       {section === 'ranking' ? (
         <CloudGroupRanking
           key={group.id}
           groupId={group.id}
+          groupName={group.name}
           selectedUserId={rankingUserId}
           onSelectUser={setRankingUserId}
         />
+      ) : null}
+
+      {section === 'chat' && isCommunityBetaEnabled() ? (
+        <GroupChatPanel group={group} user={user} />
       ) : null}
 
       {section === 'competicoes' ? (
@@ -224,28 +188,26 @@ export default function CloudGroupDetail({
           {competitionsError ? (
             <p className="text-sm font-semibold text-red-500">{competitionsError}</p>
           ) : null}
-          {!competitionsLoading && !competitionsError && competitions.length === 0 ? (
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Você ainda não participa de uma competição deste grupo.
-            </p>
-          ) : null}
-          {competitions.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onOpenCompetition?.(item.id)}
-              className="w-full text-left p-3 rounded-xl border cursor-pointer"
-              style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-            >
-              <p className="font-semibold">{item.name || 'Competição'}</p>
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                {item.date} · {item.status}
-              </p>
-            </button>
-          ))}
+        {!competitionsLoading && !competitionsError && competitions.length === 0 ? (
+          <EmptyState
+            title="Nenhuma competição neste grupo"
+            description="Você ainda não participa de uma competição deste grupo."
+          />
+        ) : null}
+        {competitions.map((item) => (
+          <EntityCard
+            key={item.id}
+            title={item.name || 'Competição'}
+            dateLabel={formatSessionDate(item.date)}
+            status={item.status}
+            onClick={() => onOpenCompetition?.(item.id)}
+          />
+        ))}
         </section>
       ) : null}
 
+      {['grupo', 'encontros', 'membros'].includes(section) ? (
+      <>
       {section === 'grupo' ? (
       <>
       <div
@@ -348,15 +310,7 @@ export default function CloudGroupDetail({
           {joinHref}
         </p>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={copyInvite}
-            className="font-bold py-2 px-3 rounded-lg text-sm cursor-pointer disabled:opacity-50"
-            style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
-          >
-            Copiar código
-          </button>
+          <CopyInviteButton href={joinHref} code={group.joinCode} />
           {manage ? (
             <button
               type="button"
@@ -370,7 +324,10 @@ export default function CloudGroupDetail({
           ) : null}
         </div>
       </div>
+      </>
+      ) : null}
 
+      {(section === 'grupo' || section === 'membros') ? (
       <section
         className="p-4 rounded-xl border space-y-2"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
@@ -423,7 +380,7 @@ export default function CloudGroupDetail({
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => run(() => removeGroupMember(group.id, member.userId))}
+                      onClick={() => setPendingRemove(member)}
                       className="text-xs font-bold cursor-pointer disabled:opacity-50 text-red-500"
                     >
                       Remover
@@ -438,14 +395,16 @@ export default function CloudGroupDetail({
           <button
             type="button"
             disabled={busy}
-            onClick={() => run(() => leaveGroup(group.id), { left: true })}
+            onClick={() => setConfirmLeave(true)}
             className="text-sm font-bold cursor-pointer disabled:opacity-50 text-red-500"
           >
             Sair do grupo
           </button>
         ) : null}
       </section>
+      ) : null}
 
+      {(section === 'grupo' || section === 'encontros') ? (
       <section className="space-y-3">
         <h3 className="font-bold text-sm">Encontros</h3>
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -466,25 +425,22 @@ export default function CloudGroupDetail({
           <p className="text-sm font-semibold text-red-500">{sessionsError}</p>
         ) : null}
         {!sessionsLoading && !sessionsError && sessions.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Você ainda não participa de um encontro deste grupo.
-          </p>
+          <EmptyState
+            title="Nenhum encontro neste grupo"
+            description="Você ainda não participa de um encontro deste grupo."
+          />
         ) : null}
         {sessions.map((item) => (
-          <button
+          <EntityCard
             key={item.id}
-            type="button"
+            title={item.name || 'Encontro'}
+            dateLabel={formatSessionDate(item.date)}
+            status={item.status}
             onClick={() => onOpenSession?.(item.id)}
-            className="w-full text-left p-3 rounded-xl border cursor-pointer"
-            style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-          >
-            <p className="font-semibold">{item.name || 'Encontro'}</p>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              {item.date} · {item.status} · {item.join_code}
-            </p>
-          </button>
+          />
         ))}
       </section>
+      ) : null}
       </>
       ) : null}
 
@@ -499,6 +455,35 @@ export default function CloudGroupDetail({
         >
           {status}
         </p>
+      ) : null}
+      {confirmLeave ? (
+        <ConfirmDialog
+          titleId="leave-group-title"
+          title="Sair do grupo?"
+          message="Você deixa de fazer parte desta turma. Encontros e competições em que já entrou continuam visíveis."
+          confirmLabel="Sair do grupo"
+          destructive
+          onConfirm={() => {
+            setConfirmLeave(false);
+            run(() => leaveGroup(group.id), { left: true });
+          }}
+          onCancel={() => setConfirmLeave(false)}
+        />
+      ) : null}
+      {pendingRemove ? (
+        <ConfirmDialog
+          titleId="remove-group-member-title"
+          title="Remover membro?"
+          message={`Remover ${pendingRemove.displayName || 'esta pessoa'} do grupo? Isso não tira o acesso de encontros ou competições já existentes.`}
+          confirmLabel="Remover"
+          destructive
+          onConfirm={() => {
+            const member = pendingRemove;
+            setPendingRemove(null);
+            run(() => removeGroupMember(group.id, member.userId));
+          }}
+          onCancel={() => setPendingRemove(null)}
+        />
       ) : null}
     </div>
   );

@@ -1,0 +1,33 @@
+{
+  "name": "PaDre",
+  "short_name": "PaDre",
+  "description": "Cada jogo conta. Encontros, competições, rankings e estatísticas.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "display": "standalone",
+  "start_url": "/volleybal-drafter/",
+  "scope": "/volleybal-drafter/",
+  "id": "/volleybal-drafter/",
+  "theme_color": "#0f766e",
+  "background_color": "#f4f1ea",
+  "icons": [
+    {
+      "src": "/volleybal-drafter/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/volleybal-drafter/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/volleybal-drafter/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

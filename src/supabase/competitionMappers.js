@@ -1,3 +1,5 @@
+import { translateRole } from '../ui/labels.js';
+
 function toIsoString(value) {
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'string') return value;
@@ -186,11 +188,7 @@ export function canScoreCloudCompetition(role, status) {
 }
 
 export function competitionRoleLabel(role) {
-  if (role === 'owner') return 'organizador';
-  if (role === 'admin') return 'admin';
-  if (role === 'member') return 'membro';
-  if (role === 'viewer') return 'visitante';
-  return role ?? '';
+  return translateRole(role);
 }
 
 export function applyCompetitionMatchRealtimeChange(loaded, payload) {

@@ -177,7 +177,7 @@ describe('CloudSessionOpenPanel', () => {
       />
     );
     expect(html).toContain('Encontro não encontrado.');
-    expect(html).toContain('Recarregar');
+    expect(html).toContain('Tentar novamente');
     expect(html).not.toContain('Carregando encontro...');
   });
 

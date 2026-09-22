@@ -62,6 +62,7 @@ describe('etapa 8: boundary cloud vs legado', () => {
 
   it('App não monta telas Gist nem dual-write', () => {
     const app = read('App.jsx');
+    const shell = read('ui/AppShell.jsx');
     expect(app).not.toMatch(/GameSessionsView/);
     expect(app).not.toMatch(/<CompetitionsView/);
     expect(app).not.toMatch(/from ['"].\/CompetitionsView/);
@@ -69,10 +70,12 @@ describe('etapa 8: boundary cloud vs legado', () => {
     expect(app).not.toMatch(/Salvar no Gist/);
     expect(app).toMatch('<CloudSessionsView');
     expect(app).toMatch('<CloudCompetitionsView');
-    expect(app).toMatch('🗓️ Encontros');
-    expect(app).toMatch('🏆 Competições');
+    expect(shell).toMatch('Encontros');
+    expect(shell).toMatch('Competições');
     expect(app).not.toMatch(/Encontros online/);
     expect(app).not.toMatch(/\bGist\b/);
+    expect(app).not.toMatch('Cortada');
+    expect(app).not.toMatch(/migration\/legacy\//);
   });
 
   it('menu normal não mostra Gist; migration reader fica isolado', () => {

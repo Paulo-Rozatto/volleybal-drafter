@@ -1,3 +1,5 @@
+import { translateRole } from '../ui/labels.js';
+
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -13,6 +15,8 @@ export function mapGroupMember(row) {
   return {
     userId: row.user_id,
     displayName: profile?.display_name ?? profile?.displayName ?? '',
+    username: profile?.username ?? '',
+    avatarPath: profile?.avatar_path ?? profile?.avatarPath ?? null,
     role: row.role,
     joinedAt: row.joined_at ?? null,
   };
@@ -69,8 +73,5 @@ export function attachGroupMembers(groups, members, myUserId) {
 }
 
 export function groupRoleLabel(role) {
-  if (role === 'owner') return 'Owner';
-  if (role === 'admin') return 'Admin';
-  if (role === 'member') return 'Membro';
-  return role ?? '';
+  return translateRole(role);
 }

@@ -54,7 +54,7 @@ describe('CloudGroupRankingPanel', () => {
       />
     );
     expect(erro).toContain('Falha no ranking');
-    expect(erro).toContain('Recarregar');
+    expect(erro).toContain('Tentar novamente');
     expect(erro).not.toContain('Carregando ranking');
   });
 

@@ -4,7 +4,7 @@ export const SCORE_UI_MESSAGES = {
   SCORE_NEGATIVE: 'O placar deve usar números inteiros não negativos.',
   SCORE_NOT_INTEGER: 'O placar deve usar números inteiros não negativos.',
   SCORE_INVALID_TYPE: 'O placar deve usar números inteiros não negativos.',
-  SCORE_VERSION_CONFLICT: 'O placar mudou em outro dispositivo. Recarregue e tente de novo.',
+  SCORE_VERSION_CONFLICT: 'Este placar foi alterado em outro dispositivo. Atualizamos os dados para você.',
   SCORE_FORBIDDEN: 'Você não pode registrar placar neste encontro.',
 };
 

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import CompetitionDetail from './CompetitionDetail.jsx';
+import ConfirmDialog from './ConfirmDialog.jsx';
+import CopyInviteButton from './ui/CopyInviteButton.jsx';
 import {
   classifyCompetitionPersist,
   findChangedCompetitionMatch,
@@ -37,6 +39,8 @@ function asRpcResult(rpc, fallback = 'Não foi possível concluir.') {
 export default function CloudCompetitionDetail({ loaded, user, onBack, onReload }) {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmFinalize, setConfirmFinalize] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState(null);
   const [guestName, setGuestName] = useState('');
   const [cloudPlayers, setCloudPlayers] = useState([]);
   const competition = loaded.competition;
@@ -127,16 +131,6 @@ export default function CloudCompetitionDetail({ loaded, user, onBack, onReload 
     }
   }
 
-  async function copyInvite() {
-    const text = `${loaded.joinCode}\n${joinHref}`;
-    try {
-      await globalThis.navigator?.clipboard?.writeText?.(text);
-      setStatus('Código copiado.');
-    } catch {
-      setStatus(joinHref);
-    }
-  }
-
   async function addGuest(event) {
     event.preventDefault();
     const name = guestName.trim();
@@ -194,15 +188,7 @@ export default function CloudCompetitionDetail({ loaded, user, onBack, onReload 
           {joinHref}
         </p>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={copyInvite}
-            className="font-bold py-2 px-3 rounded-lg text-sm cursor-pointer disabled:opacity-50"
-            style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
-          >
-            Copiar código
-          </button>
+        <CopyInviteButton href={joinHref} code={loaded.joinCode} />
           {manage ? (
             <button
               type="button"
@@ -223,7 +209,7 @@ export default function CloudCompetitionDetail({ loaded, user, onBack, onReload 
       >
         <h3 className="font-bold text-sm">Acesso</h3>
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          competition_members não entram no elenco. Entrar no grupo também não entra aqui.
+          Quem entra com o convite colabora nesta competição. Isso não coloca ninguém no elenco nem no grupo.
         </p>
         {loaded.members.map((member) => {
           const canEditMember = manage && member.role !== 'owner' && member.userId !== user?.id;
@@ -270,13 +256,13 @@ export default function CloudCompetitionDetail({ loaded, user, onBack, onReload 
                       className="text-xs font-bold cursor-pointer disabled:opacity-50"
                       style={{ color: 'var(--primary)' }}
                     >
-                      Tornar visitante
+                      Tornar visualizador
                     </button>
                   ) : null}
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => run(() => removeCloudCompetitionMember(competition.id, member.userId))}
+                    onClick={() => setPendingRemove(member)}
                     className="text-xs font-bold cursor-pointer disabled:opacity-50 text-red-500"
                   >
                     Remover
@@ -320,9 +306,7 @@ export default function CloudCompetitionDetail({ loaded, user, onBack, onReload 
         <button
           type="button"
           disabled={busy}
-          onClick={() =>
-            run(() => finalizeCloudCompetition(competition.id, loaded.structureVersion))
-          }
+            onClick={() => setConfirmFinalize(true)}
           className="w-full font-bold py-3 rounded-xl cursor-pointer disabled:opacity-50"
           style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
         >
@@ -341,6 +325,34 @@ export default function CloudCompetitionDetail({ loaded, user, onBack, onReload 
         >
           {status}
         </p>
+      ) : null}
+      {confirmFinalize ? (
+        <ConfirmDialog
+          titleId="finalize-competition-title"
+          title="Finalizar competição?"
+          message="A competição deixa de aceitar mudanças de chave. Placar ainda pode ser corrigido por dono ou administrador."
+          confirmLabel="Finalizar competição"
+          onConfirm={() => {
+            setConfirmFinalize(false);
+            run(() => finalizeCloudCompetition(competition.id, loaded.structureVersion));
+          }}
+          onCancel={() => setConfirmFinalize(false)}
+        />
+      ) : null}
+      {pendingRemove ? (
+        <ConfirmDialog
+          titleId="remove-competition-member-title"
+          title="Remover acesso?"
+          message={`Remover ${pendingRemove.displayName || 'esta pessoa'} desta competição?`}
+          confirmLabel="Remover"
+          destructive
+          onConfirm={() => {
+            const member = pendingRemove;
+            setPendingRemove(null);
+            run(() => removeCloudCompetitionMember(competition.id, member.userId));
+          }}
+          onCancel={() => setPendingRemove(null)}
+        />
       ) : null}
     </div>
   );

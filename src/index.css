@@ -1,49 +1,172 @@
 @import "tailwindcss";
 
 :root {
-  /* Brand Colors from Palette */
-  --primary: #23aaff;
-  --primary-hover: #0092ed;
-  --secondary: #5288aa;
-  --accent: #ffa526;
-
-  /* Light Theme Surfaces & Text */
-  --bg-app: #f8fafc;
+  --bg-app: #f4f1ea;
   --bg-surface: #ffffff;
-  --bg-subtle: #f1f5f9;
-  --border-color: #e2e8f0;
-
-  --text-main: #0f172a;
-  --text-muted: #64748b;
-  --text-inverse: #ffffff;
-
+  --bg-elevated: #fffcf7;
+  --bg-subtle: #ebe6dc;
+  --text-main: #1c1917;
+  --text-muted: #57534e;
+  --text-inverse: #fafaf9;
+  --text-on-primary: #fafaf9;
+  --primary: #0f766e;
+  --primary-hover: #0d9488;
+  --accent: #c2410c;
+  --border-color: #e7e5e4;
+  --success: #15803d;
+  --warning: #d97706;
+  --danger: #b91c1c;
+  --focus-ring: #0f766e;
   color-scheme: light dark;
 }
 
-/* Dark Theme Support */
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-app: #1c1917;
+  --bg-surface: #292524;
+  --bg-elevated: #44403c;
+  --bg-subtle: #3f3b37;
+  --text-main: #fafaf9;
+  --text-muted: #a8a29e;
+  --text-inverse: #1c1917;
+  --text-on-primary: #042f2e;
+  --primary: #2dd4bf;
+  --primary-hover: #5eead4;
+  --accent: #fb923c;
+  --border-color: #44403c;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --focus-ring: #2dd4bf;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    --primary: #38bdff;       /* Slightly brighter blue for dark backgrounds */
-    --primary-hover: #23aaff;
-    --secondary: #68a3c7;
-    --accent: #ffb347;
-
-    /* Dark Theme Surfaces & Text */
-    --bg-app: #0f172a;        /* Deep Slate Dark */
-    --bg-surface: #1e293b;    /* Card Surface */
-    --bg-subtle: #334155;     /* Zebra Row / Subtle fill */
-    --border-color: #334155;
-
-    --text-main: #f8fafc;
-    --text-muted: #94a3b8;
-    --text-inverse: #0f172a;
+  html:not([data-theme="light"]) {
+    --bg-app: #1c1917;
+    --bg-surface: #292524;
+    --bg-elevated: #44403c;
+    --bg-subtle: #3f3b37;
+    --text-main: #fafaf9;
+    --text-muted: #a8a29e;
+    --text-inverse: #1c1917;
+    --text-on-primary: #042f2e;
+    --primary: #2dd4bf;
+    --primary-hover: #5eead4;
+    --accent: #fb923c;
+    --border-color: #44403c;
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --danger: #f87171;
+    --focus-ring: #2dd4bf;
   }
 }
 
+html,
 body {
   margin: 0;
+  min-height: 100%;
+}
+
+body {
   background-color: var(--bg-app);
   color: var(--text-main);
-  font-family: system-ui, -apple-system, sans-serif;
-  min-height: 100vh;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.text-display {
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.text-h1 {
+  font-size: 1.5rem;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+.text-h2 {
+  font-size: 1.25rem;
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+.text-h3 {
+  font-size: 1.0625rem;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.text-small {
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.text-caption {
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.padre-shell {
+  width: 100%;
+  max-width: 72rem;
+}
+
+.padre-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-subtle) 0%,
+    var(--bg-elevated) 50%,
+    var(--bg-subtle) 100%
+  );
+  background-size: 200% 100%;
+  animation: padre-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes padre-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .padre-skeleton {
+    animation: none;
+  }
 }

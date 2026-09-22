@@ -8,6 +8,8 @@ export function mapGroupPerformanceMembers(rows = []) {
   return (Array.isArray(rows) ? rows : []).map((row) => ({
     userId: row.user_id,
     displayName: row.display_name ?? '',
+    username: row.username ?? '',
+    avatarPath: row.avatar_path ?? null,
     role: row.role,
     playerId: row.player_id ?? null,
     playerName: row.player_name ?? null,

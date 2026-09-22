@@ -1,15 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  getBestPartner,
-  getHardestOpponents,
-  getPlayerMatchHistory,
-  getPlayerPerformance,
-} from './domain/playerPerformance.js';
-import {
-  formatHistoryDiagnostics,
-} from './performancePresentation.js';
-import { CloudPerformanceSections } from './CloudPerformanceSections.jsx';
 import { buildCloudPlayerPerformanceIndex } from './supabase/cloudPerformance.js';
+import EditSocialProfileForm from './community/EditSocialProfileForm.jsx';
+import PlayerSocialStats from './community/PlayerSocialStats.jsx';
+import SocialAvatar from './community/SocialAvatar.jsx';
+import { getMySocialProfile } from './community/profileApi.js';
+import { formatUsername } from './community/usernames.js';
+import { isCommunityBetaEnabled } from './community/flags.js';
 import {
   approveCloudPlayerLinkClaim,
   createAndLinkCloudPlayer,
@@ -21,6 +17,7 @@ import {
   rejectCloudPlayerLinkClaim,
   requestCloudPlayerLinkClaim,
 } from './supabase/sessionApi.js';
+import { translateClaimStatus } from './ui/labels.js';
 
 const surfaceStyle = {
   backgroundColor: 'var(--bg-surface)',
@@ -33,16 +30,19 @@ export default function CloudProfileView({ user }) {
   const [mine, setMine] = useState([]);
   const [inbox, setInbox] = useState([]);
   const [payload, setPayload] = useState(null);
+  const [social, setSocial] = useState(null);
+  const [editing, setEditing] = useState(false);
   const [playerName, setPlayerName] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!user?.id) return;
-    const [ownResult, claimableResult, claimsResult] = await Promise.all([
+    const [ownResult, claimableResult, claimsResult, socialResult] = await Promise.all([
       listLinkablePlayers(user.id),
       listClaimableCloudPlayers(),
       listMyCloudPlayerLinkClaims(),
+      isCommunityBetaEnabled() ? getMySocialProfile() : Promise.resolve({ ok: false }),
     ]);
 
     if (ownResult.ok) setOwnPlayers(ownResult.players);
@@ -57,6 +57,8 @@ export default function CloudProfileView({ user }) {
     } else {
       setStatus(claimsResult.error?.message || 'Não foi possível carregar os pedidos de vínculo.');
     }
+
+    if (socialResult.ok) setSocial(socialResult.profile);
 
     const performance = await getMyCloudPerformanceMatches();
     if (performance.ok) setPayload(performance.payload);
@@ -80,15 +82,6 @@ export default function CloudProfileView({ user }) {
     [payload]
   );
   const built = cloudIndex?.built ?? null;
-  const summary =
-    built?.ok && linked?.id ? getPlayerPerformance(built.index, linked.id) : null;
-  const bestPartner =
-    built?.ok && linked?.id ? getBestPartner(built.index, linked.id) : null;
-  const hardestOpponents =
-    built?.ok && linked?.id ? getHardestOpponents(built.index, linked.id).slice(0, 3) : [];
-  const history =
-    built?.ok && linked?.id ? getPlayerMatchHistory(built.index, linked.id) : [];
-  const diagnostics = built?.ok ? formatHistoryDiagnostics(built.index) : null;
 
   async function run(action) {
     setBusy(true);
@@ -106,6 +99,43 @@ export default function CloudProfileView({ user }) {
 
   return (
     <section className="space-y-3">
+      {social ? (
+        <section className="p-4 rounded-xl border space-y-3" style={surfaceStyle}>
+          <div className="flex items-center gap-3">
+            <SocialAvatar
+              name={social.displayName || linked?.name || 'Você'}
+              seed={social.userId}
+              avatarPath={social.avatarPath}
+              size={64}
+            />
+            <div className="min-w-0 flex-1">
+              <h3 className="font-bold text-lg truncate">{social.displayName || linked?.name || 'Seu perfil'}</h3>
+              <p className="text-caption" style={{ color: 'var(--text-muted)' }}>
+                {formatUsername(social.username)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEditing((open) => !open)}
+              className="text-xs font-bold px-3 py-2 rounded-lg cursor-pointer"
+              style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
+            >
+              Editar perfil
+            </button>
+          </div>
+          {editing ? (
+            <EditSocialProfileForm
+              profile={social}
+              onSaved={(next) => {
+                setSocial(next);
+                setEditing(false);
+              }}
+              onCancel={() => setEditing(false)}
+            />
+          ) : null}
+        </section>
+      ) : null}
+
       <section
         className="p-4 rounded-xl border space-y-3"
         style={surfaceStyle}
@@ -116,8 +146,8 @@ export default function CloudProfileView({ user }) {
         ) : (
           <>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Só é possível vincular um jogador que você criou. Participar do mesmo encontro não
-              comprova identidade. Jogadores de outra pessoa exigem um pedido de reivindicação.
+              Vincule um jogador para ver estatísticas, parceiros e histórico. Só é possível
+              vincular um jogador que você criou.
             </p>
             <form
               className="flex flex-col sm:flex-row gap-2"
@@ -205,7 +235,7 @@ export default function CloudProfileView({ user }) {
             <ul className="space-y-1">
               {mine.map((claim) => (
                 <li key={claim.id} className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {claim.player_name}: {claim.status}
+                  {claim.player_name}: {translateClaimStatus(claim.status)}
                 </li>
               ))}
             </ul>
@@ -250,19 +280,17 @@ export default function CloudProfileView({ user }) {
 
       {linked ? (
         <section className="p-4 rounded-xl border space-y-3" style={surfaceStyle}>
-          <h3 className="font-bold text-sm">Desempenho online</h3>
+          <h3 className="font-bold text-sm">Desempenho</h3>
           {!built?.ok ? (
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
               {(built?.errors ?? []).map((item) => item.message).join(' ') ||
                 'Não foi possível calcular o desempenho.'}
             </p>
           ) : (
-            <CloudPerformanceSections
-              summary={summary}
-              bestPartner={bestPartner}
-              hardestOpponents={hardestOpponents}
-              history={history}
-              diagnostics={diagnostics}
+            <PlayerSocialStats
+              index={built.index}
+              playerId={linked.id}
+              contextLabel="Geral"
             />
           )}
         </section>

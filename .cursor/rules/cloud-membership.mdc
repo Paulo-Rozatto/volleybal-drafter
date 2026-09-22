@@ -5,18 +5,19 @@ alwaysApply: true
 
 # Associação cloud e roadmap
 
-Roadmap congelado: 4 grupos validada no hospedado → 5 ranking no grupo (validada) → 6 competições cloud (validada) → 7 migração Gist (validada) → 8 desligar Gist (código do cliente; sem migration SQL nova; não `db push` por causa desta etapa).
+Roadmap congelado: 4 grupos validada no hospedado → 5 ranking no grupo (validada) → 6 competições cloud (validada) → 7 migração Gist (validada) → 8 desligar Gist (validada) → 9 rebranding PaDre (validada) → 10 comunidade beta (amigos, perfis sociais, stats globais, chat de grupo; nova migration; não `db push`; não alterar Vite `base`).
 
-Identidade da etapa 3 permanece congelada. Não unifique Gist. Sem ranking mundial público.
+Identidade da etapa 3 permanece congelada. Não unifique Gist. Sem ranking mundial público. Comunidade Beta é aditiva: `COMMUNITY_BETA_ENABLED` no frontend; amizade não concede acesso.
 
-Cinco relações distintas — nunca colapsar:
+Seis relações distintas — nunca colapsar:
 
 - `group_members`: pertencem à comunidade
 - `session_members`: têm acesso àquele encontro
 - `session_players`: jogam naquele encontro
 - `competition_members`: usuários com acesso colaborativo à competição
 - `competition_players`: jogadores no roster da competição
+- `friend_requests` / amizade: relação social apenas
 
-Não copie `group_members` automaticamente para `session_members`, `session_players`, `competition_members` nem `competition_players`. Encontro/competição avulsos continuam válidos (`group_id` nulo). Entrar no grupo não abre os encontros nem as competições do grupo.
+Não copie `group_members` automaticamente para `session_members`, `session_players`, `competition_members` nem `competition_players`. Amizade não copia para nenhuma dessas relações. Encontro/competição avulsos continuam válidos (`group_id` nulo). Entrar no grupo não abre os encontros nem as competições do grupo.
 
 `get_my_performance_matches()` é só o player vinculado ao `auth.uid()` (sessions + competitions). Ranking de grupo usa `get_group_performance_matches(group_id)` sanitizada: sessions e competitions daquele `group_id`, nunca N chamadas da RPC pessoal. Métricas ficam no JS. Leaderboard = `group_members` com player vinculado; convidados podem aparecer nas partidas, não no ranking. `sourceType` continua `"session"` ou `"competition"`.

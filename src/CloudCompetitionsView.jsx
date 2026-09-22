@@ -1,7 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import AuthPanel from './AuthPanel.jsx';
-import CloudCompetitionCreateForm from './CloudCompetitionCreateForm.jsx';
-import CloudCompetitionDetail from './CloudCompetitionDetail.jsx';
 import {
   createdCloudCompetitionId,
   fetchOpenCloudCompetition,
@@ -14,6 +11,14 @@ import {
 } from './supabase/competitionApi.js';
 import { isCanonicalJoinCode, normalizeJoinCode } from './supabase/joinCode.js';
 import useCloudCompetitionRealtime from './hooks/useCloudCompetitionRealtime.js';
+import CloudCompetitionCreateForm from './CloudCompetitionCreateForm.jsx';
+import CloudCompetitionDetail from './CloudCompetitionDetail.jsx';
+import EmptyState from './ui/EmptyState.jsx';
+import EntityCard from './ui/EntityCard.jsx';
+import ErrorState from './ui/ErrorState.jsx';
+import LoadingState from './ui/LoadingState.jsx';
+import PageHeader from './ui/PageHeader.jsx';
+import { formatSessionDate } from './teamGameSessions.js';
 
 export function CloudCompetitionOpenPanel({
   competitionLoading,
@@ -25,38 +30,17 @@ export function CloudCompetitionOpenPanel({
   onReload,
 }) {
   if (competitionLoading) {
-    return (
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        Carregando competição...
-      </p>
-    );
+    return <LoadingState label="Carregando competição..." />;
   }
 
   if (competitionError || !loaded) {
     return (
-      <div className="space-y-3">
-        <p className="text-sm font-semibold text-red-500">
-          {competitionError || 'Não foi possível abrir a competição.'}
-        </p>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            className="text-sm font-bold cursor-pointer"
-            style={{ color: 'var(--primary)' }}
-          >
-            ← Competições
-          </button>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="text-sm font-bold cursor-pointer"
-            style={{ color: 'var(--primary)' }}
-          >
-            Recarregar
-          </button>
-        </div>
-      </div>
+      <ErrorState
+        message={competitionError || 'Não foi possível abrir a competição.'}
+        onBack={onBack}
+        backLabel="← Competições"
+        onRetry={onRetry}
+      />
     );
   }
 
@@ -83,6 +67,7 @@ export default function CloudCompetitionsView({
   const [competitionLoading, setCompetitionLoading] = useState(false);
   const [competitionError, setCompetitionError] = useState(null);
   const [joinCode, setJoinCode] = useState('');
+  const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const userId = user?.id ?? null;
@@ -182,19 +167,11 @@ export default function CloudCompetitionsView({
 
   useCloudCompetitionRealtime(loaded, setLoaded, userId);
 
-  if (!user) {
-    return (
-      <div className="space-y-4">
-        <h2 className="text-xl font-bold">Competições</h2>
-        <AuthPanel
-          configured={configured}
-          ready={ready}
-          user={user}
-          pendingCompetitionJoinCode={pendingCompetitionJoinCode}
-        />
-      </div>
-    );
-  }
+  void configured;
+  void ready;
+  void pendingCompetitionJoinCode;
+
+  if (!user) return null;
 
   if (openCompetitionId) {
     return (
@@ -212,20 +189,34 @@ export default function CloudCompetitionsView({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">Competições</h2>
-      <AuthPanel configured={configured} ready={ready} user={user} />
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        Minhas competições. Pertencer a um grupo não abre a competição automaticamente.
+      <PageHeader
+        title="Competições"
+        action={
+          <button
+            type="button"
+            onClick={() => setCreating((open) => !open)}
+            className="min-h-11 px-4 rounded-xl text-small font-bold cursor-pointer"
+            style={{ backgroundColor: 'var(--primary)', color: 'var(--text-on-primary)' }}
+          >
+            {creating ? 'Fechar' : 'Nova competição'}
+          </button>
+        }
+      />
+      <p className="text-small" style={{ color: 'var(--text-muted)' }}>
+        Pertencer a um grupo não abre a competição automaticamente.
       </p>
 
-      <CloudCompetitionCreateForm
-        user={user}
-        heading="Nova competição"
-        onCreated={async (competitionId) => {
-          await refreshList();
-          onOpenCompetition?.(competitionId);
-        }}
-      />
+      {creating ? (
+        <CloudCompetitionCreateForm
+          user={user}
+          heading="Nova competição"
+          onCreated={async (competitionId) => {
+            setCreating(false);
+            await refreshList();
+            onOpenCompetition?.(competitionId);
+          }}
+        />
+      ) : null}
 
       <form
         className="p-4 rounded-xl border space-y-3"
@@ -276,24 +267,22 @@ export default function CloudCompetitionsView({
 
       <div className="space-y-2">
         {competitions.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Você ainda não participa de uma competição.
-          </p>
+          <EmptyState
+            title="Você ainda não tem competições"
+            description="Crie uma competição para gerar chave, registrar partidas e acompanhar o campeão."
+            actionLabel="Criar primeira competição"
+            onAction={() => setCreating(true)}
+          />
         ) : (
           competitions.map((item) => (
-            <button
+            <EntityCard
               key={item.id}
-              type="button"
+              title={item.name || 'Competição'}
+              dateLabel={formatSessionDate(item.date)}
+              status={item.status}
+              meta={item.groupId ? 'Grupo' : 'Avulsa'}
               onClick={() => onOpenCompetition?.(item.id)}
-              className="w-full text-left p-3 rounded-xl border cursor-pointer"
-              style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-            >
-              <p className="font-semibold">{item.name || 'Competição'}</p>
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                {item.date} · {item.status}
-                {item.groupId ? ' · grupo' : ' · avulsa'}
-              </p>
-            </button>
+            />
           ))
         )}
       </div>

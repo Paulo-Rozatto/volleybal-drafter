@@ -38,7 +38,7 @@ export default function JoinSessionView({
 
   if (!isCanonicalJoinCode(normalized)) {
     return (
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+      <p className="text-small" style={{ color: 'var(--text-muted)' }}>
         Código de convite inválido.
       </p>
     );
@@ -46,16 +46,20 @@ export default function JoinSessionView({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">Entrar no encontro {normalized}</h2>
+      <h2 className="text-h1">Você recebeu um convite para um encontro</h2>
+      <p className="text-small" style={{ color: 'var(--text-muted)' }}>
+        Depois do login, o acesso é retomado automaticamente.
+      </p>
       {!user ? (
         <AuthPanel
           configured={configured}
           ready={ready}
           user={user}
           pendingJoinCode={normalized}
+          variant="compact"
         />
       ) : (
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-small" style={{ color: 'var(--text-muted)' }}>
           {busy ? 'Validando convite...' : status}
         </p>
       )}

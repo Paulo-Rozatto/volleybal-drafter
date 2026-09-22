@@ -1,20 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  formatPerformanceModality,
-  getBestPartner,
-  getHardestOpponents,
-  getPlayerMatchHistory,
-  getPlayerPerformance,
-  listPerformanceModalities,
-} from './domain/playerPerformance.js';
-import { CloudPerformanceSections } from './CloudPerformanceSections.jsx';
-import { formatHistoryDiagnostics, formatWinRatePercent } from './performancePresentation.js';
+import { formatPerformanceModality, listPerformanceModalities } from './domain/playerPerformance.js';
+import { formatWinRatePercent } from './performancePresentation.js';
 import { shouldApplyGroupLoad } from './cloudGroupPanel.js';
 import {
   buildGroupPerformanceIndex,
   splitGroupLeaderboard,
 } from './supabase/groupPerformance.js';
 import { getGroupPerformanceMatches } from './supabase/groupPerformanceApi.js';
+import EmptyState from './ui/EmptyState.jsx';
+import ErrorState from './ui/ErrorState.jsx';
+import LoadingState from './ui/LoadingState.jsx';
+import PlayerSocialStats from './community/PlayerSocialStats.jsx';
+import SocialAvatar from './community/SocialAvatar.jsx';
+import { formatUsername } from './community/usernames.js';
 
 function memberLabel(member) {
   return member.playerName || member.displayName || member.userId;
@@ -26,6 +24,7 @@ export function CloudGroupRankingPanel({
   payload,
   selectedUserId,
   lineupSize,
+  groupName,
   onRetry,
   onSelectUser,
   onChangeLineupSize,
@@ -45,27 +44,11 @@ export function CloudGroupRankingPanel({
   const selectedMember = (model?.members ?? []).find((member) => member.userId === selectedUserId) ?? null;
 
   if (loading) {
-    return (
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        Carregando ranking...
-      </p>
-    );
+    return <LoadingState label="Carregando ranking..." />;
   }
 
   if (error) {
-    return (
-      <div className="space-y-3">
-        <p className="text-sm font-semibold text-red-500">{error}</p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="text-sm font-bold cursor-pointer"
-          style={{ color: 'var(--primary)' }}
-        >
-          Recarregar
-        </button>
-      </div>
-    );
+    return <ErrorState message={error} onRetry={onRetry} />;
   }
 
   if (selectedMember) {
@@ -74,7 +57,7 @@ export function CloudGroupRankingPanel({
         member={selectedMember}
         model={model}
         lineupSize={lineupSize}
-        modalities={modalities}
+        groupName={groupName}
         onBack={() => onSelectUser(null)}
         onChangeLineupSize={onChangeLineupSize}
       />
@@ -133,15 +116,17 @@ export function CloudGroupRankingPanel({
       ) : null}
 
       {emptyGroup ? (
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Este grupo ainda não tem membros no ranking.
-        </p>
+        <EmptyState
+          title="Ranking ainda vazio"
+          description="Este grupo ainda não tem membros no ranking."
+        />
       ) : null}
 
       {board.ranked.length === 0 && !emptyGroup ? (
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Ainda não há partidas válidas no grupo.
-        </p>
+        <EmptyState
+          title="Nenhuma partida no ranking"
+          description="Ainda não há partidas válidas no grupo."
+        />
       ) : (
         <ol className="space-y-2">
           {board.ranked.map((row) => {
@@ -151,16 +136,22 @@ export function CloudGroupRankingPanel({
                 <button
                   type="button"
                   onClick={() => onSelectUser(member?.userId ?? null)}
-                  className="w-full text-left p-3 rounded-xl border cursor-pointer"
+                  className="w-full text-left p-3 rounded-2xl border cursor-pointer flex items-center gap-3 min-h-11"
                   style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
                 >
-                  <p className="font-semibold">
-                    #{row.position} {row.playerName}
-                  </p>
-                  <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                    {row.matches} jogos · {row.wins}V/{row.losses}D ·{' '}
-                    {formatWinRatePercent(row.winRate, row.matches)}
-                  </p>
+                  <span className="w-8 text-h2 tabular-nums text-center">{row.position}</span>
+                  <SocialAvatar
+                    name={row.playerName}
+                    seed={member?.userId || row.playerId}
+                    avatarPath={member?.avatarPath}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <p className="font-semibold truncate">{row.playerName}</p>
+                    <p className="text-small" style={{ color: 'var(--text-muted)' }}>
+                      {row.matches} jogos · {row.wins}V/{row.losses}D ·{' '}
+                      {formatWinRatePercent(row.winRate, row.matches)}
+                    </p>
+                  </span>
                 </button>
               </li>
             );
@@ -213,7 +204,14 @@ export function CloudGroupRankingPanel({
   );
 }
 
-function GroupMemberProfile({ member, model, lineupSize, modalities, onBack, onChangeLineupSize }) {
+function GroupMemberProfile({
+  member,
+  model,
+  lineupSize,
+  groupName,
+  onBack,
+  onChangeLineupSize,
+}) {
   if (!member.playerId) {
     return (
       <div className="space-y-3">
@@ -229,15 +227,6 @@ function GroupMemberProfile({ member, model, lineupSize, modalities, onBack, onC
   }
 
   const built = model?.built;
-  const filters = { lineupSize };
-  const summary =
-    built?.ok ? getPlayerPerformance(built.index, member.playerId, filters) : null;
-  const bestPartner = built?.ok ? getBestPartner(built.index, member.playerId, filters) : null;
-  const hardestOpponents = built?.ok
-    ? getHardestOpponents(built.index, member.playerId, filters).slice(0, 3)
-    : [];
-  const history = built?.ok ? getPlayerMatchHistory(built.index, member.playerId, filters) : [];
-  const diagnostics = built?.ok ? formatHistoryDiagnostics(built.index) : null;
   const ranked = built?.ok
     ? splitGroupLeaderboard(built, model.members, { lineupSize }).ranked
     : [];
@@ -248,49 +237,35 @@ function GroupMemberProfile({ member, model, lineupSize, modalities, onBack, onC
       <button type="button" onClick={onBack} className="text-sm font-bold cursor-pointer" style={{ color: 'var(--primary)' }}>
         ← Ranking
       </button>
-      <h3 className="font-bold">{memberLabel(member)}</h3>
+      <div className="flex items-center gap-3">
+        <SocialAvatar
+          name={memberLabel(member)}
+          seed={member.userId}
+          avatarPath={member.avatarPath}
+          size={48}
+        />
+        <div>
+          <h3 className="font-bold">{memberLabel(member)}</h3>
+          {member.username ? (
+            <p className="text-caption" style={{ color: 'var(--text-muted)' }}>
+              {formatUsername(member.username)}
+            </p>
+          ) : null}
+        </div>
+      </div>
       <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
         {position ? `Ranking: #${position}` : 'Sem posição neste recorte'} · somente partidas deste
         grupo
       </p>
-      {modalities.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => onChangeLineupSize(null)}
-            className="text-xs font-bold px-2 py-1 rounded-lg cursor-pointer"
-            style={{
-              backgroundColor: lineupSize == null ? 'var(--primary)' : 'var(--bg-subtle)',
-              color: lineupSize == null ? 'var(--text-inverse)' : 'var(--text-main)',
-            }}
-          >
-            Todas
-          </button>
-          {modalities.map((size) => (
-            <button
-              key={size}
-              type="button"
-              onClick={() => onChangeLineupSize(size)}
-              className="text-xs font-bold px-2 py-1 rounded-lg cursor-pointer"
-              style={{
-                backgroundColor: lineupSize === size ? 'var(--primary)' : 'var(--bg-subtle)',
-                color: lineupSize === size ? 'var(--text-inverse)' : 'var(--text-main)',
-              }}
-            >
-              {formatPerformanceModality(size)}
-            </button>
-          ))}
-        </div>
-      ) : null}
       {!built?.ok ? (
         <p className="text-sm font-semibold text-red-500">Não foi possível calcular o desempenho.</p>
       ) : (
-        <CloudPerformanceSections
-          summary={summary}
-          bestPartner={bestPartner}
-          hardestOpponents={hardestOpponents}
-          history={history}
-          diagnostics={diagnostics}
+        <PlayerSocialStats
+          index={built.index}
+          playerId={member.playerId}
+          lineupSize={lineupSize}
+          onChangeLineupSize={onChangeLineupSize}
+          contextLabel={groupName ? `Grupo ${groupName}` : 'Grupo'}
           emptyMessage="Ainda sem partidas no grupo"
         />
       )}
@@ -298,7 +273,7 @@ function GroupMemberProfile({ member, model, lineupSize, modalities, onBack, onC
   );
 }
 
-export default function CloudGroupRanking({ groupId, selectedUserId, onSelectUser }) {
+export default function CloudGroupRanking({ groupId, groupName, selectedUserId, onSelectUser }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [payload, setPayload] = useState(null);
@@ -349,6 +324,7 @@ export default function CloudGroupRanking({ groupId, selectedUserId, onSelectUse
       loading={loading}
       error={error}
       payload={payload}
+      groupName={groupName}
       selectedUserId={selectedUserId}
       lineupSize={lineupSize}
       onRetry={refresh}

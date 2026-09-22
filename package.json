@@ -2,6 +2,7 @@
   "name": "volleyball-drafter",
   "private": true,
   "version": "0.0.0",
+  "description": "PaDre — Cada jogo conta. Encontros, competições, rankings e estatísticas.",
   "type": "module",
   "scripts": {
     "dev": "vite",

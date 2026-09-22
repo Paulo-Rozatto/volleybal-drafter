@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import CompetitionBracket from './CompetitionBracket.jsx';
 import CompetitionMatchEditor from './CompetitionMatchEditor.jsx';
 import CompetitionTeamBuilder from './CompetitionTeamBuilder.jsx';
+import Tabs from './ui/Tabs.jsx';
 import {
   addCompetitionTeam,
   clearCompetitionMatchScore,
@@ -37,6 +38,7 @@ export default function CompetitionDetail({
 }) {
   const [openSlot, setOpenSlot] = useState(null);
   const [generateError, setGenerateError] = useState(null);
+  const [tab, setTab] = useState('visao');
   const matchOpenerRef = useRef(null);
   const summary = competitionListItem(competition);
   const champion = competitionChampionView(competition);
@@ -114,6 +116,18 @@ export default function CompetitionDetail({
         </section>
       )}
 
+      <Tabs
+        label="Seções da competição"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { id: 'visao', label: 'Visão geral' },
+          { id: 'participantes', label: 'Participantes' },
+          { id: 'chave', label: 'Chave / fases' },
+        ]}
+      />
+
+      {tab === 'participantes' ? (
       <section className="space-y-2">
         <h3 className="font-bold">Times e seeding</h3>
         <CompetitionTeamBuilder
@@ -142,8 +156,9 @@ export default function CompetitionDetail({
           }
         />
       </section>
+      ) : null}
 
-      {showGenerate && canEditTeams && (
+      {(tab === 'visao' || tab === 'chave') && showGenerate && canEditTeams && (
         <div className="space-y-2">
           {blockedReason && (
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -163,6 +178,8 @@ export default function CompetitionDetail({
         </div>
       )}
 
+      {tab === 'chave' ? (
+      <>
       {stageViews.map((stage, stageIndex) => (
         <section key={stage.id} className="space-y-3">
           <div className="flex items-center justify-between gap-3">
@@ -233,6 +250,8 @@ export default function CompetitionDetail({
           )}
         </section>
       ))}
+      </>
+      ) : null}
 
       {openSlot && canScore && (
         <CompetitionMatchEditor

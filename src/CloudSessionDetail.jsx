@@ -12,6 +12,13 @@ import AutomaticTeamBuilder from './AutomaticTeamBuilder.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
 import RoundBoard from './RoundBoard.jsx';
 import TeamBuilder from './TeamBuilder.jsx';
+import FriendRosterSection from './community/FriendRosterSection.jsx';
+import { isCommunityBetaEnabled } from './community/flags.js';
+import CopyInviteButton from './ui/CopyInviteButton.jsx';
+import EmptyState from './ui/EmptyState.jsx';
+import StatusBadge from './ui/StatusBadge.jsx';
+import Tabs from './ui/Tabs.jsx';
+import { translateRole } from './ui/labels.js';
 import {
   cloudSessionToDocument,
   lineupPlan,
@@ -67,7 +74,6 @@ import {
   startTeamSessionRoundRobin,
   teamSessionFinalizeProgressLabel,
   teamSessionRoundSummary,
-  translateSessionStatus,
   updateSessionTeam,
 } from './teamGameSessions.js';
 
@@ -113,11 +119,7 @@ function findMatch(session, matchId) {
 }
 
 function roleLabel(role) {
-  if (role === 'owner') return 'organizador';
-  if (role === 'admin') return 'admin';
-  if (role === 'member') return 'membro';
-  if (role === 'viewer') return 'visitante';
-  return role ?? '';
+  return translateRole(role);
 }
 
 export default function CloudSessionDetail({ session, user, onReload }) {
@@ -132,6 +134,7 @@ export default function CloudSessionDetail({ session, user, onReload }) {
   const [busy, setBusy] = useState(false);
   const [viewSessionId, setViewSessionId] = useState(session?.id);
   const [detailView, setDetailView] = useState(SESSION_DETAIL_DEFAULT_VIEW);
+  const [gamesSection, setGamesSection] = useState('resumo');
 
   if (session?.id !== viewSessionId) {
     setViewSessionId(session?.id);
@@ -341,6 +344,24 @@ export default function CloudSessionDetail({ session, user, onReload }) {
     await onReload?.();
   }
 
+  async function addFriendToRoster(friend) {
+    if (!friend?.playerId || !manage || !editable) return;
+    setBusy(true);
+    setActionError(null);
+    const added = await addCloudSessionPlayer(
+      session.id,
+      friend.playerId,
+      friend.playerName || friend.displayName,
+      session.structureVersion
+    );
+    setBusy(false);
+    if (!added.ok) {
+      setActionError(added.error?.message || 'Não foi possível incluir o amigo no elenco.');
+      return;
+    }
+    await onReload?.();
+  }
+
   async function removePlayer(playerId) {
     setBusy(true);
     const removed = await removeCloudSessionPlayer(session.id, playerId, session.structureVersion);
@@ -359,35 +380,35 @@ export default function CloudSessionDetail({ session, user, onReload }) {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">{sessionDisplayName(session)}</h2>
+      <h2 className="text-h1">{sessionDisplayName(session)}</h2>
       {session.legacySourceId ? (
-        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-          Importado do legado
+        <p className="text-caption font-semibold" style={{ color: 'var(--text-muted)' }}>
+          Importado de dados antigos
         </p>
       ) : null}
       <div
-        className="p-4 rounded-xl border space-y-1"
+        className="p-4 rounded-2xl border space-y-2"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
       >
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-small" style={{ color: 'var(--text-muted)' }}>
           {formatSessionDate(session.date)}
         </p>
-        <p className="text-sm font-semibold">{translateSessionStatus(session.status)}</p>
-        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+        <StatusBadge status={session.status} />
+        <p className="text-caption font-semibold" style={{ color: 'var(--text-muted)' }}>
           Formato {formatFormatLabel(teamSize)} · seu papel: {roleLabel(role)}
         </p>
-        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-caption font-semibold" style={{ color: 'var(--text-muted)' }}>
           {formatTeamCountPhrase(teamCount, teamSize)}
         </p>
         {Number.isInteger(session?.courtCount) && (
-          <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-caption font-semibold" style={{ color: 'var(--text-muted)' }}>
             {pluralize(session.courtCount, 'quadra', 'quadras')}
           </p>
         )}
-        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-caption font-semibold" style={{ color: 'var(--text-muted)' }}>
           {pluralize(roundCount, 'rodada', 'rodadas')} · {pluralize(matchCount, 'partida', 'partidas')}
         </p>
-        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-caption font-semibold" style={{ color: 'var(--text-muted)' }}>
           {pluralize(completedCount, 'partida concluída', 'partidas concluídas')} ·{' '}
           {pluralize(pendingCount, 'partida pendente', 'partidas pendentes')}
           {invalidCount > 0
@@ -440,16 +461,44 @@ export default function CloudSessionDetail({ session, user, onReload }) {
 
       {showGames && (
       <>
+      <Tabs
+        label="Seções do encontro"
+        value={gamesSection}
+        onChange={setGamesSection}
+        options={[
+          { id: 'resumo', label: 'Resumo' },
+          { id: 'jogadores', label: 'Jogadores' },
+          { id: 'times', label: 'Times' },
+          { id: 'partidas', label: 'Partidas' },
+          { id: 'acesso', label: 'Acesso' },
+        ]}
+      />
 
-      {manage ? (
+      {gamesSection === 'resumo' ? (
+        <p className="text-small" style={{ color: 'var(--text-muted)' }}>
+          {pendingCount > 0
+            ? `${pluralize(pendingCount, 'partida pendente', 'partidas pendentes')} para registrar.`
+            : matchCount === 0
+              ? 'Nenhuma partida ainda. Monte os times e gere as rodadas.'
+              : 'Todas as partidas deste encontro já têm placar.'}
+        </p>
+      ) : null}
+
+      {(gamesSection === 'acesso' || gamesSection === 'resumo') && manage ? (
         <div
           className="p-4 rounded-xl border space-y-2"
           style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
         >
-          <p className="text-sm font-semibold">Convite: {session.joinCode}</p>
-          <p className="text-xs break-all" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-small font-semibold">Convite: {session.joinCode}</p>
+          <p className="text-caption break-all" style={{ color: 'var(--text-muted)' }}>
             {joinHref}
           </p>
+          <CopyInviteButton href={joinHref} code={session.joinCode} />
+          {isCommunityBetaEnabled() ? (
+            <p className="text-caption" style={{ color: 'var(--text-muted)' }}>
+              Convidar amigos: copie o convite e envie. Amizade não entra no encontro sozinha.
+            </p>
+          ) : null}
           <button
             type="button"
             disabled={busy}
@@ -462,6 +511,7 @@ export default function CloudSessionDetail({ session, user, onReload }) {
         </div>
       ) : null}
 
+      {gamesSection === 'acesso' ? (
       <section
         className="p-4 rounded-xl border space-y-2"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
@@ -476,16 +526,19 @@ export default function CloudSessionDetail({ session, user, onReload }) {
           </p>
         ))}
       </section>
+      ) : null}
 
+      {gamesSection === 'jogadores' ? (
       <section
         className="p-4 rounded-xl border space-y-2"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
       >
         <h3 className="font-bold text-sm">Jogadores do encontro</h3>
         {roster.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Nenhum jogador neste encontro.
-          </p>
+          <EmptyState
+            title="Nenhum jogador neste encontro"
+            description="Inclua quem vai jogar antes de montar os times."
+          />
         ) : (
           roster.map((player) => (
             <div key={player.playerId} className="flex items-center justify-between gap-2">
@@ -530,9 +583,13 @@ export default function CloudSessionDetail({ session, user, onReload }) {
             </button>
           </form>
         ) : null}
+        {editable ? (
+          <FriendRosterSection roster={roster} disabled={busy} onAddFriend={addFriendToRoster} />
+        ) : null}
       </section>
+      ) : null}
 
-      {inProgress && canFinalize && (
+      {gamesSection === 'partidas' && inProgress && canFinalize && (
         <div
           className="p-4 rounded-xl border"
           style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--primary)' }}
@@ -541,7 +598,7 @@ export default function CloudSessionDetail({ session, user, onReload }) {
         </div>
       )}
 
-      {finished && (
+      {gamesSection === 'partidas' && finished && (
         <div
           className="p-4 rounded-xl border"
           style={{ backgroundColor: 'var(--bg-subtle)', borderColor: 'var(--border-color)' }}
@@ -550,6 +607,8 @@ export default function CloudSessionDetail({ session, user, onReload }) {
         </div>
       )}
 
+      {gamesSection === 'times' ? (
+      <>
       {editable && (
         <div className="flex rounded-lg p-1 gap-1" style={{ backgroundColor: 'var(--bg-subtle)' }}>
           <button
@@ -666,7 +725,11 @@ export default function CloudSessionDetail({ session, user, onReload }) {
           </button>
         </div>
       )}
+      </>
+      ) : null}
 
+      {gamesSection === 'partidas' ? (
+      <>
       {actionError && !editable && !confirmReset && !confirmFinalize && !confirmAppendCycle && (
         <p className="text-xs font-semibold text-red-500">{actionError}</p>
       )}
@@ -795,6 +858,8 @@ export default function CloudSessionDetail({ session, user, onReload }) {
           ))}
         </section>
       )}
+      </>
+      ) : null}
 
       </>
       )}

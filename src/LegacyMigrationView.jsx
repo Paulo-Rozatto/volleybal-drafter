@@ -357,10 +357,11 @@ export default function LegacyMigrationView({
         <button type="button" className="text-sm font-bold cursor-pointer" style={{ color: 'var(--primary)' }} onClick={onBack}>
           ← Voltar
         </button>
-          <h2 className="text-xl font-bold">Importar dados antigos</h2>
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          A importação exige login. Nenhum dado do Gist remoto será apagado.
-        </p>
+      <h2 className="text-xl font-bold">Importar dados antigos</h2>
+      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        Use esta área apenas se você utilizava uma versão anterior do aplicativo. A importação
+        exige login. Nenhum dado do Gist remoto será apagado.
+      </p>
         <AuthPanel configured={configured} ready={ready} user={user} />
       </div>
     );
@@ -373,7 +374,8 @@ export default function LegacyMigrationView({
       </button>
       <h2 className="text-xl font-bold">Importar dados antigos</h2>
       <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        Importação unidirecional. Nenhum dado antigo remoto será apagado. Não é sincronização permanente.
+        Use esta área apenas se você utilizava uma versão anterior do aplicativo. Importação
+        unidirecional. Nenhum dado antigo remoto será apagado. Não é sincronização permanente.
       </p>
 
       {step === 'origin' && (

@@ -3,6 +3,8 @@ import { isMatchPending } from './domain/sessionValidation.js';
 import { formatMatchScore, matchWinningSide, resolveMatchSideLabel } from './roundDisplay.js';
 import { messageForScoreErrors, scoreFieldsToValues } from './scoreInput.js';
 import { CLEAR_SCORE_CONFIRMATION_MESSAGE } from './teamGameSessions.js';
+import ScoreStepper from './ui/ScoreStepper.jsx';
+import Button from './ui/Button.jsx';
 
 function scoreDraftValue(value) {
   return typeof value === 'number' ? String(value) : '';
@@ -123,52 +125,29 @@ export default function MatchScoreEditor({
       <TeamName label={labelA} winner={winner === 'A'} />
 
       {editing ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min="0"
-              step="1"
-              inputMode="numeric"
-              value={draftA}
-              onChange={(event) => {
-                setDraftA(event.target.value);
-                setError(null);
-              }}
-              aria-label={teamSize === 2 ? 'Placar da dupla A' : 'Placar do time A'}
-              className="w-full border rounded-lg p-2 text-center text-sm font-bold outline-none"
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--text-main)',
-                borderColor: 'var(--border-color)',
-              }}
-            />
-            <span className="text-sm font-bold" style={{ color: 'var(--text-muted)' }}>
-              ×
-            </span>
-            <input
-              type="number"
-              min="0"
-              step="1"
-              inputMode="numeric"
-              value={draftB}
-              onChange={(event) => {
-                setDraftB(event.target.value);
-                setError(null);
-              }}
-              aria-label={teamSize === 2 ? 'Placar da dupla B' : 'Placar do time B'}
-              className="w-full border rounded-lg p-2 text-center text-sm font-bold outline-none"
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--text-main)',
-                borderColor: 'var(--border-color)',
-              }}
-            />
-          </div>
+        <div className="space-y-3">
+          <ScoreStepper
+            label={labelA}
+            value={draftA}
+            onChange={(next) => {
+              setDraftA(next);
+              setError(null);
+            }}
+          />
+          <ScoreStepper
+            label={labelB}
+            value={draftB}
+            onChange={(next) => {
+              setDraftB(next);
+              setError(null);
+            }}
+          />
           {error && <p className="text-xs font-semibold text-red-500">{error}</p>}
           {conflict?.current && (
             <div className="rounded-lg border p-2 space-y-2" style={{ borderColor: 'var(--border-color)' }}>
-              <p className="text-xs font-semibold">Este placar foi alterado por outra pessoa.</p>
+              <p className="text-xs font-semibold">
+                Este placar foi alterado em outro dispositivo. Atualizamos os dados para você.
+              </p>
               <p className="text-xs">
                 Atual: {conflict.current.scoreA} × {conflict.current.scoreB}
               </p>
@@ -215,26 +194,12 @@ export default function MatchScoreEditor({
             </div>
           )}
           <div className="flex flex-col sm:flex-row gap-2">
-            <button
-              type="button"
-              onClick={handleSave}
-              className="flex-1 font-bold py-2 rounded-xl text-sm cursor-pointer"
-              style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
-            >
+            <Button onClick={handleSave} className="flex-1">
               Salvar placar
-            </button>
-            <button
-              type="button"
-              onClick={closeEditor}
-              className="flex-1 font-bold py-2 rounded-xl border text-sm cursor-pointer"
-              style={{
-                backgroundColor: 'var(--bg-subtle)',
-                borderColor: 'var(--border-color)',
-                color: 'var(--text-main)',
-              }}
-            >
+            </Button>
+            <Button variant="secondary" onClick={closeEditor} className="flex-1">
               Cancelar
-            </button>
+            </Button>
           </div>
         </div>
       ) : (

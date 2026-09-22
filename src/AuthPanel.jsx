@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
-import { signInWithMagicLink, signOut } from './supabase/auth.js';
+import { signInWithMagicLink } from './supabase/auth.js';
 import { rememberPendingCompetitionJoinCode, rememberPendingGroupJoinCode, rememberPendingJoinCode } from './supabase/joinCode.js';
+import BrandLogo from './ui/BrandLogo.jsx';
+import Button from './ui/Button.jsx';
+import { BRAND_PITCH, BRAND_TAGLINE } from './ui/brand.js';
 
 export default function AuthPanel({
   configured,
@@ -9,77 +12,40 @@ export default function AuthPanel({
   pendingJoinCode,
   pendingGroupJoinCode,
   pendingCompetitionJoinCode,
-  onSignedOut,
-  onOpenMigration,
+  variant = 'landing',
 }) {
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const landing = variant === 'landing';
+
+  if (user) return null;
 
   if (!configured) {
     return (
-      <div
-        className="p-4 rounded-xl border space-y-2"
+      <section
+        className="p-5 rounded-2xl border space-y-2"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
       >
-        <h3 className="font-bold text-sm">Conta (Supabase)</h3>
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para entrar e usar encontros,
-          competições e grupos.
+        <h2 className="text-h2">Entrar</h2>
+        <p className="text-small" style={{ color: 'var(--text-muted)' }}>
+          O acesso por e-mail ainda não está configurado neste ambiente.
         </p>
-      </div>
+      </section>
     );
   }
 
   if (!ready) {
     return (
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+      <p className="text-small" style={{ color: 'var(--text-muted)' }}>
         Verificando sessão...
       </p>
     );
   }
 
-  if (user) {
-    return (
-      <div
-        className="p-4 rounded-xl border space-y-3"
-        style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-      >
-        <h3 className="font-bold text-sm">Conta</h3>
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          {user.email}
-        </p>
-        {onOpenMigration ? (
-          <button
-            type="button"
-            onClick={onOpenMigration}
-            className="w-full font-bold py-2 rounded-lg text-sm cursor-pointer"
-            style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
-          >
-            Importar dados antigos
-          </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={async () => {
-            setBusy(true);
-            await signOut();
-            setBusy(false);
-            onSignedOut?.();
-          }}
-          disabled={busy}
-          className="w-full font-bold py-2 rounded-lg text-sm cursor-pointer disabled:opacity-50"
-          style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
-        >
-          Sair
-        </button>
-      </div>
-    );
-  }
-
   return (
     <form
-      className="p-4 rounded-xl border space-y-3"
+      className="p-5 rounded-2xl border space-y-4"
       style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
       onSubmit={async (event) => {
         event.preventDefault();
@@ -101,49 +67,54 @@ export default function AuthPanel({
         );
       }}
     >
-      <h3 className="font-bold text-sm">Entrar</h3>
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        A conta é necessária para encontros, competições, grupos e perfil. O sorteio rápido
-        continua só neste aparelho.
-      </p>
+      {landing ? (
+        <div className="space-y-2 text-center">
+          <BrandLogo size="lg" className="justify-center text-[var(--primary)]" />
+          <p className="text-h3">{BRAND_TAGLINE}</p>
+          <p className="text-small" style={{ color: 'var(--text-muted)' }}>
+            {BRAND_PITCH}
+          </p>
+        </div>
+      ) : (
+        <h2 className="text-h2">Entrar</h2>
+      )}
       {pendingJoinCode ? (
-        <p className="text-sm font-semibold">
-          Depois do login você entra no encontro {pendingJoinCode}.
-        </p>
+        <p className="text-small font-semibold">Depois do login você entra no encontro convidado.</p>
       ) : null}
       {pendingGroupJoinCode ? (
-        <p className="text-sm font-semibold">
-          Depois do login você entra no grupo {pendingGroupJoinCode}.
-        </p>
+        <p className="text-small font-semibold">Depois do login você entra no grupo convidado.</p>
       ) : null}
       {pendingCompetitionJoinCode ? (
-        <p className="text-sm font-semibold">
-          Depois do login você entra na competição {pendingCompetitionJoinCode}.
-        </p>
+        <p className="text-small font-semibold">Depois do login você entra na competição convidada.</p>
       ) : null}
-      <input
-        type="email"
-        required
-        value={email}
-        onChange={(event) => setEmail(event.target.value)}
-        placeholder="karen.d@example.net"
-        className="w-full border p-2 rounded text-sm outline-none"
-        style={{
-          backgroundColor: 'var(--bg-app)',
-          color: 'var(--text-main)',
-          borderColor: 'var(--border-color)',
-        }}
-      />
-      <button
-        type="submit"
-        disabled={busy}
-        className="w-full font-bold py-2 rounded-lg text-sm cursor-pointer disabled:opacity-50"
-        style={{ backgroundColor: 'var(--primary)', color: 'var(--text-inverse)' }}
-      >
-        {busy ? 'Enviando...' : 'Receber link de acesso'}
-      </button>
+      <div className="space-y-2">
+        <label htmlFor="padre-email" className="text-small font-semibold">
+          E-mail
+        </label>
+        <input
+          id="padre-email"
+          type="email"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="voce@email.com"
+          className="w-full min-h-11 border px-3 rounded-xl text-sm outline-none"
+          style={{
+            backgroundColor: 'var(--bg-app)',
+            color: 'var(--text-main)',
+            borderColor: 'var(--border-color)',
+          }}
+        />
+      </div>
+      <Button type="submit" disabled={busy} className="w-full">
+        {busy ? 'Enviando...' : 'Entrar'}
+      </Button>
+      <p className="text-caption" style={{ color: 'var(--text-muted)' }}>
+        Enviaremos um link de acesso para seu e-mail.
+      </p>
       {status ? (
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-small" style={{ color: 'var(--text-muted)' }}>
           {status}
         </p>
       ) : null}

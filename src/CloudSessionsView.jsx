@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import AuthPanel from './AuthPanel.jsx';
-import CloudSessionDetail from './CloudSessionDetail.jsx';
 import CloudSessionCreateForm from './CloudSessionCreateForm.jsx';
+import CloudSessionDetail from './CloudSessionDetail.jsx';
 import {
   fetchOpenCloudSession,
   shouldApplySessionLoad,
 } from './cloudSessionPanel.js';
 import { listCloudSessions, loadCloudSession } from './supabase/sessionApi.js';
 import useCloudSessionRealtime from './hooks/useCloudSessionRealtime.js';
+import EmptyState from './ui/EmptyState.jsx';
+import EntityCard from './ui/EntityCard.jsx';
+import ErrorState from './ui/ErrorState.jsx';
+import LoadingState from './ui/LoadingState.jsx';
+import PageHeader from './ui/PageHeader.jsx';
+import { formatSessionDate } from './teamGameSessions.js';
 
 export function CloudSessionOpenPanel({
   sessionLoading,
@@ -19,38 +24,17 @@ export function CloudSessionOpenPanel({
   onReload,
 }) {
   if (sessionLoading) {
-    return (
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        Carregando encontro...
-      </p>
-    );
+    return <LoadingState label="Carregando encontro..." />;
   }
 
   if (sessionError || !session) {
     return (
-      <div className="space-y-3">
-        <p className="text-sm font-semibold text-red-500">
-          {sessionError || 'Não foi possível abrir o encontro.'}
-        </p>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            className="text-sm font-bold cursor-pointer"
-            style={{ color: 'var(--primary)' }}
-          >
-            ← Encontros
-          </button>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="text-sm font-bold cursor-pointer"
-            style={{ color: 'var(--primary)' }}
-          >
-            Recarregar
-          </button>
-        </div>
-      </div>
+      <ErrorState
+        message={sessionError || 'Não foi possível abrir o encontro.'}
+        onBack={onBack}
+        backLabel="← Encontros"
+        onRetry={onRetry}
+      />
     );
   }
 
@@ -59,7 +43,7 @@ export function CloudSessionOpenPanel({
       <button
         type="button"
         onClick={onBack}
-        className="text-sm font-bold cursor-pointer"
+        className="text-small font-bold cursor-pointer min-h-11"
         style={{ color: 'var(--primary)' }}
       >
         ← Encontros
@@ -82,6 +66,7 @@ export default function CloudSessionsView({
   const [session, setSession] = useState(null);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState(null);
+  const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState('');
   const userId = user?.id ?? null;
   const openIdRef = useRef(openSessionId);
@@ -180,19 +165,9 @@ export default function CloudSessionsView({
 
   useCloudSessionRealtime(session, setSession, userId);
 
-  if (!user) {
-    return (
-      <div className="space-y-4">
-        <h2 className="text-xl font-bold">Encontros</h2>
-        <AuthPanel
-          configured={configured}
-          ready={ready}
-          user={user}
-          pendingJoinCode={pendingJoinCode}
-        />
-      </div>
-    );
-  }
+  void configured;
+  void ready;
+  void pendingJoinCode;
 
   if (openSessionId) {
     return (
@@ -210,43 +185,56 @@ export default function CloudSessionsView({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold">Encontros</h2>
-      <AuthPanel configured={configured} ready={ready} user={user} />
+      <PageHeader
+        title="Encontros"
+        action={
+          <button
+            type="button"
+            onClick={() => setCreating((open) => !open)}
+            className="min-h-11 px-4 rounded-xl text-small font-bold cursor-pointer"
+            style={{ backgroundColor: 'var(--primary)', color: 'var(--text-on-primary)' }}
+          >
+            {creating ? 'Fechar' : 'Novo encontro'}
+          </button>
+        }
+      />
       {legacyNotice}
 
-      <CloudSessionCreateForm
-        user={user}
-        heading="Novo encontro avulso"
-        onCreated={async (sessionId) => {
-          await refreshList();
-          onOpenSession?.(sessionId);
-        }}
-      />
+      {creating ? (
+        <CloudSessionCreateForm
+          user={user}
+          heading="Novo encontro"
+          onCreated={async (sessionId) => {
+            setCreating(false);
+            await refreshList();
+            onOpenSession?.(sessionId);
+          }}
+        />
+      ) : null}
 
       <div className="space-y-2">
         {sessions.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Você ainda não participa de um encontro.
-          </p>
+          <EmptyState
+            title="Você ainda não tem encontros"
+            description="Crie um encontro para registrar times, partidas e placares."
+            actionLabel="Criar primeiro encontro"
+            onAction={() => setCreating(true)}
+          />
         ) : (
           sessions.map((item) => (
-            <button
+            <EntityCard
               key={item.id}
-              type="button"
+              title={item.name || 'Encontro'}
+              dateLabel={formatSessionDate(item.date)}
+              status={item.status}
+              meta={item.group_id ? 'Grupo' : null}
               onClick={() => onOpenSession?.(item.id)}
-              className="w-full text-left p-3 rounded-xl border cursor-pointer"
-              style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}
-            >
-              <p className="font-semibold">{item.name || 'Encontro'}</p>
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                {item.date} · {item.status} · {item.join_code}
-              </p>
-            </button>
+            />
           ))
         )}
       </div>
       {status ? (
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-small" style={{ color: 'var(--text-muted)' }}>
           {status}
         </p>
       ) : null}

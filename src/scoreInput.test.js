@@ -33,7 +33,7 @@ describe('messageForScoreErrors', () => {
   it('mapeia códigos de validateScore para mensagens da UI', () => {
     expect(messageForScoreErrors([{ code: 'SCORE_PARTIAL' }])).toBe('Preencha os dois lados do placar.');
     expect(messageForScoreErrors([{ code: 'SCORE_VERSION_CONFLICT' }])).toBe(
-      'O placar mudou em outro dispositivo. Recarregue e tente de novo.'
+      'Este placar foi alterado em outro dispositivo. Atualizamos os dados para você.'
     );
     expect(messageForScoreErrors([{ code: 'SCORE_NEGATIVE' }])).toBe(
       'O placar deve usar números inteiros não negativos.'
