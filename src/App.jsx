@@ -10,6 +10,7 @@ import CloudCompetitionsView from './CloudCompetitionsView.jsx';
 import JoinSessionView from './JoinSessionView.jsx';
 import JoinGroupView from './JoinGroupView.jsx';
 import JoinCompetitionView from './JoinCompetitionView.jsx';
+import LegacyMigrationView from './LegacyMigrationView.jsx';
 import useAuth from './hooks/useAuth.js';
 import {
   clearPendingCompetitionJoinCode,
@@ -69,7 +70,7 @@ const INITIAL_ROSTER = [];
 
 export default function App() {
   // --- Core Navigation & Drawer States ---
-  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance', 'cloud', 'join', 'groups', 'groupJoin', 'cloudCompetitions', 'competitionJoin'
+  const [currentView, setCurrentView] = useState('draft'); // 'draft', 'players', 'preview', 'history', 'sessions', 'competitions', 'performance', 'cloud', 'join', 'groups', 'groupJoin', 'cloudCompetitions', 'competitionJoin', 'migration'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const auth = useAuth();
   const [cloudSessionId, setCloudSessionId] = useState(null);
@@ -184,10 +185,17 @@ export default function App() {
       rememberPendingJoinCode(intent.code);
       setPendingJoinCode(intent.code);
       setCurrentView('join');
+    } else if ((globalThis.location?.hash ?? '') === '#/migration' || (globalThis.location?.hash ?? '').startsWith('#/migration')) {
+      setCurrentView('migration');
     }
 
     const onHashChange = () => {
-      const competitionCode = parseCompetitionJoinHash(globalThis.location?.hash ?? '');
+      const hash = globalThis.location?.hash ?? '';
+      if (hash === '#/migration' || hash.startsWith('#/migration')) {
+        setCurrentView('migration');
+        return;
+      }
+      const competitionCode = parseCompetitionJoinHash(hash);
       if (competitionCode) {
         rememberPendingCompetitionJoinCode(competitionCode);
         setPendingCompetitionJoinCode(competitionCode);
@@ -819,6 +827,24 @@ export default function App() {
             >
               📊 Desempenho
             </button>
+            {auth.user ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentView('migration');
+                  if (globalThis.location) globalThis.location.hash = '#/migration';
+                  setIsMenuOpen(false);
+                }}
+                className="p-3 text-left font-semibold rounded-lg transition-colors cursor-pointer"
+                style={{
+                  backgroundColor: currentView === 'migration' ? 'var(--bg-subtle)' : 'transparent',
+                  color: 'var(--text-main)'
+                }}
+                aria-current={currentView === 'migration' ? 'page' : undefined}
+              >
+                ⬆️ Migrar dados antigos
+              </button>
+            ) : null}
             <button
               onClick={() => {
                 if (draftHistory.length === 0) return alert('Nenhum sorteio salvo!');
@@ -1108,6 +1134,10 @@ export default function App() {
               pendingJoinCode={pendingJoinCode}
               openSessionId={cloudSessionId}
               onOpenSession={setCloudSessionId}
+              onOpenMigration={() => {
+                setCurrentView('migration');
+                if (globalThis.location) globalThis.location.hash = '#/migration';
+              }}
             />
           )}
 
@@ -1160,6 +1190,26 @@ export default function App() {
               document={gameSessions}
               roster={players}
               competitionsDocument={competitions}
+            />
+          )}
+
+          {currentView === 'migration' && (
+            <LegacyMigrationView
+              configured={auth.configured}
+              ready={auth.ready}
+              user={auth.user}
+              players={players}
+              gameSessions={gameSessions}
+              competitions={competitions}
+              gistLoaded={gistLoaded}
+              onBack={() => {
+                setCurrentView('draft');
+                if ((globalThis.location?.hash ?? '').startsWith('#/migration')) {
+                  const url = new URL(globalThis.location.href);
+                  url.hash = '';
+                  globalThis.history?.replaceState?.({}, '', `${url.pathname}${url.search}`);
+                }
+              }}
             />
           )}
 

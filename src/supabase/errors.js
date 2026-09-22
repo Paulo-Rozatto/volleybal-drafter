@@ -74,6 +74,16 @@ export const CLOUD_RPC_ERROR_MESSAGES = Object.freeze({
   COMPETITION_OWNER_IMMUTABLE: 'O organizador da competição não pode ser alterado nesta etapa.',
   COMPETITION_MEMBER_NOT_FOUND: 'Essa pessoa não participa desta competição.',
   COMPETITION_ACCESS_DENIED: 'Você não participa desta competição.',
+  INVALID_LEGACY_DATA: 'Os dados legados são inválidos e não podem ser importados.',
+  UNSUPPORTED_SCHEMA: 'Esta versão do documento legado não é suportada.',
+  NEEDS_PLAYER_MAPPING: 'Associe ou crie o jogador cloud antes de importar este item.',
+  LEGACY_ID_CONFLICT: 'Este item legado já existe no cloud com outro dono.',
+  CLOUD_ID_CONFLICT: 'Há um conflito de identificador com um registro cloud existente.',
+  PLAYER_MAPPING_CONFLICT: 'Este jogador legado já está associado a outro player cloud.',
+  PLAYER_MAPPING_INVALID: 'Não é possível associar a este player cloud.',
+  LEGACY_IMPORT_BATCH_NOT_FOUND: 'Lote de importação não encontrado.',
+  LEGACY_IMPORT_BATCH_INVALID: 'Este lote de importação não pode ser usado.',
+  IMPORT_FAILED: 'A importação deste item falhou.',
 });
 
 export function rpcErrorCode(error) {

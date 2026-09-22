@@ -77,6 +77,7 @@ export default function CloudSessionsView({
   pendingJoinCode,
   openSessionId,
   onOpenSession,
+  onOpenMigration,
 }) {
   const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(null);
@@ -211,7 +212,7 @@ export default function CloudSessionsView({
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-bold">Encontros online</h2>
-      <AuthPanel configured={configured} ready={ready} user={user} />
+      <AuthPanel configured={configured} ready={ready} user={user} onOpenMigration={onOpenMigration} />
       {user ? <CloudProfileView user={user} /> : null}
 
       <CloudSessionCreateForm

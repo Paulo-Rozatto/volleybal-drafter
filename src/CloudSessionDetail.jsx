@@ -344,6 +344,11 @@ export default function CloudSessionDetail({ session, user, onReload }) {
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-bold">{sessionDisplayName(session)}</h2>
+      {session.legacySourceId ? (
+        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+          Importado do legado
+        </p>
+      ) : null}
       <div
         className="p-4 rounded-xl border space-y-1"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)' }}

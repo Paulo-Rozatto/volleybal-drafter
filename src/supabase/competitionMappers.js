@@ -156,6 +156,7 @@ export function assembleCloudCompetition({
     structureVersion: Number(competition.structure_version ?? 0),
     joinCode: competition.join_code,
     groupId: competition.group_id ?? null,
+    legacySourceId: competition.legacy_source_id ?? null,
     myRole: myMember?.role ?? null,
     members: members.map((row) => mapCompetitionMember(row, myUserId)),
     roster: (players ?? []).map((row) => ({

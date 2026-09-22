@@ -120,6 +120,7 @@ export function listSessionPerformanceMatches(document) {
             lineupB: match?.lineupB,
             scoreA: match?.scoreA,
             scoreB: match?.scoreB,
+            originKey: session?.id ?? null,
           })
         );
       });
@@ -169,6 +170,7 @@ export function listCompetitionPerformanceMatches(document, { sourceIndexOffset 
               lineupB: match?.lineupB,
               scoreA: match?.scoreA,
               scoreB: match?.scoreB,
+              originKey: competition?.id ?? null,
             })
           );
         });
@@ -180,6 +182,26 @@ export function listCompetitionPerformanceMatches(document, { sourceIndexOffset 
     nameSnapshots: Object.freeze(nameSnapshots),
     matches: Object.freeze(matches),
   });
+}
+
+export function performanceSourceIdentity(match) {
+  return `${match?.sourceType ?? ''}::${match?.originKey || match?.sourceId || ''}`;
+}
+
+export function dedupePerformanceMatchesByOrigin(matches = []) {
+  const kept = [];
+  const sourceIdByIdentity = new Map();
+  for (const match of matches) {
+    const identity = performanceSourceIdentity(match);
+    const firstSourceId = sourceIdByIdentity.get(identity);
+    if (firstSourceId == null) {
+      sourceIdByIdentity.set(identity, match.sourceId);
+      kept.push(match);
+      continue;
+    }
+    if (firstSourceId === match.sourceId) kept.push(match);
+  }
+  return kept;
 }
 
 export function combinePerformanceMatchSources(sessionDocument, competitionsDocument = null) {

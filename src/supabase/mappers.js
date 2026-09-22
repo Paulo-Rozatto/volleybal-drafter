@@ -158,6 +158,7 @@ export function mapCloudSession({
     },
     courtCount: session.court_count ?? null,
     structureVersion: Number(session.structure_version ?? 0),
+    legacySourceId: session.legacy_source_id ?? null,
     createdAt: session.created_at,
     updatedAt: session.updated_at,
     members: mappedMembers,

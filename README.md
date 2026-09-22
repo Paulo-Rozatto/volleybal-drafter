@@ -121,7 +121,7 @@ https://paulo-rozatto.github.io/volleybal-drafter/**
 
 Se as etapas 1–3 já estavam aplicadas, rode só `20260921180000_cloud_groups.sql` (já no hospedado). As etapas 5 e 6 (`20260921200000_group_performance.sql`, `20260921220000_cloud_competitions.sql`) **não** devem ir ao remoto até revisão.
 
-O login **não** é exigido para sorteio, elenco Gist, encontros Gist, competições Gist ou desempenho local. A conta vale para **Encontros online**, **Grupos** e **Competições online**.
+O login **não** é exigido para sorteio, elenco Gist, encontros Gist, competições Gist ou desempenho local. A conta vale para **Encontros online**, **Grupos**, **Competições online** e **Migrar dados antigos**.
 
 Convite de encontro: `#/join/CODIGO` (já logado) ou `?join=CODIGO` no redirect do magic link.
 Convite de grupo: `#/group/join/CODIGO` ou `?groupJoin=CODIGO`. Os dois códigos ficam em chaves distintas do `sessionStorage` e **não** se misturam.
@@ -224,9 +224,27 @@ Roteiro manual (depois do `db push` desta migration):
 4. Score conflict e structure conflict como nas sessões.
 5. Perfil pessoal: a competition aparece. Grupo: só a competition com `group_id` daquele grupo. Avulsa não mexe no ranking do grupo.
 
+### Etapa 7 — Migração do legado
+
+Importação **unidirecional** e explícita de Gist/localStorage → Supabase. **Não** é sincronização permanente. **Não** há dual-write. O Gist **não** é apagado, editado nem marcado como migrado. As telas e a persistência legadas continuam até a etapa 8.
+
+Identidade de importação: `sessions.legacy_source_id` e `competitions.legacy_source_id` (texto; UUID legado permanece texto). `already_imported` só vale quando `created_by` é o importador atual; membership (`session_members` / `competition_members`) **não** prova importação — outro usuário, mesmo member, recebe `LEGACY_ID_CONFLICT` sem detalhes da entidade. Reexecutar a mesma entidade pelo dono devolve `already_imported` e **não** atualiza o cloud. Fingerprint SHA-256 do snapshot é auditoria do lote, não identidade. Itens de lote são únicos por batch (`batch_id` + usuário + tipo + legado); lote novo não apaga o relatório do lote anterior.
+
+Players: nome **não** é identidade. Dois “João” continuam dois IDs. Cloud “João” + legado “João” **não** mesclam sozinhos. Mapping explícito do usuário (`legacy_player_mappings`) reutiliza um player cloud ao qual ele tem legitimidade (`created_by` ou `linked_user_id`). Importação **nunca** preenche `linked_user_id`. Convidados continuam sem conta.
+
+Encontros e competições importados nascem **avulsos** (`group_id` nulo). O importador vira owner. Roster vira `session_players` / `competition_players`; **não** copia outros usuários para `session_members` / `competition_members`. As cinco relações continuam distintas.
+
+RPCs específicas (`import_legacy_player`, `import_legacy_session`, `import_legacy_competition`) criam o estado histórico validado em **uma transação por entidade**. Não enfraquecem `save_competition_structure` / `set_match_score` / `set_competition_match_score`. Placar histórico entra com `version = 0` e `updated_by` nulo, **sem** `match_events` / `competition_match_events` falsos. A primeira correção cloud incrementa version e audita normalmente.
+
+UI: `#/migration` (autenticado). Preview/dry-run, resolução de jogadores, progresso retomável, relatório por item. Falha de um item não desfaz os demais. Cancelar para de enviar novos itens; não há botão “desfazer migração”.
+
+`originKey` no motor local passou a ser o id da sessão/competição. Cloud continua `legacy_source_id ?? entity_id`. `dedupePerformanceMatchesByOrigin` evita contar o mesmo encontro duas vezes se legado e cloud importado forem combinados. Métricas continuam no JS.
+
+Migration: `supabase/migrations/20260922000000_legacy_import.sql`. **Não aplicar no hospedado até revisão.** Tabelas de import não entram no realtime.
+
 ### Validação hospedada (etapa 3.5)
 
-Circuito já validado no projeto hospedado (Auth, RLS, RPC, Realtime, grupos). As etapas 5 e 6 ainda são só locais — não rode `20260921200000_group_performance.sql` nem `20260921220000_cloud_competitions.sql` no SQL Editor até a revisão.
+Circuito já validado no projeto hospedado (Auth, RLS, RPC, Realtime, grupos). As etapas 5, 6 e 7 ainda são só locais — não rode `20260921200000_group_performance.sql`, `20260921220000_cloud_competitions.sql` nem `20260922000000_legacy_import.sql` no SQL Editor até a revisão.
 
 1. Preencha `.env` (já copiado de `.env.example`; o arquivo está no `.gitignore`) com a URL e a **anon key** reais. Placeholder do example não conta como configurado.
 2. Rode as três migrations no SQL Editor, na ordem dos timestamps.

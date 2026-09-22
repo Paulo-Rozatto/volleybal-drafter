@@ -173,6 +173,11 @@ export default function CloudCompetitionDetail({ loaded, user, players = [], onB
                 Competição avulsa
               </p>
             )}
+            {loaded.legacySourceId ? (
+              <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+                Importado do legado
+              </p>
+            ) : null}
             <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
               Seu papel: {competitionRoleLabel(role)}
             </p>

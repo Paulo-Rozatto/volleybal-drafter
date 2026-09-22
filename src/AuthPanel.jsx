@@ -10,6 +10,7 @@ export default function AuthPanel({
   pendingGroupJoinCode,
   pendingCompetitionJoinCode,
   onSignedOut,
+  onOpenMigration,
 }) {
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState('');
@@ -48,6 +49,16 @@ export default function AuthPanel({
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           {user.email}
         </p>
+        {onOpenMigration ? (
+          <button
+            type="button"
+            onClick={onOpenMigration}
+            className="w-full font-bold py-2 rounded-lg text-sm cursor-pointer"
+            style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-main)' }}
+          >
+            Migrar dados antigos
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={async () => {

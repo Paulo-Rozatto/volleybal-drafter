@@ -9,6 +9,7 @@ import {
   classifyPerformanceMatch,
   combinePerformanceMatchSources,
   createAnalyzableMatch,
+  dedupePerformanceMatchesByOrigin,
   listCompetitionPerformanceMatches,
   listSessionPerformanceMatches,
 } from './performanceMatches.js';
@@ -224,5 +225,45 @@ describe('classifyPerformanceMatch e createAnalyzableMatch', () => {
         scoreB: 18,
       }).cycleNumber
     ).toBe(2);
+  });
+
+  it('usa originKey do id legado e deduplica Gist+cloud importado', () => {
+    const listed = listSessionPerformanceMatches({
+      schemaVersion: TEAM_SESSION_SCHEMA_VERSION,
+      sessions: [
+        {
+          id: 'sess-1',
+          date: '2026-09-12',
+          name: 'Sábado',
+          createdAt: ISO,
+          updatedAt: ISO,
+          rounds: [
+            {
+              id: 'r1',
+              number: 1,
+              matches: [
+                {
+                  id: 'm1',
+                  lineupA: [member('andre', 'André')],
+                  lineupB: [member('ana', 'Ana')],
+                  scoreA: 21,
+                  scoreB: 18,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(listed.matches[0].originKey).toBe('sess-1');
+
+    const cloudCopy = {
+      ...listed.matches[0],
+      sourceId: 'cloud-uuid',
+      originKey: 'sess-1',
+    };
+    const deduped = dedupePerformanceMatchesByOrigin([...listed.matches, cloudCopy]);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].sourceId).toBe('sess-1');
   });
 });
